@@ -255,7 +255,17 @@
     "description": "字典詞彙會在語音辨識時提供給 AI，提升專有名詞與術語的辨識準確度。",
     "weightDescription": "每次語音辨識時，系統會將權重最高的前 {limit} 個詞彙加入 AI 辨識提示。當 AI 偵測到你重複修正同一個詞時，該詞的權重會自動提升。",
     "noAiSuggestions": "尚無 AI 推薦詞彙，啟用智慧字典學習後系統會自動學習",
-    "aiTermCount": "{count} 個詞"
+    "aiTermCount": "{count} 個詞",
+    "export": "匯出",
+    "import": "匯入",
+    "exportSuccess": "已匯出 {count} 個詞",
+    "exportEmpty": "沒有可匯出的詞",
+    "importSuccess": "匯入完成：新增 {added}、合併 {merged}、略過 {skipped}",
+    "importEmpty": "檔案中沒有可匯入的詞",
+    "importTooLarge": "檔案太大，無法匯入",
+    "importInvalidFile": "無法辨識的檔案格式",
+    "importFailed": "匯入失敗：{error}",
+    "transferHint": "可將字典匯出成單一檔案，在另一台裝置匯入。匯入也支援純文字 .txt/.csv（一行一個詞），方便從 Typeless 等工具遷移。"
   },
   "accessibility": {
     "title": "需要輔助使用權限",
