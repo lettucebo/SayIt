@@ -65,7 +65,7 @@ import {
 import {
   getAzureAccessToken,
   clearAzureTokenCache,
-  getAzureScopeForEndpoint,
+  getAzureScopeForApiKind,
 } from "../lib/azureAuth";
 
 declare const __APP_VERSION__: string;
@@ -258,7 +258,8 @@ export const useSettingsStore = defineStore("settings", () => {
       return { apiKey: "", provider, modelId: azureChatDeployment.value };
     }
 
-    const scope = getAzureScopeForEndpoint(azureEndpoint.value);
+    // chat 走 v1 路徑（/openai/v1/）→ ai.azure.com 受眾
+    const scope = getAzureScopeForApiKind("chat");
     if (azureAuthMode.value === "entra") {
       const token = await getAzureAccessToken(
         {
@@ -322,7 +323,8 @@ export const useSettingsStore = defineStore("settings", () => {
       apiVersion: azureApiVersion.value || undefined,
     };
 
-    const scope = getAzureScopeForEndpoint(azureEndpoint.value);
+    // whisper 走傳統 deployments 路徑 → cognitiveservices 受眾
+    const scope = getAzureScopeForApiKind("whisper");
     if (azureAuthMode.value === "entra") {
       const token = await getAzureAccessToken(
         {

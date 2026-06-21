@@ -118,7 +118,7 @@
 
 - **Chat（LLM 整理）** — provider `"azure"`，走 Azure OpenAI v1 端點 `{endpoint}/openai/v1/chat/completions`（OpenAI 線相容，同路徑也能接 Foundry 上的 Grok/DeepSeek）。`buildFetchParams("azure", …, azureOptions)` 在 `llmProvider.ts`。
 - **Whisper（轉錄）** — `whisperProviderId = "azure"` 時走 Rust `transcription.rs`：`{endpoint}/openai/deployments/{deployment}/audio/transcriptions?api-version=…`，保留 `verbose_json`/`no_speech_prob`。
-- **驗證** — API Key（`api-key` header）或 **Entra ID（App Registration / client credentials）**（`Authorization: Bearer`）。token 取得與快取在 `src/lib/azureAuth.ts`；scope 依 host：v1 chat 用 `ai.azure.com/.default`、deployments/Speech 用 `cognitiveservices.azure.com/.default`。
+- **驗證** — API Key（`api-key` header）或 **Entra ID（App Registration / client credentials）**（`Authorization: Bearer`）。token 取得與快取在 `src/lib/azureAuth.ts`；scope 依 **API 路徑**（非 host）由 `getAzureScopeForApiKind()` 選擇：v1 chat 用 `ai.azure.com/.default`、deployments/Speech（Whisper）用 `cognitiveservices.azure.com/.default`。
 - **設定解析** — `useSettingsStore` 的 `getLlmRequestConfig()` / `getWhisperRequestConfig()`（皆 async，Entra 需換 token）回傳 `{ apiKey, provider, modelId?, azure?/endpoint?… }`，供 enhancer / `transcribe_audio` 使用。設定（endpoint/authMode/key 或 tenant+client+secret/部署名）存 `tauri-plugin-store`，**不進 SQLite**。
 - **UI** — 獨立「Azure / Microsoft Foundry」連線卡（endpoint+憑證輸入一次，chat 與 whisper 共用）＋模型卡兩子區選部署名。
 - **allowlist/CSP** — `capabilities/default.json` + `tauri.conf.json` 已加 `*.openai.azure.com`、`*.services.ai.azure.com`、`*.cognitiveservices.azure.com`、`login.microsoftonline.com`。

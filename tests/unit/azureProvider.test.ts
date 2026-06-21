@@ -7,7 +7,7 @@ import {
   type AzureRequestOptions,
 } from "../../src/lib/llmProvider";
 import {
-  getAzureScopeForEndpoint,
+  getAzureScopeForApiKind,
   AZURE_SCOPE_FOUNDRY,
   AZURE_SCOPE_COGNITIVE,
 } from "../../src/lib/azureAuth";
@@ -56,20 +56,13 @@ describe("Azure provider", () => {
     });
   });
 
-  describe("getAzureScopeForEndpoint", () => {
-    it("[P0] Foundry 專案端點 → ai.azure.com", () => {
-      expect(
-        getAzureScopeForEndpoint("https://r.services.ai.azure.com"),
-      ).toBe(AZURE_SCOPE_FOUNDRY);
+  describe("getAzureScopeForApiKind", () => {
+    it("[P0] chat（v1 路徑 /openai/v1/）→ ai.azure.com", () => {
+      expect(getAzureScopeForApiKind("chat")).toBe(AZURE_SCOPE_FOUNDRY);
     });
 
-    it("[P0] 傳統 Azure OpenAI / Cognitive → cognitiveservices.azure.com", () => {
-      expect(getAzureScopeForEndpoint("https://r.openai.azure.com")).toBe(
-        AZURE_SCOPE_COGNITIVE,
-      );
-      expect(
-        getAzureScopeForEndpoint("https://r.cognitiveservices.azure.com"),
-      ).toBe(AZURE_SCOPE_COGNITIVE);
+    it("[P0] whisper（傳統 deployments 路徑）→ cognitiveservices.azure.com", () => {
+      expect(getAzureScopeForApiKind("whisper")).toBe(AZURE_SCOPE_COGNITIVE);
     });
   });
 

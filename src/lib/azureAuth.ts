@@ -12,23 +12,25 @@ export interface AzureEntraCredentials {
   clientSecret: string;
 }
 
-// scope 依目標 host 不同：
-//  - v1 chat（/openai/v1/）與 *.services.ai.azure.com → Foundry scope
-//  - 傳統 deployments 路徑（/openai/deployments/.../audio）與 *.cognitiveservices → Cognitive scope
+// Entra token scope（受眾）依「呼叫的 API 路徑」決定，而非 endpoint host：
+//  - v1 推論路徑（/openai/v1/...，本專案 chat 整理）→ ai.azure.com 受眾
+//  - 傳統 deployments 資料面（/openai/deployments/.../audio/transcriptions?api-version=，
+//    本專案 Whisper 轉錄）→ cognitiveservices.azure.com 受眾
+// 同一個 Foundry / Azure OpenAI 資源上，這兩條路徑各自要求不同受眾，
+// 因此不能用 host 推導（否則其中一條路徑會拿到錯受眾的 token 而 401）。
 export const AZURE_SCOPE_FOUNDRY = "https://ai.azure.com/.default";
 export const AZURE_SCOPE_COGNITIVE =
   "https://cognitiveservices.azure.com/.default";
 
+export type AzureApiKind = "chat" | "whisper";
+
 /**
- * 依 endpoint host 推導 Entra token scope：
- *  - Foundry 專案端點（*.services.ai.azure.com）→ ai.azure.com 受眾
- *  - 傳統 Azure OpenAI / Cognitive Services（*.openai.azure.com、*.cognitiveservices.azure.com）→ cognitiveservices 受眾
+ * 依呼叫的 API 種類選擇 Entra token scope：
+ *  - "chat"（v1 路徑 /openai/v1/）→ ai.azure.com 受眾
+ *  - "whisper"（傳統 deployments 路徑）→ cognitiveservices 受眾
  */
-export function getAzureScopeForEndpoint(endpoint: string): string {
-  if (endpoint.toLowerCase().includes("services.ai.azure.com")) {
-    return AZURE_SCOPE_FOUNDRY;
-  }
-  return AZURE_SCOPE_COGNITIVE;
+export function getAzureScopeForApiKind(kind: AzureApiKind): string {
+  return kind === "chat" ? AZURE_SCOPE_FOUNDRY : AZURE_SCOPE_COGNITIVE;
 }
 
 export class AzureAuthError extends Error {
