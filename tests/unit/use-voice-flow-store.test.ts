@@ -176,6 +176,17 @@ vi.mock("../../src/stores/useSettingsStore", () => ({
     loadSettings: mockLoadSettings,
     getApiKey: () => mockSettingsState.apiKey,
     getLlmApiKey: () => mockSettingsState.apiKey,
+    getLlmRequestConfig: () =>
+      Promise.resolve({
+        apiKey: mockSettingsState.apiKey,
+        provider: "groq",
+        modelId: mockSettingsState.selectedLlmModelId,
+      }),
+    getWhisperRequestConfig: () =>
+      Promise.resolve({ apiKey: mockSettingsState.apiKey, provider: "groq" }),
+    getEffectiveChatModel: () => mockSettingsState.selectedLlmModelId,
+    whisperProviderId: "groq",
+    hasWhisperConfig: true,
     getAiPrompt: () => mockSettingsState.aiPrompt,
     refreshApiKey: vi.fn().mockResolvedValue(undefined),
     refreshLlmApiKey: vi.fn().mockResolvedValue(undefined),
@@ -449,6 +460,11 @@ describe("useVoiceFlowStore", () => {
       vocabularyTermList: null,
       modelId: "whisper-large-v3",
       language: "zh",
+      provider: "groq",
+      endpoint: null,
+      deployment: null,
+      apiVersion: null,
+      authMode: null,
     });
     expect(store.status).toBe("success");
     expect(store.message).toBe("voiceFlow.pasteSuccess");
@@ -1310,6 +1326,11 @@ describe("useVoiceFlowStore", () => {
         vocabularyTermList: ["TypeScript", "Tauri"],
         modelId: "whisper-large-v3",
         language: "zh",
+        provider: "groq",
+        endpoint: null,
+        deployment: null,
+        apiVersion: null,
+        authMode: null,
       });
     });
 
@@ -1339,6 +1360,11 @@ describe("useVoiceFlowStore", () => {
         vocabularyTermList: null,
         modelId: "whisper-large-v3",
         language: "zh",
+        provider: "groq",
+        endpoint: null,
+        deployment: null,
+        apiVersion: null,
+        authMode: null,
       });
     });
 
@@ -1400,6 +1426,11 @@ describe("useVoiceFlowStore", () => {
         vocabularyTermList: ["Pinia", "Vitest"],
         modelId: "whisper-large-v3",
         language: "zh",
+        provider: "groq",
+        endpoint: null,
+        deployment: null,
+        apiVersion: null,
+        authMode: null,
       });
 
       // enhancer 也收到詞彙

@@ -95,6 +95,51 @@ fn format_whisper_prompt(term_list: &[String]) -> String {
     format!("Important Vocabulary: {}", terms.join(", "))
 }
 
+const DEFAULT_AZURE_WHISPER_API_VERSION: &str = "2024-06-01";
+
+/// Azure OpenAI Whisper（deployment-path）轉錄設定。
+struct AzureWhisperConfig {
+    endpoint: String,
+    deployment: String,
+    api_version: String,
+    /// entra → Authorization: Bearer；key → api-key header
+    use_bearer: bool,
+}
+
+/// 依 provider 參數建出 Azure 設定；非 azure 回 None。
+fn build_azure_whisper_config(
+    provider: Option<String>,
+    endpoint: Option<String>,
+    deployment: Option<String>,
+    api_version: Option<String>,
+    auth_mode: Option<String>,
+) -> Result<Option<AzureWhisperConfig>, TranscriptionError> {
+    if provider.as_deref() != Some("azure") {
+        return Ok(None);
+    }
+    let endpoint = endpoint
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| TranscriptionError::RequestFailed("Azure endpoint missing".to_string()))?;
+    let deployment = deployment
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| {
+            TranscriptionError::RequestFailed("Azure whisper deployment missing".to_string())
+        })?;
+    let api_version = api_version
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| DEFAULT_AZURE_WHISPER_API_VERSION.to_string());
+    let use_bearer = auth_mode.as_deref() == Some("entra");
+    Ok(Some(AzureWhisperConfig {
+        endpoint,
+        deployment,
+        api_version,
+        use_bearer,
+    }))
+}
+
 // ========== Shared Transcription Logic ==========
 
 async fn send_transcription_request(
@@ -104,6 +149,7 @@ async fn send_transcription_request(
     vocabulary_term_list: Option<Vec<String>>,
     model_id: Option<String>,
     language: Option<String>,
+    azure: Option<AzureWhisperConfig>,
 ) -> Result<TranscriptionResult, TranscriptionError> {
     if wav_data.len() < MINIMUM_AUDIO_SIZE {
         return Err(TranscriptionError::AudioTooSmall(wav_data.len()));
@@ -117,9 +163,26 @@ async fn send_transcription_request(
 
     let model = model_id.unwrap_or_else(|| DEFAULT_WHISPER_MODEL_ID.to_string());
 
+    // 依 provider 決定 URL、是否帶 model 欄位、與認證 header 型式
+    let (url, use_bearer, include_model) = match &azure {
+        Some(cfg) => {
+            let base = cfg.endpoint.trim_end_matches('/');
+            (
+                format!(
+                    "{}/openai/deployments/{}/audio/transcriptions?api-version={}",
+                    base, cfg.deployment, cfg.api_version
+                ),
+                cfg.use_bearer,
+                false,
+            )
+        }
+        None => (GROQ_API_URL.to_string(), true, true),
+    };
+
     println!(
-        "[transcription] Sending {} bytes WAV to Groq API (model={})",
+        "[transcription] Sending {} bytes WAV to {} (model={})",
         wav_data.len(),
+        if azure.is_some() { "Azure" } else { "Groq" },
         model
     );
 
@@ -133,8 +196,12 @@ async fn send_transcription_request(
 
     let mut form = reqwest::multipart::Form::new()
         .part("file", file_part)
-        .text("model", model)
         .text("response_format", "verbose_json");
+
+    // Azure deployment-path 不需要 model 欄位（部署已在 URL）
+    if include_model {
+        form = form.text("model", model);
+    }
 
     // Conditionally add language — None means auto-detect
     if let Some(lang) = language {
@@ -149,10 +216,13 @@ async fn send_transcription_request(
     }
 
     // Send request (reuse shared client for connection pooling)
-    let response = transcription_state
-        .client
-        .post(GROQ_API_URL)
-        .bearer_auth(&api_key)
+    let mut request_builder = transcription_state.client.post(&url);
+    request_builder = if use_bearer {
+        request_builder.bearer_auth(&api_key)
+    } else {
+        request_builder.header("api-key", &api_key)
+    };
+    let response = request_builder
         .multipart(form)
         .send()
         .await
@@ -205,6 +275,7 @@ async fn send_transcription_request(
 // ========== Commands ==========
 
 #[command]
+#[allow(clippy::too_many_arguments)]
 pub async fn transcribe_audio(
     state: State<'_, AudioRecorderState>,
     transcription_state: State<'_, TranscriptionState>,
@@ -212,10 +283,17 @@ pub async fn transcribe_audio(
     vocabulary_term_list: Option<Vec<String>>,
     model_id: Option<String>,
     language: Option<String>,
+    provider: Option<String>,
+    endpoint: Option<String>,
+    deployment: Option<String>,
+    api_version: Option<String>,
+    auth_mode: Option<String>,
 ) -> Result<TranscriptionResult, TranscriptionError> {
     if api_key.trim().is_empty() {
         return Err(TranscriptionError::ApiKeyMissing);
     }
+
+    let azure = build_azure_whisper_config(provider, endpoint, deployment, api_version, auth_mode)?;
 
     // Take WAV data from shared state (consume it)
     let wav_data = {
@@ -233,11 +311,13 @@ pub async fn transcribe_audio(
         vocabulary_term_list,
         model_id,
         language,
+        azure,
     )
     .await
 }
 
 #[command]
+#[allow(clippy::too_many_arguments)]
 pub async fn retranscribe_from_file(
     transcription_state: State<'_, TranscriptionState>,
     file_path: String,
@@ -245,16 +325,22 @@ pub async fn retranscribe_from_file(
     vocabulary_term_list: Option<Vec<String>>,
     model_id: Option<String>,
     language: Option<String>,
+    provider: Option<String>,
+    endpoint: Option<String>,
+    deployment: Option<String>,
+    api_version: Option<String>,
+    auth_mode: Option<String>,
 ) -> Result<TranscriptionResult, TranscriptionError> {
     if api_key.trim().is_empty() {
         return Err(TranscriptionError::ApiKeyMissing);
     }
 
+    let azure = build_azure_whisper_config(provider, endpoint, deployment, api_version, auth_mode)?;
+
     // 注意：std::fs::read 是同步 I/O，但 WAV 檔案通常很小（< 1MB），
     // 在 Tauri command 的 async context 中可接受。
-    let wav_data = std::fs::read(&file_path).map_err(|e| {
-        TranscriptionError::RequestFailed(format!("Failed to read WAV file: {e}"))
-    })?;
+    let wav_data = std::fs::read(&file_path)
+        .map_err(|e| TranscriptionError::RequestFailed(format!("Failed to read WAV file: {e}")))?;
 
     println!(
         "[transcription] Retranscribing from file: {} ({} bytes)",
@@ -269,28 +355,45 @@ pub async fn retranscribe_from_file(
         vocabulary_term_list,
         model_id,
         language,
+        azure,
     )
     .await
 }
 
 #[command]
+#[allow(clippy::too_many_arguments)]
 pub async fn test_whisper_connection(
     transcription_state: State<'_, TranscriptionState>,
     api_key: String,
     model_id: Option<String>,
+    provider: Option<String>,
+    endpoint: Option<String>,
+    deployment: Option<String>,
+    api_version: Option<String>,
+    auth_mode: Option<String>,
 ) -> Result<(), TranscriptionError> {
     if api_key.trim().is_empty() {
         return Err(TranscriptionError::ApiKeyMissing);
     }
+
+    let azure = build_azure_whisper_config(provider, endpoint, deployment, api_version, auth_mode)?;
 
     // 1 秒 16kHz silence ≈ 32044 bytes，遠超過 MINIMUM_AUDIO_SIZE 的 1000 byte 下限。
     let silence_samples = vec![0i16; 16_000];
     let wav_data = super::audio_recorder::encode_wav(&silence_samples, 16_000)
         .map_err(|e| TranscriptionError::RequestFailed(e.to_string()))?;
 
-    send_transcription_request(wav_data, &transcription_state, api_key, None, model_id, None)
-        .await
-        .map(|_| ())
+    send_transcription_request(
+        wav_data,
+        &transcription_state,
+        api_key,
+        None,
+        model_id,
+        None,
+        azure,
+    )
+    .await
+    .map(|_| ())
 }
 
 // ========== Tests ==========
@@ -339,5 +442,69 @@ mod tests {
         assert!(json.contains("\"rawText\""));
         assert!(json.contains("\"transcriptionDurationMs\""));
         assert!(json.contains("\"noSpeechProbability\""));
+    }
+
+    #[test]
+    fn test_build_azure_whisper_config_non_azure() {
+        assert!(build_azure_whisper_config(None, None, None, None, None)
+            .unwrap()
+            .is_none());
+        assert!(
+            build_azure_whisper_config(Some("groq".to_string()), None, None, None, None)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn test_build_azure_whisper_config_full() {
+        let cfg = build_azure_whisper_config(
+            Some("azure".to_string()),
+            Some("https://r.openai.azure.com/".to_string()),
+            Some("whisper".to_string()),
+            Some("2024-10-21".to_string()),
+            Some("entra".to_string()),
+        )
+        .unwrap()
+        .expect("expected Some config");
+        assert_eq!(cfg.endpoint, "https://r.openai.azure.com/");
+        assert_eq!(cfg.deployment, "whisper");
+        assert_eq!(cfg.api_version, "2024-10-21");
+        assert!(cfg.use_bearer);
+    }
+
+    #[test]
+    fn test_build_azure_whisper_config_defaults_and_key_mode() {
+        let cfg = build_azure_whisper_config(
+            Some("azure".to_string()),
+            Some("https://r.openai.azure.com".to_string()),
+            Some("whisper".to_string()),
+            None,
+            Some("key".to_string()),
+        )
+        .unwrap()
+        .expect("expected Some config");
+        assert_eq!(cfg.api_version, DEFAULT_AZURE_WHISPER_API_VERSION);
+        assert!(!cfg.use_bearer);
+    }
+
+    #[test]
+    fn test_build_azure_whisper_config_missing_fields_err() {
+        assert!(build_azure_whisper_config(
+            Some("azure".to_string()),
+            None,
+            Some("whisper".to_string()),
+            None,
+            Some("key".to_string())
+        )
+        .is_err());
+        assert!(build_azure_whisper_config(
+            Some("azure".to_string()),
+            Some("https://r.openai.azure.com".to_string()),
+            None,
+            None,
+            Some("key".to_string())
+        )
+        .is_err());
     }
 }

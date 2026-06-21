@@ -4,7 +4,8 @@ import {
   getEnhancementErrorMessage,
   getTranscriptionErrorMessage,
 } from "./errorUtils";
-import type { LlmModelId, WhisperModelId } from "./modelRegistry";
+import type { LlmProviderId, WhisperModelId } from "./modelRegistry";
+import type { AzureRequestOptions } from "./llmProvider";
 
 export interface TestSuccess {
   ok: true;
@@ -20,13 +21,16 @@ export interface TestFailure {
 export type TestResult = TestSuccess | TestFailure;
 
 export async function testLlmConnection(
-  modelId: LlmModelId,
+  modelId: string,
   apiKey: string,
+  extras?: { provider?: LlmProviderId; azure?: AzureRequestOptions },
 ): Promise<TestResult> {
   const start = performance.now();
   try {
     await enhanceText("ping", apiKey, {
       modelId,
+      provider: extras?.provider,
+      azure: extras?.azure,
       systemPrompt: "Reply with the word OK only.",
       maxTokens: 50,
     });
@@ -43,10 +47,25 @@ export async function testLlmConnection(
 export async function testWhisperConnection(
   modelId: WhisperModelId,
   apiKey: string,
+  extras?: {
+    provider?: "groq" | "azure";
+    endpoint?: string;
+    deployment?: string;
+    apiVersion?: string;
+    authMode?: "key" | "entra";
+  },
 ): Promise<TestResult> {
   const start = performance.now();
   try {
-    await invoke("test_whisper_connection", { apiKey, modelId });
+    await invoke("test_whisper_connection", {
+      apiKey,
+      modelId,
+      provider: extras?.provider,
+      endpoint: extras?.endpoint ?? null,
+      deployment: extras?.deployment ?? null,
+      apiVersion: extras?.apiVersion ?? null,
+      authMode: extras?.authMode ?? null,
+    });
     return { ok: true, durationMs: elapsed(start) };
   } catch (err) {
     return {

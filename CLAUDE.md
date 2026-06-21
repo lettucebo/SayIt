@@ -71,8 +71,8 @@
 | `read_recording_file` | `plugins/audio_recorder.rs` | HistoryView | `id: String, app: AppHandle` | `Result<Response, String>` |
 | `delete_all_recordings` | `plugins/audio_recorder.rs` | SettingsView | `app: AppHandle` | `Result<u32, String>` |
 | `cleanup_old_recordings` | `plugins/audio_recorder.rs` | main-window.ts | `days: u32, app: AppHandle` | `Result<Vec<String>, String>` |
-| `transcribe_audio` | `plugins/transcription.rs` | useVoiceFlowStore | `state: State<AudioRecorderState>, transcription_state: State<TranscriptionState>, api_key: String, vocabulary_term_list: Option<Vec<String>>, model_id: Option<String>, language: Option<String>` | `Result<TranscriptionResult, TranscriptionError>` |
-| `retranscribe_from_file` | `plugins/transcription.rs` | useVoiceFlowStore | `path: String, api_key: String, vocabulary_term_list: Option<Vec<String>>, model_id: Option<String>, language: Option<String>` | `Result<TranscriptionResult, TranscriptionError>` |
+| `transcribe_audio` | `plugins/transcription.rs` | useVoiceFlowStore | `state: State<AudioRecorderState>, transcription_state: State<TranscriptionState>, api_key: String, vocabulary_term_list: Option<Vec<String>>, model_id: Option<String>, language: Option<String>, provider: Option<String>, endpoint: Option<String>, deployment: Option<String>, api_version: Option<String>, auth_mode: Option<String>` | `Result<TranscriptionResult, TranscriptionError>` |
+| `retranscribe_from_file` | `plugins/transcription.rs` | useVoiceFlowStore | `file_path: String, api_key: String, vocabulary_term_list: Option<Vec<String>>, model_id: Option<String>, language: Option<String>, provider: Option<String>, endpoint: Option<String>, deployment: Option<String>, api_version: Option<String>, auth_mode: Option<String>` | `Result<TranscriptionResult, TranscriptionError>` |
 | `play_start_sound` | `plugins/sound_feedback.rs` | useVoiceFlowStore | — | `()` |
 | `play_stop_sound` | `plugins/sound_feedback.rs` | useVoiceFlowStore | — | `()` |
 | `play_error_sound` | `plugins/sound_feedback.rs` | useVoiceFlowStore | — | `()` |
@@ -114,12 +114,21 @@
 - **回傳型別** — `checkForAppUpdate()` → `Promise<UpdateCheckResult>`（`up-to-date` | `update-available` | `error`）
 - **已知限制** — `autoUpdater.ts` 中 `window.confirm` 在 Tauri WKWebView 會被靜默忽略，未來需改用 in-app UI
 
+## Azure / Microsoft Foundry Provider
+
+- **Chat（LLM 整理）** — provider `"azure"`，走 Azure OpenAI v1 端點 `{endpoint}/openai/v1/chat/completions`（OpenAI 線相容，同路徑也能接 Foundry 上的 Grok/DeepSeek）。`buildFetchParams("azure", …, azureOptions)` 在 `llmProvider.ts`。
+- **Whisper（轉錄）** — `whisperProviderId = "azure"` 時走 Rust `transcription.rs`：`{endpoint}/openai/deployments/{deployment}/audio/transcriptions?api-version=…`，保留 `verbose_json`/`no_speech_prob`。
+- **驗證** — API Key（`api-key` header）或 **Entra ID（App Registration / client credentials）**（`Authorization: Bearer`）。token 取得與快取在 `src/lib/azureAuth.ts`；scope 依 host：v1 chat 用 `ai.azure.com/.default`、deployments/Speech 用 `cognitiveservices.azure.com/.default`。
+- **設定解析** — `useSettingsStore` 的 `getLlmRequestConfig()` / `getWhisperRequestConfig()`（皆 async，Entra 需換 token）回傳 `{ apiKey, provider, modelId?, azure?/endpoint?… }`，供 enhancer / `transcribe_audio` 使用。設定（endpoint/authMode/key 或 tenant+client+secret/部署名）存 `tauri-plugin-store`，**不進 SQLite**。
+- **UI** — 獨立「Azure / Microsoft Foundry」連線卡（endpoint+憑證輸入一次，chat 與 whisper 共用）＋模型卡兩子區選部署名。
+- **allowlist/CSP** — `capabilities/default.json` + `tauri.conf.json` 已加 `*.openai.azure.com`、`*.services.ai.azure.com`、`*.cognitiveservices.azure.com`、`login.microsoftonline.com`。
+
 ## 依賴方向規則
 
 ```
   views/ ──→ components/ + stores/ + composables/
   stores/ ──→ lib/
-  lib/ ──→ External APIs (Groq / OpenAI / Anthropic)
+  lib/ ──→ External APIs (Groq / OpenAI / Anthropic / Azure Foundry)
 
   ❌ views/ 不可直接 import lib/
   ❌ 元件不可直接執行 SQL
