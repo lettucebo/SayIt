@@ -245,6 +245,7 @@ onBeforeUnmount(() => {
                 </div>
               </CardHeader>
               <CardContent>
+                <!-- 免費額度（免費服務）-->
                 <template v-if="hasFreeQuota">
                   <p class="text-2xl font-bold text-foreground">
                     {{ Math.round(quotaRemainingPercent * 100) }}%
@@ -260,20 +261,30 @@ onBeforeUnmount(() => {
                     {{ quotaBottleneckLabel }}
                   </p>
                 </template>
-                <template v-else>
-                  <div class="space-y-1">
-                    <p
-                      v-for="(item, idx) in paidUsageList"
-                      :key="idx"
-                      class="text-sm font-medium text-foreground truncate"
-                    >
-                      {{ item.label }}
-                    </p>
-                  </div>
-                  <p class="text-xs text-muted-foreground mt-1.5">
-                    {{ $t("dashboard.billedNoFreeQuota") }}
+
+                <!-- 付費服務今日用量（混用與全付費共用同一段；混用為次要樣式 + 分隔線）-->
+                <div
+                  v-if="paidUsageList.length > 0"
+                  class="space-y-1"
+                  :class="hasFreeQuota ? 'mt-1.5 pt-1.5 border-t border-border' : ''"
+                >
+                  <p
+                    v-for="(item, idx) in paidUsageList"
+                    :key="idx"
+                    class="truncate"
+                    :class="hasFreeQuota ? 'text-xs text-muted-foreground' : 'text-sm font-medium text-foreground'"
+                  >
+                    {{ item.label }}
                   </p>
-                </template>
+                </div>
+
+                <!-- 全付費提示（混用不顯示，避免與免費額度 % 矛盾）-->
+                <p
+                  v-if="!hasFreeQuota"
+                  class="text-xs text-muted-foreground mt-1.5"
+                >
+                  {{ $t("dashboard.billedNoFreeQuota") }}
+                </p>
               </CardContent>
             </Card>
           </TooltipTrigger>

@@ -60,18 +60,20 @@ function makeSettings(overrides: Record<string, unknown> = {}) {
   };
 }
 
-const tooltipStub = { template: "<div><slot /></div>" };
+const passThroughStub = { template: "<div><slot /></div>" };
 
-function mountDashboard() {
+// renderTooltip=false 時 TooltipContent 不渲染 slot → 只測「卡片主體」；
+// renderTooltip=true 時渲染 tooltip 內容 → 測 tooltip 行為。
+function mountDashboard(renderTooltip = false) {
   return mount(DashboardView, {
     global: {
       plugins: [i18n],
       stubs: {
         DashboardUsageChart: true,
-        TooltipProvider: tooltipStub,
-        Tooltip: tooltipStub,
-        TooltipTrigger: tooltipStub,
-        TooltipContent: tooltipStub,
+        TooltipProvider: passThroughStub,
+        Tooltip: passThroughStub,
+        TooltipTrigger: passThroughStub,
+        TooltipContent: renderTooltip ? passThroughStub : { template: "<div />" },
       },
     },
   });
@@ -83,10 +85,9 @@ describe("DashboardView 額度卡片", () => {
     historyState = makeHistory({ whisperRequestCount: 10, llmRequestCount: 5 });
   });
 
-  it("[P0] 全免費 provider 顯示剩餘免費額度百分比，無計費標籤", () => {
+  it("[P0] 全免費 provider：主體顯示剩餘免費額度百分比，無計費標籤", () => {
     settingsState = makeSettings();
-    const wrapper = mountDashboard();
-    const text = wrapper.text();
+    const text = mountDashboard().text();
 
     expect(text).toContain("今日剩餘免費額度");
     expect(text).toContain("%");
@@ -94,7 +95,7 @@ describe("DashboardView 額度卡片", () => {
     expect(text).not.toContain("今日用量");
   });
 
-  it("[P0] 全計費 provider（Azure）顯示今日用量與計費提示，不顯示百分比", () => {
+  it("[P0] 全計費 provider（Azure）：主體顯示今日用量與計費提示，不顯示百分比", () => {
     settingsState = makeSettings({
       whisperProviderId: "azure",
       selectedLlmProviderId: "azure",
@@ -105,31 +106,71 @@ describe("DashboardView 額度卡片", () => {
       llmRequestCount: 8,
       llmTotalTokens: 4500,
     });
-    const wrapper = mountDashboard();
-    const text = wrapper.text();
+    const text = mountDashboard().text();
 
     expect(text).toContain("今日用量");
     expect(text).toContain("計費");
     expect(text).toContain("Whisper");
     expect(text).toContain("LLM");
     expect(text).toContain("付費方案 — 無免費額度限制");
-    // 計費方案不應出現額度百分比（避免誤導的 0% / Infinity）
     expect(text).not.toContain("%");
     expect(text).not.toContain("Infinity");
     expect(text).not.toContain("NaN");
   });
 
-  it("[P0] 混用（Groq Whisper + Azure LLM）顯示免費額度百分比並標示計費", () => {
+  it("[P0] 混用（Groq Whisper + Azure LLM）：主體同時顯示免費 % 與付費 LLM 用量行，但不含無額度提示", () => {
     settingsState = makeSettings({
       whisperProviderId: "groq",
       selectedLlmProviderId: "azure",
     });
-    const wrapper = mountDashboard();
-    const text = wrapper.text();
+    historyState = makeHistory({
+      whisperRequestCount: 10,
+      llmRequestCount: 8,
+      llmTotalTokens: 4500,
+    });
+    const text = mountDashboard().text();
 
     expect(text).toContain("今日剩餘免費額度");
     expect(text).toContain("%");
     expect(text).toContain("計費");
+    // 付費 LLM 用量行現在出現在卡片主體（不再只在 tooltip）
+    expect(text).toContain("LLM");
+    // 混用主體不應顯示「無免費額度」提示（與免費 % 矛盾）
+    expect(text).not.toContain("付費方案 — 無免費額度限制");
     expect(text).not.toContain("Infinity");
+  });
+
+  it("[P0] 反向混用（Azure Whisper + Groq LLM）：主體顯示免費 % 與付費 Whisper 用量行", () => {
+    settingsState = makeSettings({
+      whisperProviderId: "azure",
+      selectedLlmProviderId: "groq",
+    });
+    historyState = makeHistory({
+      whisperRequestCount: 7,
+      whisperBilledAudioMs: 30_000,
+      llmRequestCount: 5,
+    });
+    const text = mountDashboard().text();
+
+    expect(text).toContain("今日剩餘免費額度");
+    expect(text).toContain("%");
+    expect(text).toContain("計費");
+    // 付費 Whisper 用量行出現在卡片主體
+    expect(text).toContain("Whisper");
+    expect(text).not.toContain("付費方案 — 無免費額度限制");
+    expect(text).not.toContain("Infinity");
+  });
+
+  it("[P0] 混用 tooltip 仍保留付費用量與無額度提示", () => {
+    settingsState = makeSettings({
+      whisperProviderId: "groq",
+      selectedLlmProviderId: "azure",
+    });
+    historyState = makeHistory({ llmRequestCount: 8, llmTotalTokens: 4500 });
+    // renderTooltip=true → tooltip 內容會被渲染
+    const text = mountDashboard(true).text();
+
+    expect(text).toContain("付費方案 — 無免費額度限制");
+    expect(text).toContain("LLM");
   });
 });
