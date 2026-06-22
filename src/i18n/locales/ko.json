@@ -245,7 +245,12 @@
     "quotaLlmRequests": "LLM {used}/{limit} 회",
     "quotaLlmTokens": "LLM {used}/{limit} tokens",
     "vocabularyAnalysis": "사전 분석",
-    "vocabularyAnalysisUsage": "사전 분석: {requests} 회 / {tokens} tokens"
+    "vocabularyAnalysisUsage": "사전 분석: {requests} 회 / {tokens} tokens",
+    "dailyUsage": "오늘 사용량",
+    "billedPlan": "유료",
+    "billedNoFreeQuota": "유료 요금제 — 무료 할당량 없음",
+    "usageWhisper": "Whisper: {requests}회 · {audio}",
+    "usageLlm": "LLM: {requests}회 · {tokens} tokens"
   },
   "history": {
     "searchPlaceholder": "전사 기록 검색...",
