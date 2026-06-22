@@ -58,6 +58,15 @@ import {
   type LlmProviderId,
   type WhisperModelId,
 } from "../lib/modelRegistry";
+import {
+  normalizeAzureEndpoint,
+  type AzureRequestOptions,
+} from "../lib/llmProvider";
+import {
+  getAzureAccessToken,
+  clearAzureTokenCache,
+  getAzureScopeForApiKind,
+} from "../lib/azureAuth";
 
 declare const __APP_VERSION__: string;
 
@@ -123,6 +132,17 @@ export const useSettingsStore = defineStore("settings", () => {
         return anthropicApiKey.value !== "";
       case "gemini":
         return geminiApiKey.value !== "";
+      case "azure":
+        return (
+          azureEnabled.value &&
+          azureEndpoint.value !== "" &&
+          azureChatDeployment.value !== "" &&
+          (azureAuthMode.value === "key"
+            ? azureApiKey.value !== ""
+            : azureTenantId.value !== "" &&
+              azureClientId.value !== "" &&
+              azureClientSecret.value !== "")
+        );
       default:
         // exhaustiveness：若 LlmProviderId 新增成員，這行會 type error
         selectedLlmProviderId.value satisfies never;
@@ -148,6 +168,31 @@ export const useSettingsStore = defineStore("settings", () => {
   const isCopyTranscriptionToClipboardEnabled = ref<boolean>(
     DEFAULT_COPY_TRANSCRIPTION_TO_CLIPBOARD,
   );
+  // ── Azure / Microsoft Foundry ──
+  const azureEnabled = ref<boolean>(false);
+  const azureEndpoint = ref<string>("");
+  const azureAuthMode = ref<"key" | "entra">("key");
+  const azureApiKey = ref<string>("");
+  const azureTenantId = ref<string>("");
+  const azureClientId = ref<string>("");
+  const azureClientSecret = ref<string>("");
+  const azureApiVersion = ref<string>("");
+  const azureChatDeployment = ref<string>("");
+  const azureWhisperDeployment = ref<string>("");
+  const whisperProviderId = ref<"groq" | "azure">("groq");
+  const hasWhisperConfig = computed(() => {
+    if (whisperProviderId.value !== "azure") return apiKey.value !== "";
+    return (
+      azureEnabled.value &&
+      azureEndpoint.value !== "" &&
+      azureWhisperDeployment.value !== "" &&
+      (azureAuthMode.value === "key"
+        ? azureApiKey.value !== ""
+        : azureTenantId.value !== "" &&
+          azureClientId.value !== "" &&
+          azureClientSecret.value !== "")
+    );
+  });
   let isLoaded = false;
 
   /** Resolve which SupportedLocale to use for prompt default (shared logic). */
@@ -171,7 +216,128 @@ export const useSettingsStore = defineStore("settings", () => {
         return anthropicApiKey.value;
       case "gemini":
         return geminiApiKey.value;
+      case "azure":
+        return azureAuthMode.value === "key" ? azureApiKey.value : "";
     }
+  }
+
+  function getAzureRequestOptions(authValue: string): AzureRequestOptions {
+    return {
+      endpoint: azureEndpoint.value,
+      apiVersion: azureApiVersion.value || undefined,
+      authMode: azureAuthMode.value,
+      authValue,
+    };
+  }
+
+  /**
+   * 解析一次 LLM 請求所需的 auth + provider + model。
+   * Azure-Entra 需非同步換 token，故此方法為 async。
+   */
+  async function getLlmRequestConfig(): Promise<{
+    apiKey: string;
+    provider: LlmProviderId;
+    modelId: string;
+    azure?: AzureRequestOptions;
+  }> {
+    const provider = selectedLlmProviderId.value;
+    if (provider !== "azure") {
+      return {
+        apiKey: getLlmApiKey(),
+        provider,
+        modelId: selectedLlmModelId.value,
+      };
+    }
+
+    // Azure 設定不完整 → 回空 apiKey，呼叫端走「未設定」流程（不打 token / 不送請求）
+    if (
+      !azureEnabled.value ||
+      azureEndpoint.value === "" ||
+      azureChatDeployment.value === ""
+    ) {
+      return { apiKey: "", provider, modelId: azureChatDeployment.value };
+    }
+
+    // chat 走 v1 路徑（/openai/v1/）→ ai.azure.com 受眾
+    const scope = getAzureScopeForApiKind("chat");
+    if (azureAuthMode.value === "entra") {
+      const token = await getAzureAccessToken(
+        {
+          tenantId: azureTenantId.value,
+          clientId: azureClientId.value,
+          clientSecret: azureClientSecret.value,
+        },
+        scope,
+      );
+      return {
+        apiKey: token,
+        provider,
+        modelId: azureChatDeployment.value,
+        azure: getAzureRequestOptions(token),
+      };
+    }
+
+    return {
+      apiKey: azureApiKey.value,
+      provider,
+      modelId: azureChatDeployment.value,
+      azure: getAzureRequestOptions(azureApiKey.value),
+    };
+  }
+
+  /** 用於 usage 記錄/成本計算的有效 chat 模型：Azure 用部署名，其餘用 selectedLlmModelId。 */
+  function getEffectiveChatModel(): string {
+    return selectedLlmProviderId.value === "azure"
+      ? azureChatDeployment.value
+      : selectedLlmModelId.value;
+  }
+
+  /**
+   * 解析語音轉錄所需的 auth + provider + Azure 連線參數。
+   * Azure-Entra 用 cognitiveservices scope（deployments 路徑）。
+   */
+  async function getWhisperRequestConfig(): Promise<{
+    apiKey: string;
+    provider: "groq" | "azure";
+    endpoint?: string;
+    deployment?: string;
+    apiVersion?: string;
+    authMode?: "key" | "entra";
+  }> {
+    if (whisperProviderId.value !== "azure") {
+      return { apiKey: apiKey.value, provider: "groq" };
+    }
+
+    if (
+      !azureEnabled.value ||
+      azureEndpoint.value === "" ||
+      azureWhisperDeployment.value === ""
+    ) {
+      return { apiKey: "", provider: "azure" };
+    }
+
+    const base = {
+      provider: "azure" as const,
+      endpoint: azureEndpoint.value,
+      deployment: azureWhisperDeployment.value,
+      apiVersion: azureApiVersion.value || undefined,
+    };
+
+    // whisper 走傳統 deployments 路徑 → cognitiveservices 受眾
+    const scope = getAzureScopeForApiKind("whisper");
+    if (azureAuthMode.value === "entra") {
+      const token = await getAzureAccessToken(
+        {
+          tenantId: azureTenantId.value,
+          clientId: azureClientId.value,
+          clientSecret: azureClientSecret.value,
+        },
+        scope,
+      );
+      return { ...base, apiKey: token, authMode: "entra" };
+    }
+
+    return { ...base, apiKey: azureApiKey.value, authMode: "key" };
   }
 
   async function syncHotkeyConfigToRust(key: TriggerKey, mode: TriggerMode) {
@@ -299,6 +465,28 @@ export const useSettingsStore = defineStore("settings", () => {
       const savedGeminiApiKey = await store.get<string>("geminiApiKey");
       geminiApiKey.value = savedGeminiApiKey?.trim() ?? "";
 
+      // Azure / Microsoft Foundry
+      azureEnabled.value = (await store.get<boolean>("azureEnabled")) ?? false;
+      azureEndpoint.value =
+        (await store.get<string>("azureEndpoint"))?.trim() ?? "";
+      azureAuthMode.value =
+        (await store.get<"key" | "entra">("azureAuthMode")) ?? "key";
+      azureApiKey.value = (await store.get<string>("azureApiKey"))?.trim() ?? "";
+      azureTenantId.value =
+        (await store.get<string>("azureTenantId"))?.trim() ?? "";
+      azureClientId.value =
+        (await store.get<string>("azureClientId"))?.trim() ?? "";
+      azureClientSecret.value =
+        (await store.get<string>("azureClientSecret")) ?? "";
+      azureApiVersion.value =
+        (await store.get<string>("azureApiVersion"))?.trim() ?? "";
+      azureChatDeployment.value =
+        (await store.get<string>("azureChatDeployment"))?.trim() ?? "";
+      azureWhisperDeployment.value =
+        (await store.get<string>("azureWhisperDeployment"))?.trim() ?? "";
+      whisperProviderId.value =
+        (await store.get<"groq" | "azure">("whisperProviderId")) ?? "groq";
+
       // LLM Model ID（含 Kimi K2 遷移）
       const savedLlmModelId = await store.get<string>("llmModelId");
       const llmMigratedFromKimiK2 = await store.get<boolean>(
@@ -323,7 +511,11 @@ export const useSettingsStore = defineStore("settings", () => {
 
       // model-provider 交叉驗證：防止 key 洩漏到錯誤 provider
       const modelConfig = findLlmModelConfig(selectedLlmModelId.value);
-      if (modelConfig && modelConfig.providerId !== selectedLlmProviderId.value) {
+      if (
+        selectedLlmProviderId.value !== "azure" &&
+        modelConfig &&
+        modelConfig.providerId !== selectedLlmProviderId.value
+      ) {
         selectedLlmModelId.value = getDefaultModelIdForProvider(
           selectedLlmProviderId.value,
         );
@@ -764,22 +956,22 @@ export const useSettingsStore = defineStore("settings", () => {
       const store = await load(STORE_NAME);
       await store.set("llmProviderId", providerId);
 
-      // 切換 provider 時重設為該 provider 預設模型
-      const defaultModelId = getDefaultModelIdForProvider(providerId);
-      await store.set("llmModelId", defaultModelId);
+      // 切換 provider 時重設為該 provider 預設模型；Azure 例外（模型 = 部署名稱）
+      if (providerId !== "azure") {
+        const defaultModelId = getDefaultModelIdForProvider(providerId);
+        await store.set("llmModelId", defaultModelId);
+        selectedLlmModelId.value = defaultModelId;
+      }
       await store.save();
 
       selectedLlmProviderId.value = providerId;
-      selectedLlmModelId.value = defaultModelId;
 
       const payload: SettingsUpdatedPayload = {
         key: "llmProvider",
         value: providerId,
       };
       await emitEvent(SETTINGS_UPDATED, payload);
-      console.log(
-        `[useSettingsStore] LLM provider saved: ${providerId}, model reset to: ${defaultModelId}`,
-      );
+      console.log(`[useSettingsStore] LLM provider saved: ${providerId}`);
     } catch (err) {
       console.error(
         "[useSettingsStore] saveLlmProvider failed:",
@@ -907,6 +1099,186 @@ export const useSettingsStore = defineStore("settings", () => {
     }
   }
 
+  async function saveAzureConnection(cfg: {
+    enabled: boolean;
+    endpoint: string;
+    authMode: "key" | "entra";
+    apiKey: string;
+    tenantId: string;
+    clientId: string;
+    clientSecret: string;
+    apiVersion: string;
+  }) {
+    try {
+      const store = await load(STORE_NAME);
+      const normalizedEndpoint = normalizeAzureEndpoint(cfg.endpoint);
+      await store.set("azureEnabled", cfg.enabled);
+      await store.set("azureEndpoint", normalizedEndpoint);
+      await store.set("azureAuthMode", cfg.authMode);
+      await store.set("azureApiKey", cfg.apiKey.trim());
+      await store.set("azureTenantId", cfg.tenantId.trim());
+      await store.set("azureClientId", cfg.clientId.trim());
+      await store.set("azureClientSecret", cfg.clientSecret);
+      await store.set("azureApiVersion", cfg.apiVersion.trim());
+
+      // 停用 Azure 時，把仍指向 azure 的 provider 切回 groq（避免無 UI 可切換而卡死）
+      if (!cfg.enabled) {
+        if (selectedLlmProviderId.value === "azure") {
+          const groqModel = getDefaultModelIdForProvider("groq");
+          await store.set("llmProviderId", "groq");
+          await store.set("llmModelId", groqModel);
+          selectedLlmProviderId.value = "groq";
+          selectedLlmModelId.value = groqModel;
+        }
+        if (whisperProviderId.value === "azure") {
+          await store.set("whisperProviderId", "groq");
+          whisperProviderId.value = "groq";
+        }
+      }
+      await store.save();
+
+      azureEnabled.value = cfg.enabled;
+      azureEndpoint.value = normalizedEndpoint;
+      azureAuthMode.value = cfg.authMode;
+      azureApiKey.value = cfg.apiKey.trim();
+      azureTenantId.value = cfg.tenantId.trim();
+      azureClientId.value = cfg.clientId.trim();
+      azureClientSecret.value = cfg.clientSecret;
+      azureApiVersion.value = cfg.apiVersion.trim();
+      clearAzureTokenCache();
+
+      const payload: SettingsUpdatedPayload = {
+        key: "azureConnection",
+        value: cfg.enabled,
+      };
+      await emitEvent(SETTINGS_UPDATED, payload);
+      console.log("[useSettingsStore] Azure connection saved");
+    } catch (err) {
+      console.error(
+        "[useSettingsStore] saveAzureConnection failed:",
+        extractErrorMessage(err),
+      );
+      captureError(err, { source: "settings", step: "save-azure-connection" });
+      throw err;
+    }
+  }
+
+  async function deleteAzureConnection() {
+    try {
+      const store = await load(STORE_NAME);
+      const keys = [
+        "azureEnabled",
+        "azureEndpoint",
+        "azureAuthMode",
+        "azureApiKey",
+        "azureTenantId",
+        "azureClientId",
+        "azureClientSecret",
+        "azureApiVersion",
+      ];
+      for (const k of keys) {
+        await store.delete(k);
+      }
+
+      // 把仍指向 azure 的 provider 切回 groq，否則轉錄/整理會卡在「未設定」
+      if (selectedLlmProviderId.value === "azure") {
+        const groqModel = getDefaultModelIdForProvider("groq");
+        await store.set("llmProviderId", "groq");
+        await store.set("llmModelId", groqModel);
+        selectedLlmProviderId.value = "groq";
+        selectedLlmModelId.value = groqModel;
+      }
+      if (whisperProviderId.value === "azure") {
+        await store.set("whisperProviderId", "groq");
+        whisperProviderId.value = "groq";
+      }
+      await store.save();
+
+      azureEnabled.value = false;
+      azureEndpoint.value = "";
+      azureAuthMode.value = "key";
+      azureApiKey.value = "";
+      azureTenantId.value = "";
+      azureClientId.value = "";
+      azureClientSecret.value = "";
+      azureApiVersion.value = "";
+      clearAzureTokenCache();
+
+      const payload: SettingsUpdatedPayload = {
+        key: "azureConnection",
+        value: false,
+      };
+      await emitEvent(SETTINGS_UPDATED, payload);
+      console.log("[useSettingsStore] Azure connection deleted");
+    } catch (err) {
+      console.error(
+        "[useSettingsStore] deleteAzureConnection failed:",
+        extractErrorMessage(err),
+      );
+      throw err;
+    }
+  }
+
+  async function saveAzureChatDeployment(name: string) {
+    try {
+      const store = await load(STORE_NAME);
+      await store.set("azureChatDeployment", name.trim());
+      await store.save();
+      azureChatDeployment.value = name.trim();
+      const payload: SettingsUpdatedPayload = {
+        key: "azureChatDeployment",
+        value: name.trim(),
+      };
+      await emitEvent(SETTINGS_UPDATED, payload);
+    } catch (err) {
+      console.error(
+        "[useSettingsStore] saveAzureChatDeployment failed:",
+        extractErrorMessage(err),
+      );
+      throw err;
+    }
+  }
+
+  async function saveAzureWhisperDeployment(name: string) {
+    try {
+      const store = await load(STORE_NAME);
+      await store.set("azureWhisperDeployment", name.trim());
+      await store.save();
+      azureWhisperDeployment.value = name.trim();
+      const payload: SettingsUpdatedPayload = {
+        key: "azureWhisperDeployment",
+        value: name.trim(),
+      };
+      await emitEvent(SETTINGS_UPDATED, payload);
+    } catch (err) {
+      console.error(
+        "[useSettingsStore] saveAzureWhisperDeployment failed:",
+        extractErrorMessage(err),
+      );
+      throw err;
+    }
+  }
+
+  async function saveWhisperProvider(id: "groq" | "azure") {
+    try {
+      const store = await load(STORE_NAME);
+      await store.set("whisperProviderId", id);
+      await store.save();
+      whisperProviderId.value = id;
+      const payload: SettingsUpdatedPayload = {
+        key: "whisperProvider",
+        value: id,
+      };
+      await emitEvent(SETTINGS_UPDATED, payload);
+    } catch (err) {
+      console.error(
+        "[useSettingsStore] saveWhisperProvider failed:",
+        extractErrorMessage(err),
+      );
+      throw err;
+    }
+  }
+
   async function refreshLlmApiKey() {
     try {
       const store = await load(STORE_NAME);
@@ -929,6 +1301,25 @@ export const useSettingsStore = defineStore("settings", () => {
         case "gemini": {
           const savedKey = await store.get<string>("geminiApiKey");
           geminiApiKey.value = savedKey?.trim() ?? "";
+          break;
+        }
+        case "azure": {
+          azureEndpoint.value =
+            (await store.get<string>("azureEndpoint"))?.trim() ?? "";
+          azureAuthMode.value =
+            (await store.get<"key" | "entra">("azureAuthMode")) ?? "key";
+          azureApiKey.value =
+            (await store.get<string>("azureApiKey"))?.trim() ?? "";
+          azureTenantId.value =
+            (await store.get<string>("azureTenantId"))?.trim() ?? "";
+          azureClientId.value =
+            (await store.get<string>("azureClientId"))?.trim() ?? "";
+          azureClientSecret.value =
+            (await store.get<string>("azureClientSecret")) ?? "";
+          azureApiVersion.value =
+            (await store.get<string>("azureApiVersion"))?.trim() ?? "";
+          azureChatDeployment.value =
+            (await store.get<string>("azureChatDeployment"))?.trim() ?? "";
           break;
         }
       }
@@ -1336,6 +1727,28 @@ export const useSettingsStore = defineStore("settings", () => {
       isCopyTranscriptionToClipboardEnabled.value =
         savedCopyTranscriptionToClipboard ??
         DEFAULT_COPY_TRANSCRIPTION_TO_CLIPBOARD;
+
+      // Azure / Microsoft Foundry（跨視窗同步）
+      azureEnabled.value = (await store.get<boolean>("azureEnabled")) ?? false;
+      azureEndpoint.value =
+        (await store.get<string>("azureEndpoint"))?.trim() ?? "";
+      azureAuthMode.value =
+        (await store.get<"key" | "entra">("azureAuthMode")) ?? "key";
+      azureApiKey.value = (await store.get<string>("azureApiKey"))?.trim() ?? "";
+      azureTenantId.value =
+        (await store.get<string>("azureTenantId"))?.trim() ?? "";
+      azureClientId.value =
+        (await store.get<string>("azureClientId"))?.trim() ?? "";
+      azureClientSecret.value =
+        (await store.get<string>("azureClientSecret")) ?? "";
+      azureApiVersion.value =
+        (await store.get<string>("azureApiVersion"))?.trim() ?? "";
+      azureChatDeployment.value =
+        (await store.get<string>("azureChatDeployment"))?.trim() ?? "";
+      azureWhisperDeployment.value =
+        (await store.get<string>("azureWhisperDeployment"))?.trim() ?? "";
+      whisperProviderId.value =
+        (await store.get<"groq" | "azure">("whisperProviderId")) ?? "groq";
     } catch (err) {
       console.error(
         "[useSettingsStore] refreshCrossWindowSettings failed:",
@@ -1387,6 +1800,10 @@ export const useSettingsStore = defineStore("settings", () => {
     geminiApiKey: computed(() => geminiApiKey.value),
     getApiKey,
     getLlmApiKey,
+    getLlmRequestConfig,
+    getWhisperRequestConfig,
+    getEffectiveChatModel,
+    hasWhisperConfig,
     getAiPrompt,
     savePromptMode,
     consumeUpgradeNotice,
@@ -1422,6 +1839,22 @@ export const useSettingsStore = defineStore("settings", () => {
     deleteAnthropicApiKey,
     saveGeminiApiKey,
     deleteGeminiApiKey,
+    azureEnabled,
+    azureEndpoint,
+    azureAuthMode,
+    azureApiKey: computed(() => azureApiKey.value),
+    azureTenantId,
+    azureClientId,
+    azureClientSecret: computed(() => azureClientSecret.value),
+    azureApiVersion,
+    azureChatDeployment,
+    azureWhisperDeployment,
+    whisperProviderId,
+    saveAzureConnection,
+    deleteAzureConnection,
+    saveAzureChatDeployment,
+    saveAzureWhisperDeployment,
+    saveWhisperProvider,
     refreshLlmApiKey,
     saveWhisperModel,
     isMuteOnRecordingEnabled,

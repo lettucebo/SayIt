@@ -34,6 +34,18 @@
         },
         {
           "url": "https://generativelanguage.googleapis.com/*"
+        },
+        {
+          "url": "https://*.openai.azure.com/*"
+        },
+        {
+          "url": "https://*.services.ai.azure.com/*"
+        },
+        {
+          "url": "https://*.cognitiveservices.azure.com/*"
+        },
+        {
+          "url": "https://login.microsoftonline.com/*"
         }
       ]
     },

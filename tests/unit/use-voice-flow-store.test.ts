@@ -176,6 +176,17 @@ vi.mock("../../src/stores/useSettingsStore", () => ({
     loadSettings: mockLoadSettings,
     getApiKey: () => mockSettingsState.apiKey,
     getLlmApiKey: () => mockSettingsState.apiKey,
+    getLlmRequestConfig: () =>
+      Promise.resolve({
+        apiKey: mockSettingsState.apiKey,
+        provider: "groq",
+        modelId: mockSettingsState.selectedLlmModelId,
+      }),
+    getWhisperRequestConfig: () =>
+      Promise.resolve({ apiKey: mockSettingsState.apiKey, provider: "groq" }),
+    getEffectiveChatModel: () => mockSettingsState.selectedLlmModelId,
+    whisperProviderId: "groq",
+    hasWhisperConfig: true,
     getAiPrompt: () => mockSettingsState.aiPrompt,
     refreshApiKey: vi.fn().mockResolvedValue(undefined),
     refreshLlmApiKey: vi.fn().mockResolvedValue(undefined),
@@ -449,6 +460,11 @@ describe("useVoiceFlowStore", () => {
       vocabularyTermList: null,
       modelId: "whisper-large-v3",
       language: "zh",
+      provider: "groq",
+      endpoint: null,
+      deployment: null,
+      apiVersion: null,
+      authMode: null,
     });
     expect(store.status).toBe("success");
     expect(store.message).toBe("voiceFlow.pasteSuccess");
@@ -675,7 +691,7 @@ describe("useVoiceFlowStore", () => {
   it("[P0] 轉錄失敗時應回報中文錯誤訊息", async () => {
     mockInvoke.mockImplementation(
       createMockInvokeHandler({
-        transcribeError: new Error("Groq API error (500)"),
+        transcribeError: new Error("Transcription API error (500)"),
       }),
     );
 
@@ -1310,6 +1326,11 @@ describe("useVoiceFlowStore", () => {
         vocabularyTermList: ["TypeScript", "Tauri"],
         modelId: "whisper-large-v3",
         language: "zh",
+        provider: "groq",
+        endpoint: null,
+        deployment: null,
+        apiVersion: null,
+        authMode: null,
       });
     });
 
@@ -1339,6 +1360,11 @@ describe("useVoiceFlowStore", () => {
         vocabularyTermList: null,
         modelId: "whisper-large-v3",
         language: "zh",
+        provider: "groq",
+        endpoint: null,
+        deployment: null,
+        apiVersion: null,
+        authMode: null,
       });
     });
 
@@ -1400,6 +1426,11 @@ describe("useVoiceFlowStore", () => {
         vocabularyTermList: ["Pinia", "Vitest"],
         modelId: "whisper-large-v3",
         language: "zh",
+        provider: "groq",
+        endpoint: null,
+        deployment: null,
+        apiVersion: null,
+        authMode: null,
       });
 
       // enhancer 也收到詞彙
@@ -1573,7 +1604,7 @@ describe("useVoiceFlowStore", () => {
     it("[P0] 轉錄失敗時不應呼叫 start_quality_monitor", async () => {
       mockInvoke.mockImplementation(
         createMockInvokeHandler({
-          transcribeError: new Error("Groq API error (500)"),
+          transcribeError: new Error("Transcription API error (500)"),
         }),
       );
 
@@ -1740,7 +1771,7 @@ describe("useVoiceFlowStore", () => {
     it("[P0] AC2: 轉錄 API 失敗時應寫入 failed 記錄（有 audioFilePath）", async () => {
       mockInvoke.mockImplementation(
         createMockInvokeHandler({
-          transcribeError: new Error("Groq API error (500)"),
+          transcribeError: new Error("Transcription API error (500)"),
         }),
       );
 
@@ -2154,7 +2185,7 @@ describe("useVoiceFlowStore", () => {
     it("[P0] API 錯誤失敗後 canRetry 應為 true", async () => {
       mockInvoke.mockImplementation(
         createMockInvokeHandler({
-          transcribeError: new Error("Groq API error (500)"),
+          transcribeError: new Error("Transcription API error (500)"),
         }),
       );
 
@@ -2186,7 +2217,7 @@ describe("useVoiceFlowStore", () => {
       // 重送也拋出錯誤
       mockInvoke.mockImplementation(
         createMockInvokeHandler({
-          retranscribeError: new Error("Groq API error (503)"),
+          retranscribeError: new Error("Transcription API error (503)"),
         }),
       );
 

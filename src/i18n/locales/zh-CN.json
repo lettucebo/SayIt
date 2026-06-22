@@ -68,7 +68,8 @@
       "openai": "OpenAI（推荐）",
       "anthropic": "Anthropic",
       "gemini": "Google Gemini（免费额度）",
-      "groqNote": "使用上方 Groq API Key"
+      "groqNote": "使用上方 Groq API Key",
+      "azure": "Azure / Microsoft Foundry"
     },
     "providerApiKey": {
       "openaiTitle": "OpenAI API Key",
@@ -187,6 +188,38 @@
       "description": "转录粘贴后自动检测修正，通过 AI 分析学习新词汇",
       "privacyNote": "启用后，系统会读取光标附近的文字用于 AI 分析，不存储原文",
       "analysisModelUpdated": "字典分析模型已更新"
+    },
+    "azure": {
+      "title": "Azure / Microsoft Foundry",
+      "description": "设置一组 Azure 端点与凭证，文字整理与语音转录可共用。",
+      "endpointLabel": "端点 URL",
+      "endpointPlaceholder": "https://your-resource.openai.azure.com",
+      "authModeLabel": "验证方式",
+      "authKey": "API Key",
+      "authEntra": "Microsoft Entra ID",
+      "apiKeyLabel": "API Key",
+      "tenantIdLabel": "Tenant ID",
+      "clientIdLabel": "Client ID（App Registration）",
+      "clientSecretLabel": "Client Secret",
+      "secretWarning": "Client Secret 会保存在本机，请妥善保管。",
+      "apiVersionLabel": "API 版本（选填）",
+      "apiVersionPlaceholder": "留空使用默认值",
+      "clear": "清除连接",
+      "saved": "Azure 连接已保存",
+      "deleted": "Azure 连接已清除",
+      "deploymentSaved": "部署名称已保存",
+      "chatDeploymentLabel": "Chat 部署名称",
+      "chatDeploymentPlaceholder": "例如 gpt-4o",
+      "chatHint": "输入你在 Azure 上的 chat 模型部署名称。",
+      "notConfiguredHint": "请先在上方“Azure / Microsoft Foundry”卡片启用并设置连接。",
+      "whisperDeploymentLabel": "Whisper 部署名称",
+      "whisperDeploymentPlaceholder": "例如 whisper",
+      "whisperHint": "输入你在 Azure 上的 Whisper 模型部署名称。",
+      "issueNotEnabled": "请先在上方「Azure / Microsoft Foundry」卡启用连接。",
+      "issueEndpoint": "请在上方连接卡填写 Endpoint URL 并按「保存」。",
+      "issueCredentials": "请在上方连接卡填写 Tenant ID／Client ID／Client Secret 并按「保存」。",
+      "issueApiKey": "请在上方连接卡填写 API Key 并按「保存」。",
+      "issueDeployment": "请填写部署名称并按「保存」。"
     }
   },
   "dashboard": {
@@ -212,7 +245,12 @@
     "quotaLlmRequests": "LLM {used}/{limit} 次",
     "quotaLlmTokens": "LLM {used}/{limit} tokens",
     "vocabularyAnalysis": "字典分析",
-    "vocabularyAnalysisUsage": "字典分析：{requests} 次 / {tokens} tokens"
+    "vocabularyAnalysisUsage": "字典分析：{requests} 次 / {tokens} tokens",
+    "dailyUsage": "今日用量",
+    "billedPlan": "计费",
+    "billedNoFreeQuota": "付费方案 — 无免费额度限制",
+    "usageWhisper": "Whisper：{requests} 次 · {audio}",
+    "usageLlm": "LLM：{requests} 次 · {tokens} tokens"
   },
   "history": {
     "searchPlaceholder": "搜索转录记录...",

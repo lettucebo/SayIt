@@ -448,6 +448,7 @@ pub fn run() {
             plugins::transcription::transcribe_audio,
             plugins::transcription::retranscribe_from_file,
             plugins::transcription::test_whisper_connection,
+            plugins::azure_auth::get_azure_entra_token,
             plugins::sound_feedback::play_start_sound,
             plugins::sound_feedback::play_stop_sound,
             plugins::sound_feedback::play_error_sound,

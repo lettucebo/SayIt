@@ -41,29 +41,61 @@ describe("getTranscriptionErrorMessage", () => {
     );
   });
 
-  it("[P0] Groq API 401 應映射為 API Key 無效", () => {
-    const error = new Error("Groq API error (401): Unauthorized");
+  it("[P0] 轉錄 API 401 應映射為 API Key 無效", () => {
+    const error = new Error("Transcription API error (401): Unauthorized");
     expect(getTranscriptionErrorMessage(error)).toBe("API Key 無效或已過期");
   });
 
-  it("[P0] Groq API 429 應映射為請求過於頻繁", () => {
-    const error = new Error("Groq API error (429): Rate limit exceeded");
+  it("[P0] 轉錄 API 429 應映射為請求過於頻繁", () => {
+    const error = new Error("Transcription API error (429): Rate limit exceeded");
     expect(getTranscriptionErrorMessage(error)).toBe("請求過於頻繁，稍後再試");
   });
 
-  it("[P0] Groq API 500+ 應映射為服務暫時無法使用", () => {
-    const error = new Error("Groq API error (500): Internal Server Error");
+  it("[P0] 轉錄 API 500+ 應映射為服務暫時無法使用", () => {
+    const error = new Error("Transcription API error (500): Internal Server Error");
     expect(getTranscriptionErrorMessage(error)).toBe("轉錄服務暫時無法使用");
   });
 
-  it("[P0] Groq API 未知狀態碼應映射為語音轉錄失敗", () => {
-    const error = new Error("Groq API error (418): I'm a teapot");
+  it("[P0] 轉錄 API 未知狀態碼應映射為語音轉錄失敗", () => {
+    const error = new Error("Transcription API error (418): I'm a teapot");
     expect(getTranscriptionErrorMessage(error)).toBe("語音轉錄失敗");
   });
 
-  it("[P0] Groq API 無狀態碼應映射為語音轉錄失敗", () => {
-    const error = new Error("Groq API error: unknown");
+  it("[P0] 轉錄 API 無狀態碼應映射為語音轉錄失敗", () => {
+    const error = new Error("Transcription API error: unknown");
     expect(getTranscriptionErrorMessage(error)).toBe("語音轉錄失敗");
+  });
+
+  // Tauri invoke 把 Rust TranscriptionError reject 為「純字串」（非 Error 實例）；
+  // 這些案例保證真實語音流程的狀態碼對應不會因 instanceof 判斷而失效。
+  it("[P0] 真實 Tauri 字串錯誤 401 應映射為 API Key 無效", () => {
+    expect(
+      getTranscriptionErrorMessage("Transcription API error (401): Unauthorized"),
+    ).toBe("API Key 無效或已過期");
+  });
+
+  it("[P0] 真實 Tauri 字串錯誤 429 應映射為請求過於頻繁", () => {
+    expect(
+      getTranscriptionErrorMessage(
+        "Transcription API error (429): Rate limit exceeded",
+      ),
+    ).toBe("請求過於頻繁，稍後再試");
+  });
+
+  it("[P0] 真實 Tauri 字串錯誤 400 應映射為音檔無效", () => {
+    expect(
+      getTranscriptionErrorMessage(
+        "Transcription API error (400): Unexpected end of Stream",
+      ),
+    ).toBe("音檔格式無效或錄音資料不完整");
+  });
+
+  it("[P0] 真實 Tauri 字串傳輸錯誤應映射為網路連線中斷", () => {
+    expect(
+      getTranscriptionErrorMessage(
+        "Transcription API request failed: error sending request (os error 10054)",
+      ),
+    ).toBe("網路連線中斷");
   });
 
   it("[P0] MediaRecorder 錯誤應映射為錄音裝置錯誤", () => {
@@ -106,10 +138,10 @@ describe("getTranscriptionErrorMessage", () => {
     );
   });
 
-  it("[P0] Groq API error 包含 network 字眼時不應被誤判為網路錯誤", () => {
+  it("[P0] 轉錄 API error 包含 network 字眼時不應被誤判為網路錯誤", () => {
     expect(
       getTranscriptionErrorMessage(
-        new Error("Groq API error (500): network issue on server"),
+        new Error("Transcription API error (500): network issue on server"),
       ),
     ).toBe("轉錄服務暫時無法使用");
   });

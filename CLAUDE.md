@@ -71,14 +71,15 @@
 | `read_recording_file` | `plugins/audio_recorder.rs` | HistoryView | `id: String, app: AppHandle` | `Result<Response, String>` |
 | `delete_all_recordings` | `plugins/audio_recorder.rs` | SettingsView | `app: AppHandle` | `Result<u32, String>` |
 | `cleanup_old_recordings` | `plugins/audio_recorder.rs` | main-window.ts | `days: u32, app: AppHandle` | `Result<Vec<String>, String>` |
-| `transcribe_audio` | `plugins/transcription.rs` | useVoiceFlowStore | `state: State<AudioRecorderState>, transcription_state: State<TranscriptionState>, api_key: String, vocabulary_term_list: Option<Vec<String>>, model_id: Option<String>, language: Option<String>` | `Result<TranscriptionResult, TranscriptionError>` |
-| `retranscribe_from_file` | `plugins/transcription.rs` | useVoiceFlowStore | `path: String, api_key: String, vocabulary_term_list: Option<Vec<String>>, model_id: Option<String>, language: Option<String>` | `Result<TranscriptionResult, TranscriptionError>` |
+| `transcribe_audio` | `plugins/transcription.rs` | useVoiceFlowStore | `state: State<AudioRecorderState>, transcription_state: State<TranscriptionState>, api_key: String, vocabulary_term_list: Option<Vec<String>>, model_id: Option<String>, language: Option<String>, provider: Option<String>, endpoint: Option<String>, deployment: Option<String>, api_version: Option<String>, auth_mode: Option<String>` | `Result<TranscriptionResult, TranscriptionError>` |
+| `retranscribe_from_file` | `plugins/transcription.rs` | useVoiceFlowStore | `file_path: String, api_key: String, vocabulary_term_list: Option<Vec<String>>, model_id: Option<String>, language: Option<String>, provider: Option<String>, endpoint: Option<String>, deployment: Option<String>, api_version: Option<String>, auth_mode: Option<String>` | `Result<TranscriptionResult, TranscriptionError>` |
 | `play_start_sound` | `plugins/sound_feedback.rs` | useVoiceFlowStore | — | `()` |
 | `play_stop_sound` | `plugins/sound_feedback.rs` | useVoiceFlowStore | — | `()` |
 | `play_error_sound` | `plugins/sound_feedback.rs` | useVoiceFlowStore | — | `()` |
 | `play_learned_sound` | `plugins/sound_feedback.rs` | NotchHud.vue | — | `()` |
 | `start_hotkey_recording` | `plugins/hotkey_listener.rs` | SettingsView | `state: State<HotkeyListenerState>` | `()` |
 | `cancel_hotkey_recording` | `plugins/hotkey_listener.rs` | SettingsView | `state: State<HotkeyListenerState>` | `()` |
+| `get_azure_entra_token` | `plugins/azure_auth.rs` | `azureAuth.ts`（getAzureAccessToken） | `tenant_id: String, client_id: String, client_secret: String, scope: String` | `Result<AzureTokenResult, String>`（`{ accessToken, expiresIn }`） |
 
 ### Rust → Frontend Events
 
@@ -114,18 +115,28 @@
 - **回傳型別** — `checkForAppUpdate()` → `Promise<UpdateCheckResult>`（`up-to-date` | `update-available` | `error`）
 - **已知限制** — `autoUpdater.ts` 中 `window.confirm` 在 Tauri WKWebView 會被靜默忽略，未來需改用 in-app UI
 
+## Azure / Microsoft Foundry Provider
+
+- **Chat（LLM 整理）** — provider `"azure"`，走 Azure OpenAI v1 端點 `{endpoint}/openai/v1/chat/completions`（OpenAI 線相容，同路徑也能接 Foundry 上的 Grok/DeepSeek）。`buildFetchParams("azure", …, azureOptions)` 在 `llmProvider.ts`。
+- **Whisper（轉錄）** — `whisperProviderId = "azure"` 時走 Rust `transcription.rs`：`{endpoint}/openai/deployments/{deployment}/audio/transcriptions?api-version=…`，保留 `verbose_json`/`no_speech_prob`。
+- **驗證** — API Key（`api-key` header）或 **Entra ID（App Registration / client credentials）**（`Authorization: Bearer`）。token 由 **Rust** `plugins/azure_auth.rs` 的 `get_azure_entra_token` 取得（reqwest，不帶 browser `Origin`，避免 `AADSTS9002326` cross-origin 拒絕），快取在 `src/lib/azureAuth.ts`；scope 依 **API 路徑**（非 host）由 `getAzureScopeForApiKind()` 選擇：v1 chat 用 `ai.azure.com/.default`、deployments/Speech（Whisper）用 `cognitiveservices.azure.com/.default`。
+- **設定解析** — `useSettingsStore` 的 `getLlmRequestConfig()` / `getWhisperRequestConfig()`（皆 async，Entra 需換 token）回傳 `{ apiKey, provider, modelId?, azure?/endpoint?… }`，供 enhancer / `transcribe_audio` 使用。設定（endpoint/authMode/key 或 tenant+client+secret/部署名）存 `tauri-plugin-store`，**不進 SQLite**。
+- **UI** — 獨立「Azure / Microsoft Foundry」連線卡（endpoint+憑證輸入一次，chat 與 whisper 共用）＋模型卡兩子區選部署名。
+- **allowlist/CSP** — `capabilities/default.json` + `tauri.conf.json` 已加 `*.openai.azure.com`、`*.services.ai.azure.com`、`*.cognitiveservices.azure.com`、`login.microsoftonline.com`。前端 plugin-http 受此 allowlist + CSP `connect-src` 約束；Rust `transcription.rs` / `azure_auth.rs` 用 reqwest 直連，**不**受 allowlist 約束。
+- **轉錄 HTTP client（rustls）** — `transcription.rs` `TranscriptionState::new()` 用 `.use_rustls_tls()` 建 reqwest，`Cargo.toml` reqwest features 須含 `rustls-tls` **與** `rustls-tls-native-roots`。Windows native-tls/schannel 會截斷大型（>~64KB）multipart upload → Azure 回 HTTP 400「Unexpected end of Stream」；`rustls-tls-native-roots` 讓 rustls 仍信任 OS 憑證庫（企業 TLS proxy / 自簽 CA）。Groq 與 Azure Whisper 共用此 client。
+
 ## 依賴方向規則
 
 ```
   views/ ──→ components/ + stores/ + composables/
   stores/ ──→ lib/
-  lib/ ──→ External APIs (Groq / OpenAI / Anthropic)
+  lib/ ──→ External APIs (Groq / OpenAI / Anthropic / Azure Foundry)
 
   ❌ views/ 不可直接 import lib/
   ❌ 元件不可直接執行 SQL
 ```
 
-## 關鍵禁忌（最常違反的 8 條）
+## 關鍵禁忌（最常違反的 10 條）
 
 1. **❌ 瀏覽器原生 `fetch`** → 用 `@tauri-apps/plugin-http` 的 `fetch`
 2. **❌ Options API** → 僅 `<script setup lang="ts">`
@@ -136,6 +147,7 @@
 7. **❌ 手寫 UI 元件** → 用 shadcn-vue（new-york style），詳見下方「shadcn-vue 元件使用規則」
 8. **❌ 直接 import Tauri event API** → 用 `useTauriEvents.ts` 封裝
 9. **❌ 未經設計直接實作 UI** → 先用 Pencil MCP 完成 `design.pen` 設計稿，再寫程式碼
+10. **❌ 假設 `invoke()` 錯誤是 `Error` 實例** → Rust 錯誤 enum 經 `serialize_str` 以「純字串」reject；前端錯誤對應一律先 `extractErrorMessage(err)` 正規化再比對（見 `src/lib/errorUtils.ts`），勿把比對包在 `error instanceof Error` 內
 
 ## shadcn-vue 元件使用規則
 
