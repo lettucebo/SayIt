@@ -110,8 +110,8 @@ describe("DashboardView 額度卡片", () => {
 
     expect(text).toContain("今日用量");
     expect(text).toContain("計費");
-    expect(text).toContain("Whisper");
-    expect(text).toContain("LLM");
+    expect(text).toContain("Whisper：12 次");
+    expect(text).toContain("LLM：8 次 · 4,500 tokens");
     expect(text).toContain("付費方案 — 無免費額度限制");
     expect(text).not.toContain("%");
     expect(text).not.toContain("Infinity");
@@ -133,8 +133,8 @@ describe("DashboardView 額度卡片", () => {
     expect(text).toContain("今日剩餘免費額度");
     expect(text).toContain("%");
     expect(text).toContain("計費");
-    // 付費 LLM 用量行現在出現在卡片主體（不再只在 tooltip）
-    expect(text).toContain("LLM");
+    // 付費 LLM 用量行（含實際數字）出現在卡片主體（不再只在 tooltip）
+    expect(text).toContain("LLM：8 次 · 4,500 tokens");
     // 混用主體不應顯示「無免費額度」提示（與免費 % 矛盾）
     expect(text).not.toContain("付費方案 — 無免費額度限制");
     expect(text).not.toContain("Infinity");
@@ -155,8 +155,8 @@ describe("DashboardView 額度卡片", () => {
     expect(text).toContain("今日剩餘免費額度");
     expect(text).toContain("%");
     expect(text).toContain("計費");
-    // 付費 Whisper 用量行出現在卡片主體
-    expect(text).toContain("Whisper");
+    // 付費 Whisper 用量行（含實際次數）出現在卡片主體
+    expect(text).toContain("Whisper：7 次");
     expect(text).not.toContain("付費方案 — 無免費額度限制");
     expect(text).not.toContain("Infinity");
   });

@@ -271,7 +271,6 @@ onBeforeUnmount(() => {
                   <p
                     v-for="(item, idx) in paidUsageList"
                     :key="idx"
-                    class="truncate"
                     :class="hasFreeQuota ? 'text-xs text-muted-foreground' : 'text-sm font-medium text-foreground'"
                   >
                     {{ item.label }}
@@ -280,7 +279,7 @@ onBeforeUnmount(() => {
 
                 <!-- 全付費提示（混用不顯示，避免與免費額度 % 矛盾）-->
                 <p
-                  v-if="!hasFreeQuota"
+                  v-if="!hasFreeQuota && paidUsageList.length > 0"
                   class="text-xs text-muted-foreground mt-1.5"
                 >
                   {{ $t("dashboard.billedNoFreeQuota") }}
