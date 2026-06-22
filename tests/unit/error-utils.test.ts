@@ -66,6 +66,38 @@ describe("getTranscriptionErrorMessage", () => {
     expect(getTranscriptionErrorMessage(error)).toBe("語音轉錄失敗");
   });
 
+  // Tauri invoke 把 Rust TranscriptionError reject 為「純字串」（非 Error 實例）；
+  // 這些案例保證真實語音流程的狀態碼對應不會因 instanceof 判斷而失效。
+  it("[P0] 真實 Tauri 字串錯誤 401 應映射為 API Key 無效", () => {
+    expect(
+      getTranscriptionErrorMessage("Transcription API error (401): Unauthorized"),
+    ).toBe("API Key 無效或已過期");
+  });
+
+  it("[P0] 真實 Tauri 字串錯誤 429 應映射為請求過於頻繁", () => {
+    expect(
+      getTranscriptionErrorMessage(
+        "Transcription API error (429): Rate limit exceeded",
+      ),
+    ).toBe("請求過於頻繁，稍後再試");
+  });
+
+  it("[P0] 真實 Tauri 字串錯誤 400 應映射為音檔無效", () => {
+    expect(
+      getTranscriptionErrorMessage(
+        "Transcription API error (400): Unexpected end of Stream",
+      ),
+    ).toBe("音檔格式無效或錄音資料不完整");
+  });
+
+  it("[P0] 真實 Tauri 字串傳輸錯誤應映射為網路連線中斷", () => {
+    expect(
+      getTranscriptionErrorMessage(
+        "Transcription API request failed: error sending request (os error 10054)",
+      ),
+    ).toBe("網路連線中斷");
+  });
+
   it("[P0] MediaRecorder 錯誤應映射為錄音裝置錯誤", () => {
     const error = new Error("MediaRecorder error during stop.");
     expect(getTranscriptionErrorMessage(error)).toBe("錄音裝置發生錯誤");
