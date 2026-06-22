@@ -214,7 +214,12 @@
       "notConfiguredHint": "Enable and configure the connection in the Azure / Microsoft Foundry card above first.",
       "whisperDeploymentLabel": "Whisper deployment name",
       "whisperDeploymentPlaceholder": "e.g. whisper",
-      "whisperHint": "Enter the name of your Whisper model deployment on Azure."
+      "whisperHint": "Enter the name of your Whisper model deployment on Azure.",
+      "issueNotEnabled": "Enable the connection in the “Azure / Microsoft Foundry” card above first.",
+      "issueEndpoint": "Enter the Endpoint URL in the connection card above and click Save.",
+      "issueCredentials": "Enter Tenant ID / Client ID / Client Secret in the connection card above and click Save.",
+      "issueApiKey": "Enter the API Key in the connection card above and click Save.",
+      "issueDeployment": "Enter the deployment name and click Save."
     }
   },
   "dashboard": {

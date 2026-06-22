@@ -23,6 +23,7 @@ pub struct TranscriptionState {
 impl TranscriptionState {
     pub fn new() -> Self {
         let client = reqwest::Client::builder()
+            .use_rustls_tls()
             .timeout(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS))
             .build()
             .expect("Failed to build HTTP client");
@@ -42,9 +43,9 @@ pub enum TranscriptionError {
     FileTooLarge { size_mb: f64, limit_mb: usize },
     #[error("API key is missing")]
     ApiKeyMissing,
-    #[error("Groq API request failed: {0}")]
+    #[error("Transcription API request failed: {0}")]
     RequestFailed(String),
-    #[error("Groq API returned error ({0}): {1}")]
+    #[error("Transcription API error ({0}): {1}")]
     ApiError(u16, String),
     #[error("Failed to parse API response: {0}")]
     ParseError(String),

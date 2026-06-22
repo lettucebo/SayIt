@@ -1,4 +1,4 @@
-import { fetch } from "@tauri-apps/plugin-http";
+import { invoke } from "@tauri-apps/api/core";
 
 // ── Entra ID（App Registration / client credentials）認證 ──────
 //
@@ -33,16 +33,6 @@ export function getAzureScopeForApiKind(kind: AzureApiKind): string {
   return kind === "chat" ? AZURE_SCOPE_FOUNDRY : AZURE_SCOPE_COGNITIVE;
 }
 
-export class AzureAuthError extends Error {
-  constructor(
-    public statusCode: number,
-    public body: string,
-  ) {
-    super(`Azure Entra token request failed: ${statusCode}`);
-    this.name = "AzureAuthError";
-  }
-}
-
 interface CachedToken {
   accessToken: string;
   expiresAtMs: number;
@@ -59,9 +49,9 @@ function buildCacheKey(
   return `${credentials.tenantId}|${credentials.clientId}|${scope}`;
 }
 
-interface TokenResponse {
-  access_token?: string;
-  expires_in?: number;
+interface AzureTokenResult {
+  accessToken: string;
+  expiresIn: number;
 }
 
 export async function getAzureAccessToken(
@@ -73,7 +63,7 @@ export async function getAzureAccessToken(
     !credentials.clientId ||
     !credentials.clientSecret
   ) {
-    throw new AzureAuthError(0, "Entra credentials incomplete");
+    throw new Error("Entra credentials incomplete");
   }
 
   const cacheKey = buildCacheKey(credentials, scope);
@@ -83,45 +73,22 @@ export async function getAzureAccessToken(
     return cached.accessToken;
   }
 
-  const tokenUrl = `https://login.microsoftonline.com/${encodeURIComponent(
-    credentials.tenantId,
-  )}/oauth2/v2.0/token`;
-
-  const body = new URLSearchParams({
-    grant_type: "client_credentials",
-    client_id: credentials.clientId,
-    client_secret: credentials.clientSecret,
+  // 透過 Rust（reqwest）取 token，而非 WebView fetch：WebView 會帶 Origin
+  // header，Entra 會以 AADSTS9002326 拒絕瀏覽器來源的 client_credentials
+  // token redemption（cross-origin redemption 僅限 SPA client-type）。
+  const result = await invoke<AzureTokenResult>("get_azure_entra_token", {
+    tenantId: credentials.tenantId,
+    clientId: credentials.clientId,
+    clientSecret: credentials.clientSecret,
     scope,
   });
 
-  const response = await fetch(tokenUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: body.toString(),
-  });
-
-  if (!response.ok) {
-    let detail = "";
-    try {
-      detail = await response.text();
-    } catch {
-      // ignore
-    }
-    throw new AzureAuthError(response.status, detail);
-  }
-
-  const json = (await response.json()) as TokenResponse;
-  if (!json.access_token) {
-    throw new AzureAuthError(response.status, "No access_token in response");
-  }
-
-  const expiresInMs = (json.expires_in ?? 3600) * 1000;
   tokenCache.set(cacheKey, {
-    accessToken: json.access_token,
-    expiresAtMs: now + expiresInMs,
+    accessToken: result.accessToken,
+    expiresAtMs: now + result.expiresIn * 1000,
   });
 
-  return json.access_token;
+  return result.accessToken;
 }
 
 /** 憑證變更或刪除時呼叫，清掉舊 token 快取。 */

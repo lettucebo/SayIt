@@ -691,7 +691,7 @@ describe("useVoiceFlowStore", () => {
   it("[P0] 轉錄失敗時應回報中文錯誤訊息", async () => {
     mockInvoke.mockImplementation(
       createMockInvokeHandler({
-        transcribeError: new Error("Groq API error (500)"),
+        transcribeError: new Error("Transcription API error (500)"),
       }),
     );
 
@@ -1604,7 +1604,7 @@ describe("useVoiceFlowStore", () => {
     it("[P0] 轉錄失敗時不應呼叫 start_quality_monitor", async () => {
       mockInvoke.mockImplementation(
         createMockInvokeHandler({
-          transcribeError: new Error("Groq API error (500)"),
+          transcribeError: new Error("Transcription API error (500)"),
         }),
       );
 
@@ -1771,7 +1771,7 @@ describe("useVoiceFlowStore", () => {
     it("[P0] AC2: 轉錄 API 失敗時應寫入 failed 記錄（有 audioFilePath）", async () => {
       mockInvoke.mockImplementation(
         createMockInvokeHandler({
-          transcribeError: new Error("Groq API error (500)"),
+          transcribeError: new Error("Transcription API error (500)"),
         }),
       );
 
@@ -2185,7 +2185,7 @@ describe("useVoiceFlowStore", () => {
     it("[P0] API 錯誤失敗後 canRetry 應為 true", async () => {
       mockInvoke.mockImplementation(
         createMockInvokeHandler({
-          transcribeError: new Error("Groq API error (500)"),
+          transcribeError: new Error("Transcription API error (500)"),
         }),
       );
 
@@ -2217,7 +2217,7 @@ describe("useVoiceFlowStore", () => {
       // 重送也拋出錯誤
       mockInvoke.mockImplementation(
         createMockInvokeHandler({
-          retranscribeError: new Error("Groq API error (503)"),
+          retranscribeError: new Error("Transcription API error (503)"),
         }),
       );
 

@@ -41,28 +41,28 @@ describe("getTranscriptionErrorMessage", () => {
     );
   });
 
-  it("[P0] Groq API 401 應映射為 API Key 無效", () => {
-    const error = new Error("Groq API error (401): Unauthorized");
+  it("[P0] 轉錄 API 401 應映射為 API Key 無效", () => {
+    const error = new Error("Transcription API error (401): Unauthorized");
     expect(getTranscriptionErrorMessage(error)).toBe("API Key 無效或已過期");
   });
 
-  it("[P0] Groq API 429 應映射為請求過於頻繁", () => {
-    const error = new Error("Groq API error (429): Rate limit exceeded");
+  it("[P0] 轉錄 API 429 應映射為請求過於頻繁", () => {
+    const error = new Error("Transcription API error (429): Rate limit exceeded");
     expect(getTranscriptionErrorMessage(error)).toBe("請求過於頻繁，稍後再試");
   });
 
-  it("[P0] Groq API 500+ 應映射為服務暫時無法使用", () => {
-    const error = new Error("Groq API error (500): Internal Server Error");
+  it("[P0] 轉錄 API 500+ 應映射為服務暫時無法使用", () => {
+    const error = new Error("Transcription API error (500): Internal Server Error");
     expect(getTranscriptionErrorMessage(error)).toBe("轉錄服務暫時無法使用");
   });
 
-  it("[P0] Groq API 未知狀態碼應映射為語音轉錄失敗", () => {
-    const error = new Error("Groq API error (418): I'm a teapot");
+  it("[P0] 轉錄 API 未知狀態碼應映射為語音轉錄失敗", () => {
+    const error = new Error("Transcription API error (418): I'm a teapot");
     expect(getTranscriptionErrorMessage(error)).toBe("語音轉錄失敗");
   });
 
-  it("[P0] Groq API 無狀態碼應映射為語音轉錄失敗", () => {
-    const error = new Error("Groq API error: unknown");
+  it("[P0] 轉錄 API 無狀態碼應映射為語音轉錄失敗", () => {
+    const error = new Error("Transcription API error: unknown");
     expect(getTranscriptionErrorMessage(error)).toBe("語音轉錄失敗");
   });
 
@@ -106,10 +106,10 @@ describe("getTranscriptionErrorMessage", () => {
     );
   });
 
-  it("[P0] Groq API error 包含 network 字眼時不應被誤判為網路錯誤", () => {
+  it("[P0] 轉錄 API error 包含 network 字眼時不應被誤判為網路錯誤", () => {
     expect(
       getTranscriptionErrorMessage(
-        new Error("Groq API error (500): network issue on server"),
+        new Error("Transcription API error (500): network issue on server"),
       ),
     ).toBe("轉錄服務暫時無法使用");
   });

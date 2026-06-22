@@ -214,7 +214,12 @@
       "notConfiguredHint": "请先在上方“Azure / Microsoft Foundry”卡片启用并设置连接。",
       "whisperDeploymentLabel": "Whisper 部署名称",
       "whisperDeploymentPlaceholder": "例如 whisper",
-      "whisperHint": "输入你在 Azure 上的 Whisper 模型部署名称。"
+      "whisperHint": "输入你在 Azure 上的 Whisper 模型部署名称。",
+      "issueNotEnabled": "请先在上方「Azure / Microsoft Foundry」卡启用连接。",
+      "issueEndpoint": "请在上方连接卡填写 Endpoint URL 并按「保存」。",
+      "issueCredentials": "请在上方连接卡填写 Tenant ID／Client ID／Client Secret 并按「保存」。",
+      "issueApiKey": "请在上方连接卡填写 API Key 并按「保存」。",
+      "issueDeployment": "请填写部署名称并按「保存」。"
     }
   },
   "dashboard": {

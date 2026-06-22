@@ -652,6 +652,25 @@ async function handleSaveAzureWhisperDeployment() {
   }
 }
 
+// 當 Azure 測試連線按鈕被禁用時，回報缺少的設定項（不會是空字串才顯示）。
+function azureConnectionIssue(deployment: string): string {
+  if (!settingsStore.azureEnabled) return t("settings.azure.issueNotEnabled");
+  if (settingsStore.azureEndpoint === "")
+    return t("settings.azure.issueEndpoint");
+  if (settingsStore.azureAuthMode === "entra") {
+    if (
+      settingsStore.azureTenantId === "" ||
+      settingsStore.azureClientId === "" ||
+      settingsStore.azureClientSecret === ""
+    )
+      return t("settings.azure.issueCredentials");
+  } else if (settingsStore.azureApiKey === "") {
+    return t("settings.azure.issueApiKey");
+  }
+  if (deployment.trim() === "") return t("settings.azure.issueDeployment");
+  return "";
+}
+
 async function handleWhisperProviderChange(id: "groq" | "azure") {
   try {
     await settingsStore.saveWhisperProvider(id);
@@ -1522,6 +1541,12 @@ onBeforeUnmount(() => {
               :on-test="testAzureWhisperConnection"
               :disabled="!settingsStore.hasWhisperConfig"
             />
+            <p
+              v-if="!settingsStore.hasWhisperConfig"
+              class="text-xs text-amber-400"
+            >
+              {{ azureConnectionIssue(settingsStore.azureWhisperDeployment) }}
+            </p>
           </template>
         </div>
 
@@ -1682,6 +1707,12 @@ onBeforeUnmount(() => {
           :on-test="settingsStore.selectedLlmProviderId === 'azure' ? testAzureChatConnection : () => testLlmConnection(settingsStore.selectedLlmModelId, settingsStore.getLlmApiKey())"
           :disabled="!settingsStore.hasLlmApiKey"
         />
+        <p
+          v-if="settingsStore.selectedLlmProviderId === 'azure' && !settingsStore.hasLlmApiKey"
+          class="text-xs text-amber-400"
+        >
+          {{ azureConnectionIssue(settingsStore.azureChatDeployment) }}
+        </p>
 
         <transition name="feedback-fade">
           <p

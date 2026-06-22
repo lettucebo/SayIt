@@ -49,7 +49,7 @@ export function getTranscriptionErrorMessage(error: unknown): string {
 
   if (error instanceof Error) {
     if (
-      !error.message.includes("Groq API error") &&
+      !error.message.includes("Transcription API error") &&
       NETWORK_ERROR_PATTERN.test(error.message)
     ) {
       return t("errors.network");
@@ -59,7 +59,7 @@ export function getTranscriptionErrorMessage(error: unknown): string {
       return t("errors.transcription.fileTooLarge");
     }
 
-    if (error.message.includes("Groq API error")) {
+    if (error.message.includes("Transcription API error")) {
       const statusMatch = error.message.match(/\((\d+)\)/);
       if (statusMatch) {
         const status = parseInt(statusMatch[1], 10);

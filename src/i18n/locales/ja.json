@@ -214,7 +214,12 @@
       "notConfiguredHint": "先に上の「Azure / Microsoft Foundry」カードで接続を有効化・設定してください。",
       "whisperDeploymentLabel": "Whisper デプロイ名",
       "whisperDeploymentPlaceholder": "例: whisper",
-      "whisperHint": "Azure 上の Whisper モデルのデプロイ名を入力してください。"
+      "whisperHint": "Azure 上の Whisper モデルのデプロイ名を入力してください。",
+      "issueNotEnabled": "上の「Azure / Microsoft Foundry」カードで接続を有効にしてください。",
+      "issueEndpoint": "上の接続カードに Endpoint URL を入力して「保存」を押してください。",
+      "issueCredentials": "上の接続カードに Tenant ID／Client ID／Client Secret を入力して「保存」を押してください。",
+      "issueApiKey": "上の接続カードに API Key を入力して「保存」を押してください。",
+      "issueDeployment": "デプロイ名を入力して「保存」を押してください。"
     }
   },
   "dashboard": {
