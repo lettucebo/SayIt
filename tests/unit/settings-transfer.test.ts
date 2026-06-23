@@ -6,6 +6,7 @@ import {
   SENSITIVE_SETTING_KEYS,
   base64ToBytes,
   buildBackupFile,
+  buildBackupFilename,
   bytesToBase64,
   encryptBackup,
   getBackupPayload,
@@ -65,6 +66,24 @@ describe("buildBackupFile / serializeBackup", () => {
   it("serializeBackup 產生可解析的 JSON", () => {
     const json = serializeBackup(buildPlainBackup(sampleSettings, null));
     expect(() => JSON.parse(json)).not.toThrow();
+  });
+});
+
+describe("buildBackupFilename", () => {
+  it("格式為 sayit-backup-YYYYMMDD-HHmmss.json", () => {
+    const name = buildBackupFilename(new Date());
+    expect(name).toMatch(/^sayit-backup-\d{8}-\d{6}\.json$/);
+  });
+
+  it("不含冒號（Windows 檔名安全）", () => {
+    const name = buildBackupFilename(new Date(2026, 5, 23, 17, 45, 1));
+    expect(name).not.toContain(":");
+  });
+
+  it("以本機時間各欄位補零", () => {
+    // 月份 0-indexed：0 → 一月；2026-01-05 09:07:03
+    const name = buildBackupFilename(new Date(2026, 0, 5, 9, 7, 3));
+    expect(name).toBe("sayit-backup-20260105-090703.json");
   });
 });
 

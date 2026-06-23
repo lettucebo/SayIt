@@ -217,7 +217,8 @@
       "errorDecryptFailed": "복호화 실패: 비밀번호가 틀렸거나 파일이 손상되었습니다",
       "errorPasswordRequired": "이 백업은 암호화되어 있습니다. 비밀번호를 입력하세요",
       "errorCryptoUnavailable": "이 환경에서는 암호화를 사용할 수 없습니다",
-      "errorImportFailed": "복원 실패"
+      "errorImportFailed": "복원 실패",
+      "errorExportFailed": "내보내기 실패"
     },
     "smartDictionary": {
       "title": "스마트 사전 학습",

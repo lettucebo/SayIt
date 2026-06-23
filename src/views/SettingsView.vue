@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { invoke } from "@tauri-apps/api/core";
+import { save, open } from "@tauri-apps/plugin-dialog";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import {
   useSettingsStore,
@@ -14,13 +15,13 @@ import { useHistoryStore } from "../stores/useHistoryStore";
 import { useVocabularyStore } from "../stores/useVocabularyStore";
 import {
   buildBackupFile,
+  buildBackupFilename,
   serializeBackup,
   encryptBackup,
   parseBackup,
   getBackupPayload,
   isSupportedDictionaryBlock,
   sanitizeSettingsPayload,
-  MAX_BACKUP_FILE_BYTES,
   type BackupFile,
 } from "../lib/settingsTransfer";
 import { buildExportFile } from "../lib/vocabularyTransfer";
@@ -1017,8 +1018,6 @@ const encryptEnabled = ref(false);
 const exportPassword = ref("");
 const exportPasswordConfirm = ref("");
 const isExporting = ref(false);
-
-const backupFileInput = ref<HTMLInputElement | null>(null);
 const isImporting = ref(false);
 const parsedBackup = ref<BackupFile | null>(null);
 const importSettingsSelected = ref(false);
@@ -1091,19 +1090,10 @@ function resyncLocalInputsFromStore() {
   );
 }
 
-function downloadBackupFile(filename: string, content: string) {
-  const blob = new Blob([content], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
-}
-
-function getBackupErrorMessage(code: string): string {
+function getBackupErrorMessage(
+  code: string,
+  operation: "import" | "export" = "import",
+): string {
   switch (code) {
     case "INVALID_JSON":
     case "INVALID_FORMAT":
@@ -1119,7 +1109,11 @@ function getBackupErrorMessage(code: string): string {
     case "CRYPTO_UNAVAILABLE":
       return t("settings.backup.errorCryptoUnavailable");
     default:
-      return t("settings.backup.errorImportFailed");
+      return t(
+        operation === "export"
+          ? "settings.backup.errorExportFailed"
+          : "settings.backup.errorImportFailed",
+      );
   }
 }
 
@@ -1144,43 +1138,48 @@ async function handleBackupExport() {
     if (encryptEnabled.value) {
       file = await encryptBackup(file, exportPassword.value);
     }
-    const stamp = iso.slice(0, 10).replace(/-/g, "");
-    downloadBackupFile(`sayit-backup-${stamp}.json`, serializeBackup(file));
+    const path = await save({
+      defaultPath: buildBackupFilename(new Date()),
+      filters: [{ name: "SayIt Backup", extensions: ["json"] }],
+    });
+    if (!path) return;
+    await invoke("save_text_file", { path, content: serializeBackup(file) });
     backupFeedback.show("success", t("settings.backup.exportSuccess"));
     exportPassword.value = "";
     exportPasswordConfirm.value = "";
   } catch (err) {
-    backupFeedback.show("error", getBackupErrorMessage(extractErrorMessage(err)));
+    backupFeedback.show(
+      "error",
+      getBackupErrorMessage(extractErrorMessage(err), "export"),
+    );
     captureError(err, { source: "settings-backup-export" });
   } finally {
     isExporting.value = false;
   }
 }
 
-function triggerBackupImport() {
-  backupFileInput.value?.click();
-}
-
-async function handleBackupFileSelected(event: Event) {
-  const input = event.target as HTMLInputElement;
-  const file = input.files?.[0];
-  input.value = ""; // 允許重選同一個檔
-  if (!file) return;
-  parsedBackup.value = null;
-  importPassword.value = "";
-
-  if (file.size > MAX_BACKUP_FILE_BYTES) {
-    backupFeedback.show("error", t("settings.backup.errorTooLarge"));
-    return;
-  }
+async function triggerBackupImport() {
   try {
-    const content = await file.text();
+    const path = await open({
+      multiple: false,
+      filters: [{ name: "SayIt Backup", extensions: ["json"] }],
+    });
+    if (typeof path !== "string") return;
+    parsedBackup.value = null;
+    importPassword.value = "";
+    const content = await invoke<string>("read_text_file", { path });
     const parsed = parseBackup(content);
     parsedBackup.value = parsed;
     importSettingsSelected.value = parsed.contents.settings;
     importDictionarySelected.value = parsed.contents.dictionary;
   } catch (err) {
-    backupFeedback.show("error", getBackupErrorMessage(extractErrorMessage(err)));
+    const code = extractErrorMessage(err);
+    backupFeedback.show(
+      "error",
+      code === "FILE_TOO_LARGE"
+        ? t("settings.backup.errorTooLarge")
+        : getBackupErrorMessage(code),
+    );
     captureError(err, { source: "settings-backup-parse" });
   }
 }
@@ -2727,13 +2726,6 @@ onBeforeUnmount(() => {
           >
             <Upload class="mr-1 h-4 w-4" />{{ $t("settings.backup.chooseFile") }}
           </Button>
-          <input
-            ref="backupFileInput"
-            type="file"
-            accept="application/json,.json"
-            class="hidden"
-            @change="handleBackupFileSelected"
-          />
 
           <div v-if="parsedBackup" class="space-y-4 rounded-md border border-border p-4">
             <p class="text-sm text-muted-foreground">

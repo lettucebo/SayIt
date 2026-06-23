@@ -217,7 +217,8 @@
       "errorDecryptFailed": "Decryption failed: wrong password or corrupted file",
       "errorPasswordRequired": "This backup is encrypted; please enter the password",
       "errorCryptoUnavailable": "Encryption is not available in this environment",
-      "errorImportFailed": "Restore failed"
+      "errorImportFailed": "Restore failed",
+      "errorExportFailed": "Export failed"
     },
     "smartDictionary": {
       "title": "Smart Dictionary Learning",

@@ -217,7 +217,8 @@
       "errorDecryptFailed": "解密失败：密码错误或文件损坏",
       "errorPasswordRequired": "此备份文件已加密，请输入密码",
       "errorCryptoUnavailable": "此环境不支持加密功能",
-      "errorImportFailed": "还原失败"
+      "errorImportFailed": "还原失败",
+      "errorExportFailed": "导出失败"
     },
     "smartDictionary": {
       "title": "智能字典学习",

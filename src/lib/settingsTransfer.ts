@@ -193,6 +193,19 @@ export function serializeBackup(file: BackupFile): string {
   return JSON.stringify(file, null, 2);
 }
 
+/**
+ * 產生 Windows 檔名安全的備份檔名：`sayit-backup-YYYYMMDD-HHmmss.json`（本機時間）。
+ * 刻意以本機時間各欄位手動補零，**不**用 `toISOString()`——其輸出含冒號，
+ * 是 Windows 檔名的非法字元。
+ */
+export function buildBackupFilename(date: Date): string {
+  const pad = (n: number): string => String(n).padStart(2, "0");
+  const stamp =
+    `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}` +
+    `-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
+  return `sayit-backup-${stamp}.json`;
+}
+
 type ExpectedType = "string" | "number" | "boolean" | "object" | "stringOrObject";
 
 /**

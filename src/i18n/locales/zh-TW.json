@@ -217,7 +217,8 @@
       "errorDecryptFailed": "解密失敗：密碼錯誤或檔案毀損",
       "errorPasswordRequired": "此備份檔已加密，請輸入密碼",
       "errorCryptoUnavailable": "此環境不支援加密功能",
-      "errorImportFailed": "還原失敗"
+      "errorImportFailed": "還原失敗",
+      "errorExportFailed": "匯出失敗"
     },
     "smartDictionary": {
       "title": "智慧字典學習",

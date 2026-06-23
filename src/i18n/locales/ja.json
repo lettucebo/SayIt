@@ -217,7 +217,8 @@
       "errorDecryptFailed": "復号に失敗しました：パスワードが違うかファイルが破損しています",
       "errorPasswordRequired": "このバックアップは暗号化されています。パスワードを入力してください",
       "errorCryptoUnavailable": "この環境では暗号化を利用できません",
-      "errorImportFailed": "復元に失敗しました"
+      "errorImportFailed": "復元に失敗しました",
+      "errorExportFailed": "エクスポートに失敗しました"
     },
     "smartDictionary": {
       "title": "スマート辞書学習",

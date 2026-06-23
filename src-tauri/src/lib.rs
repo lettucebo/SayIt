@@ -414,6 +414,7 @@ pub fn run() {
         ))
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(plugins::hotkey_listener::init())
         .invoke_handler(tauri::generate_handler![
             debug_log,
@@ -449,6 +450,8 @@ pub fn run() {
             plugins::transcription::retranscribe_from_file,
             plugins::transcription::test_whisper_connection,
             plugins::azure_auth::get_azure_entra_token,
+            plugins::file_transfer::save_text_file,
+            plugins::file_transfer::read_text_file,
             plugins::sound_feedback::play_start_sound,
             plugins::sound_feedback::play_stop_sound,
             plugins::sound_feedback::play_error_sound,
