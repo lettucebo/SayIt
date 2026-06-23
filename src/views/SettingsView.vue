@@ -19,6 +19,7 @@ import {
   parseBackup,
   getBackupPayload,
   isSupportedDictionaryBlock,
+  sanitizeSettingsPayload,
   MAX_BACKUP_FILE_BYTES,
   type BackupFile,
 } from "../lib/settingsTransfer";
@@ -1185,7 +1186,13 @@ async function handleBackupFileSelected(event: Event) {
 }
 
 async function applyBackupImport() {
-  if (isImporting.value || !parsedBackup.value || !canApplyImport.value) return;
+  if (
+    isImporting.value ||
+    isRecording.value ||
+    !parsedBackup.value ||
+    !canApplyImport.value
+  )
+    return;
   try {
     isImporting.value = true;
     const payload = await getBackupPayload(
@@ -1193,6 +1200,18 @@ async function applyBackupImport() {
       importedIsEncrypted.value ? importPassword.value : undefined,
     );
 
+    // 預檢：在寫入任何設定前，先驗證所有選定的區塊，避免 half-applied 狀態
+    const willImportSettings = importSettingsSelected.value && !!payload.settings;
+    const willImportDictionary =
+      importDictionarySelected.value && !!payload.dictionary;
+    if (willImportDictionary && !isSupportedDictionaryBlock(payload.dictionary)) {
+      throw new Error("UNSUPPORTED_VERSION");
+    }
+    const cleanSettings = willImportSettings
+      ? sanitizeSettingsPayload(payload.settings as Record<string, unknown>)
+      : null;
+
+    const deviceBeforeImport = settingsStore.selectedAudioInputDeviceName;
     let settingsApplied = false;
     let dictionaryResult: {
       added: number;
@@ -1200,15 +1219,19 @@ async function applyBackupImport() {
       skipped: number;
     } | null = null;
 
-    if (importSettingsSelected.value && payload.settings) {
-      await settingsStore.importSettings(payload.settings);
+    if (cleanSettings) {
+      await settingsStore.importSettings(cleanSettings);
       resyncLocalInputsFromStore();
       settingsApplied = true;
-    }
-    if (importDictionarySelected.value && payload.dictionary) {
-      if (!isSupportedDictionaryBlock(payload.dictionary)) {
-        throw new Error("UNSUPPORTED_VERSION");
+      // 音訊裝置若有變更，重啟預覽以對齊新裝置
+      if (
+        settingsStore.selectedAudioInputDeviceName !== deviceBeforeImport
+      ) {
+        await stopPreview();
+        void startPreview(settingsStore.selectedAudioInputDeviceName);
       }
+    }
+    if (willImportDictionary && payload.dictionary) {
       dictionaryResult = await vocabularyStore.importEntries(
         payload.dictionary.terms,
       );
@@ -1232,8 +1255,12 @@ async function applyBackupImport() {
     parsedBackup.value = null;
     importPassword.value = "";
   } catch (err) {
-    backupFeedback.show("error", getBackupErrorMessage(extractErrorMessage(err)));
-    captureError(err, { source: "settings-backup-import" });
+    const code = extractErrorMessage(err);
+    backupFeedback.show("error", getBackupErrorMessage(code));
+    // 密碼錯誤／需要密碼屬常態使用者操作，不上報 Sentry 噪音
+    if (code !== "DECRYPT_FAILED" && code !== "PASSWORD_REQUIRED") {
+      captureError(err, { source: "settings-backup-import" });
+    }
   } finally {
     isImporting.value = false;
   }
@@ -2760,7 +2787,7 @@ onBeforeUnmount(() => {
 
             <AlertDialog>
               <AlertDialogTrigger as-child>
-                <Button :disabled="!canApplyImport || isImporting">
+                <Button :disabled="!canApplyImport || isImporting || isRecording">
                   {{ $t("settings.backup.importButton") }}
                 </Button>
               </AlertDialogTrigger>

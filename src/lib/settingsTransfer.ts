@@ -193,6 +193,87 @@ export function serializeBackup(file: BackupFile): string {
   return JSON.stringify(file, null, 2);
 }
 
+type ExpectedType = "string" | "number" | "boolean" | "object" | "stringOrObject";
+
+/**
+ * 各設定 key 的期望值型別（含合成 autoStartEnabled）。
+ * 用於匯入前清洗：丟棄型別不符的 key，避免把壞值（如數字欄位存字串、
+ * locale 存非字串）持久化後造成 runtime 狀態損壞。
+ */
+const SETTING_VALUE_TYPES: Record<string, ExpectedType> = {
+  hotkeyTriggerKey: "stringOrObject",
+  hotkeyTriggerMode: "string",
+  customTriggerKey: "object",
+  customTriggerKeyDomCode: "string",
+  aiPrompt: "string",
+  promptMode: "string",
+  llmProviderId: "string",
+  llmModelId: "string",
+  whisperProviderId: "string",
+  whisperModelId: "string",
+  selectedLocale: "string",
+  selectedTranscriptionLocale: "string",
+  muteOnRecording: "boolean",
+  soundEffectsEnabled: "boolean",
+  smartDictionaryEnabled: "boolean",
+  enhancementThresholdEnabled: "boolean",
+  enhancementThresholdCharCount: "number",
+  recordingAutoCleanupEnabled: "boolean",
+  recordingAutoCleanupDays: "number",
+  copyTranscriptionToClipboard: "boolean",
+  audioInputDeviceName: "string",
+  groqApiKey: "string",
+  openaiApiKey: "string",
+  anthropicApiKey: "string",
+  geminiApiKey: "string",
+  azureEnabled: "boolean",
+  azureEndpoint: "string",
+  azureAuthMode: "string",
+  azureApiKey: "string",
+  azureTenantId: "string",
+  azureClientId: "string",
+  azureClientSecret: "string",
+  azureApiVersion: "string",
+  azureChatDeployment: "string",
+  azureWhisperDeployment: "string",
+  autoStartEnabled: "boolean",
+};
+
+function matchesExpectedType(value: unknown, expected: ExpectedType): boolean {
+  switch (expected) {
+    case "string":
+      return typeof value === "string";
+    case "number":
+      return typeof value === "number" && Number.isFinite(value);
+    case "boolean":
+      return typeof value === "boolean";
+    case "object":
+      return value !== null && typeof value === "object";
+    case "stringOrObject":
+      return (
+        typeof value === "string" ||
+        (value !== null && typeof value === "object")
+      );
+  }
+}
+
+/**
+ * 匯入前清洗設定 payload：丟棄未知 key 與型別不符的值。
+ * 回傳只含合法項目的新物件（缺漏的 key 之後會 fallback 至既有/預設值）。
+ */
+export function sanitizeSettingsPayload(
+  settings: SettingsPayload,
+): SettingsPayload {
+  const result: SettingsPayload = {};
+  for (const [key, value] of Object.entries(settings)) {
+    const expected = SETTING_VALUE_TYPES[key];
+    if (!expected) continue; // 未知 key
+    if (!matchesExpectedType(value, expected)) continue; // 型別不符
+    result[key] = value;
+  }
+  return result;
+}
+
 // ---------------------------------------------------------------------------
 // 加密 / 解密（WebCrypto AES-GCM + PBKDF2）
 // ---------------------------------------------------------------------------
@@ -273,6 +354,9 @@ export async function encryptBackup(
   };
 }
 
+/** PBKDF2 迭代次數上限，避免惡意/毀損檔以超大值癱瘓 UI（DoS）。 */
+export const MAX_PBKDF2_ITERATIONS = 5_000_000;
+
 function isValidEncryptionMeta(meta: unknown): meta is EncryptionMeta {
   if (!meta || typeof meta !== "object") return false;
   const m = meta as Partial<EncryptionMeta>;
@@ -281,7 +365,9 @@ function isValidEncryptionMeta(meta: unknown): meta is EncryptionMeta {
     m.kdf === "PBKDF2" &&
     m.hash === "SHA-256" &&
     typeof m.iterations === "number" &&
+    Number.isSafeInteger(m.iterations) &&
     m.iterations > 0 &&
+    m.iterations <= MAX_PBKDF2_ITERATIONS &&
     typeof m.salt === "string" &&
     typeof m.iv === "string"
   );
@@ -408,8 +494,16 @@ export async function getBackupPayload(
   if (!file.ciphertext) throw new Error("CORRUPT_FILE");
 
   const subtle = getSubtle();
-  const salt = base64ToBytes(file.encryption.salt);
-  const iv = base64ToBytes(file.encryption.iv);
+  let salt: Uint8Array;
+  let iv: Uint8Array;
+  let cipherBytes: Uint8Array;
+  try {
+    salt = base64ToBytes(file.encryption.salt);
+    iv = base64ToBytes(file.encryption.iv);
+    cipherBytes = base64ToBytes(file.ciphertext);
+  } catch {
+    throw new Error("CORRUPT_FILE");
+  }
   if (salt.length !== SALT_BYTES || iv.length !== IV_BYTES) {
     throw new Error("CORRUPT_FILE");
   }
@@ -420,7 +514,7 @@ export async function getBackupPayload(
     plainBuffer = await subtle.decrypt(
       { name: "AES-GCM", iv: iv as BufferSource },
       key,
-      base64ToBytes(file.ciphertext) as BufferSource,
+      cipherBytes as BufferSource,
     );
   } catch {
     // 密碼錯誤、auth tag 不符、檔案毀損都歸於此

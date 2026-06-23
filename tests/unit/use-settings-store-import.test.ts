@@ -101,6 +101,21 @@ describe("useSettingsStore — exportSettings / importSettings", () => {
       expect(exported).not.toHaveProperty("azureClientSecret");
       expect(exported.muteOnRecording).toBe(true);
     });
+
+    it("[P0] excludeSecrets=true 時停用 Azure、provider 退回 groq（避免缺憑證壞掉狀態）", async () => {
+      h.mockStoreData.set("azureEnabled", true);
+      h.mockStoreData.set("whisperProviderId", "azure");
+      h.mockStoreData.set("llmProviderId", "azure");
+      h.mockStoreData.set("azureApiKey", "secret");
+
+      const store = useSettingsStore();
+      const exported = await store.exportSettings(true);
+
+      expect(exported).not.toHaveProperty("azureApiKey");
+      expect(exported.azureEnabled).toBe(false);
+      expect(exported.whisperProviderId).toBe("groq");
+      expect(exported.llmProviderId).toBe("groq");
+    });
   });
 
   describe("importSettings 副作用（防 raw-set 退化）", () => {

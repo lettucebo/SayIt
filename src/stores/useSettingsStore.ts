@@ -1826,7 +1826,22 @@ export const useSettingsStore = defineStore("settings", () => {
       }
     }
     result[AUTO_START_KEY] = isAutoStartEnabled.value;
-    return excludeSecrets ? stripSensitiveKeys(result) : result;
+    if (!excludeSecrets) return result;
+
+    const stripped = stripSensitiveKeys(result);
+    // 排除金鑰時，避免在目標機產生「已啟用但缺憑證」的壞掉 Azure 狀態：
+    // 同步停用 Azure，並把使用 Azure 的 provider 退回預設（groq）。
+    if (stripped.azureEnabled === true) {
+      stripped.azureEnabled = false;
+    }
+    if (stripped.whisperProviderId === "azure") {
+      stripped.whisperProviderId = "groq";
+    }
+    if (stripped.llmProviderId === "azure") {
+      stripped.llmProviderId = "groq";
+      delete stripped.llmModelId; // 讓目標機依 provider 套用預設模型
+    }
+    return stripped;
   }
 
   /**

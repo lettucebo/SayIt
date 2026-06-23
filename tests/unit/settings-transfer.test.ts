@@ -12,6 +12,7 @@ import {
   isSupportedDictionaryBlock,
   parseBackup,
   serializeBackup,
+  sanitizeSettingsPayload,
   stripSensitiveKeys,
   type BackupFile,
   type SettingsPayload,
@@ -219,5 +220,69 @@ describe("isSupportedDictionaryBlock", () => {
     expect(
       isSupportedDictionaryBlock({ ...sampleDictionary, version: 999 }),
     ).toBe(false);
+  });
+});
+
+describe("sanitizeSettingsPayload", () => {
+  it("丟棄型別不符與未知 key、保留合法值", () => {
+    const clean = sanitizeSettingsPayload({
+      selectedLocale: "zh-TW",
+      muteOnRecording: true,
+      enhancementThresholdCharCount: 42,
+      enhancementThresholdEnabled: "yes" as unknown as boolean, // 型別錯 → 丟棄
+      recordingAutoCleanupDays: "7" as unknown as number, // 型別錯 → 丟棄
+      bogusKey: "x", // 未知 → 丟棄
+    });
+    expect(clean.selectedLocale).toBe("zh-TW");
+    expect(clean.muteOnRecording).toBe(true);
+    expect(clean.enhancementThresholdCharCount).toBe(42);
+    expect(clean).not.toHaveProperty("enhancementThresholdEnabled");
+    expect(clean).not.toHaveProperty("recordingAutoCleanupDays");
+    expect(clean).not.toHaveProperty("bogusKey");
+  });
+
+  it("hotkeyTriggerKey 接受字串或物件", () => {
+    expect(
+      sanitizeSettingsPayload({ hotkeyTriggerKey: "fn" }).hotkeyTriggerKey,
+    ).toBe("fn");
+    const combo = { combo: { modifiers: ["command"], keycode: 1 } };
+    expect(
+      sanitizeSettingsPayload({ hotkeyTriggerKey: combo }).hotkeyTriggerKey,
+    ).toEqual(combo);
+    expect(
+      sanitizeSettingsPayload({ hotkeyTriggerKey: 123 as unknown as string }),
+    ).not.toHaveProperty("hotkeyTriggerKey");
+  });
+});
+
+describe("加密 metadata 防護", () => {
+  const password = "pw";
+
+  it("iterations 超過上限 → INVALID_FORMAT", async () => {
+    const encrypted = await encryptBackup(
+      buildPlainBackup(sampleSettings, null),
+      password,
+    );
+    const tampered = serializeBackup({
+      ...encrypted,
+      encryption: { ...encrypted.encryption!, iterations: 1e10 },
+    });
+    expect(() => parseBackup(tampered)).toThrow("INVALID_FORMAT");
+  });
+
+  it("salt/iv base64 毀損 → CORRUPT_FILE", async () => {
+    const encrypted = await encryptBackup(
+      buildPlainBackup(sampleSettings, null),
+      password,
+    );
+    const parsed = parseBackup(
+      serializeBackup({
+        ...encrypted,
+        encryption: { ...encrypted.encryption!, salt: "!!!not-base64!!!" },
+      }),
+    );
+    await expect(getBackupPayload(parsed, password)).rejects.toThrow(
+      "CORRUPT_FILE",
+    );
   });
 });
