@@ -293,7 +293,17 @@
     "description": "辞書の用語は音声認識時に AI に提供され、固有名詞や技術用語の認識精度を向上させます。",
     "weightDescription": "音声認識のたびに、重みが最も高い上位 {limit} 語が AI 認識プロンプトに含まれます。同じ修正が繰り返し検出されると、その用語の重みが自動的に増加します。",
     "noAiSuggestions": "AI 推奨の用語はまだありません。スマート辞書学習を有効にすると自動学習されます",
-    "aiTermCount": "{count} 語"
+    "aiTermCount": "{count} 語",
+    "export": "エクスポート",
+    "import": "インポート",
+    "exportSuccess": "{count} 語をエクスポートしました",
+    "exportEmpty": "エクスポートする語がありません",
+    "importSuccess": "インポート完了：追加 {added}、統合 {merged}、スキップ {skipped}",
+    "importEmpty": "ファイルにインポート可能な語がありません",
+    "importTooLarge": "ファイルが大きすぎてインポートできません",
+    "importInvalidFile": "認識できないファイル形式です",
+    "importFailed": "インポートに失敗しました：{error}",
+    "transferHint": "辞書を単一ファイルにエクスポートし、別のデバイスでインポートできます。インポートはプレーンテキスト .txt/.csv（1行1語）にも対応しており、Typeless などからの移行に便利です。"
   },
   "accessibility": {
     "title": "アクセシビリティ権限が必要です",
