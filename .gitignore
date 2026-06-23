@@ -38,3 +38,6 @@ playwright/.auth/
 
 # Auto-generated documentation scanner output
 docs/project-scan-report.json
+
+# Tauri auto-generated files (schemas/ etc.) — regenerated on every build, per-platform (matches official Tauri template)
+src-tauri/gen/
