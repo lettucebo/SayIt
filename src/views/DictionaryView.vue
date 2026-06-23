@@ -4,12 +4,7 @@ import { useVocabularyStore } from "../stores/useVocabularyStore";
 import { extractErrorMessage } from "../lib/errorUtils";
 import { useFeedbackMessage } from "../composables/useFeedbackMessage";
 import { useI18n } from "vue-i18n";
-import { Plus, Trash2, Bot, Hand, Info, Download, Upload } from "lucide-vue-next";
-import {
-  serializeExport,
-  parseImportContent,
-  MAX_IMPORT_FILE_BYTES,
-} from "../lib/vocabularyTransfer";
+import { Plus, Trash2, Bot, Hand, Info } from "lucide-vue-next";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -31,10 +26,6 @@ const newTermInput = ref("");
 const isAdding = ref(false);
 const removingTermIdSet = ref(new Set<string>());
 const feedback = useFeedbackMessage();
-
-const isExporting = ref(false);
-const isImporting = ref(false);
-const importFileInput = ref<HTMLInputElement | null>(null);
 
 const isAddDisabled = computed(
   () => !newTermInput.value.trim() || isAdding.value,
@@ -82,92 +73,6 @@ async function handleRemoveTerm(id: string, term: string) {
   }
 }
 
-function downloadTextFile(filename: string, content: string, mime: string) {
-  const blob = new Blob([content], { type: mime });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
-}
-
-async function handleExport() {
-  if (isExporting.value) return;
-  try {
-    isExporting.value = true;
-    const entries = await vocabularyStore.exportEntries();
-    if (entries.length === 0) {
-      feedback.show("error", t("dictionary.exportEmpty"));
-      return;
-    }
-    const iso = new Date().toISOString();
-    const stamp = iso.slice(0, 10).replace(/-/g, "");
-    downloadTextFile(
-      `sayit-dictionary-${stamp}.json`,
-      serializeExport(entries, iso),
-      "application/json",
-    );
-    feedback.show(
-      "success",
-      t("dictionary.exportSuccess", { count: entries.length }),
-    );
-  } catch (err) {
-    feedback.show("error", extractErrorMessage(err));
-    captureError(err, { source: "dictionary-export" });
-  } finally {
-    isExporting.value = false;
-  }
-}
-
-function triggerImport() {
-  importFileInput.value?.click();
-}
-
-async function handleImportFileSelected(event: Event) {
-  const input = event.target as HTMLInputElement;
-  const file = input.files?.[0];
-  // 清空 input，讓使用者能重複選同一個檔
-  input.value = "";
-  if (!file || isImporting.value) return;
-
-  if (file.size > MAX_IMPORT_FILE_BYTES) {
-    feedback.show("error", t("dictionary.importTooLarge"));
-    return;
-  }
-
-  try {
-    isImporting.value = true;
-    const content = await file.text();
-    const entries = parseImportContent(file.name, content);
-    if (entries.length === 0) {
-      feedback.show("error", t("dictionary.importEmpty"));
-      return;
-    }
-    const result = await vocabularyStore.importEntries(entries);
-    feedback.show(
-      "success",
-      t("dictionary.importSuccess", {
-        added: result.added,
-        merged: result.merged,
-        skipped: result.skipped,
-      }),
-    );
-  } catch (err) {
-    const message = extractErrorMessage(err);
-    const key =
-      message === "INVALID_JSON" || message === "INVALID_FORMAT"
-        ? "dictionary.importInvalidFile"
-        : "dictionary.importFailed";
-    feedback.show("error", t(key, { error: message }));
-    captureError(err, { source: "dictionary-import" });
-  } finally {
-    isImporting.value = false;
-  }
-}
-
 function formatDate(dateString: string): string {
   try {
     // SQLite created_at 儲存為 UTC 且不帶時區後綴，附加 "Z" 確保以 UTC 解析
@@ -202,29 +107,6 @@ onBeforeUnmount(() => {
     <div class="flex flex-wrap items-center justify-between gap-4">
       <div class="flex items-center gap-2">
         <Badge variant="secondary">{{ $t("dictionary.termCount", { count: vocabularyStore.termCount }) }}</Badge>
-        <Button
-          variant="outline"
-          size="sm"
-          :disabled="isExporting"
-          @click="handleExport"
-        >
-          <Download class="h-4 w-4 mr-1" />{{ $t("dictionary.export") }}
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          :disabled="isImporting"
-          @click="triggerImport"
-        >
-          <Upload class="h-4 w-4 mr-1" />{{ $t("dictionary.import") }}
-        </Button>
-        <input
-          ref="importFileInput"
-          type="file"
-          accept=".json,.txt,.csv,application/json,text/plain,text/csv"
-          class="hidden"
-          @change="handleImportFileSelected"
-        />
       </div>
 
       <div class="flex items-center gap-2">
@@ -256,7 +138,6 @@ onBeforeUnmount(() => {
         <div class="space-y-1 text-sm text-muted-foreground">
           <p>{{ $t("dictionary.description") }}</p>
           <p>{{ $t("dictionary.weightDescription", { limit: 50 }) }}</p>
-          <p>{{ $t("dictionary.transferHint") }}</p>
         </div>
       </div>
     </div>

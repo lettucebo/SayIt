@@ -330,17 +330,7 @@
     "description": "Dictionary terms are provided to the AI during speech recognition to improve accuracy for proper nouns and technical terms.",
     "weightDescription": "During each speech recognition, the top {limit} terms by weight are included in the AI recognition prompt. When the AI detects you repeatedly correcting the same term, its weight increases automatically.",
     "noAiSuggestions": "No AI suggestions yet. Enable Smart Dictionary Learning to auto-learn new terms",
-    "aiTermCount": "{count} terms",
-    "export": "Export",
-    "import": "Import",
-    "exportSuccess": "Exported {count} terms",
-    "exportEmpty": "No terms to export",
-    "importSuccess": "Import complete: {added} added, {merged} merged, {skipped} skipped",
-    "importEmpty": "No importable terms found in the file",
-    "importTooLarge": "File is too large to import",
-    "importInvalidFile": "Unrecognized file format",
-    "importFailed": "Import failed: {error}",
-    "transferHint": "Export your dictionary to a single file and import it on another device. Import also accepts a plain .txt/.csv file (one term per line) — handy for migrating from tools like Typeless."
+    "aiTermCount": "{count} terms"
   },
   "accessibility": {
     "title": "Accessibility Permission Required",
