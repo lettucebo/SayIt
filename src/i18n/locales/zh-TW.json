@@ -218,7 +218,15 @@
       "errorPasswordRequired": "此備份檔已加密，請輸入密碼",
       "errorCryptoUnavailable": "此環境不支援加密功能",
       "errorImportFailed": "還原失敗",
-      "errorExportFailed": "匯出失敗"
+      "errorExportFailed": "匯出失敗",
+      "dictImportSection": "從其他工具匯入字典",
+      "dictImportDescription": "匯入從其他工具（如 Typeless）整理出的詞表：純文字 .txt/.csv（一行一個詞）或 SayIt 字典 JSON。詞條會以權重合併進你的字典。",
+      "dictImportButton": "匯入字典檔",
+      "dictImportSuccess": "匯入完成：新增 {added}、合併 {merged}、略過 {skipped}",
+      "dictImportEmpty": "檔案中沒有可匯入的詞",
+      "dictImportTooLarge": "檔案太大，無法匯入",
+      "dictImportInvalid": "無法辨識的檔案格式",
+      "dictImportFailed": "字典匯入失敗"
     },
     "smartDictionary": {
       "title": "智慧字典學習",
@@ -330,7 +338,8 @@
     "description": "字典詞彙會在語音辨識時提供給 AI，提升專有名詞與術語的辨識準確度。",
     "weightDescription": "每次語音辨識時，系統會將權重最高的前 {limit} 個詞彙加入 AI 辨識提示。當 AI 偵測到你重複修正同一個詞時，該詞的權重會自動提升。",
     "noAiSuggestions": "尚無 AI 推薦詞彙，啟用智慧字典學習後系統會自動學習",
-    "aiTermCount": "{count} 個詞"
+    "aiTermCount": "{count} 個詞",
+    "importHint": "要從其他工具（如 Typeless）遷移嗎？請至「設定 → 備份與還原」匯入詞表（.txt/.csv/.json）。"
   },
   "accessibility": {
     "title": "需要輔助使用權限",

@@ -24,7 +24,7 @@ import {
   sanitizeSettingsPayload,
   type BackupFile,
 } from "../lib/settingsTransfer";
-import { buildExportFile } from "../lib/vocabularyTransfer";
+import { buildExportFile, parseImportContent } from "../lib/vocabularyTransfer";
 import { captureError } from "../lib/sentry";
 import {
   listenToEvent,
@@ -1019,6 +1019,7 @@ const exportPassword = ref("");
 const exportPasswordConfirm = ref("");
 const isExporting = ref(false);
 const isImporting = ref(false);
+const isDictionaryImporting = ref(false);
 const parsedBackup = ref<BackupFile | null>(null);
 const importSettingsSelected = ref(false);
 const importDictionarySelected = ref(false);
@@ -1181,6 +1182,49 @@ async function triggerBackupImport() {
         : getBackupErrorMessage(code),
     );
     captureError(err, { source: "settings-backup-parse" });
+  }
+}
+
+async function handleExternalDictionaryImport() {
+  if (isDictionaryImporting.value) return;
+  isDictionaryImporting.value = true;
+  try {
+    const path = await open({
+      multiple: false,
+      filters: [
+        { name: "Dictionary / Wordlist", extensions: ["json", "txt", "csv"] },
+      ],
+    });
+    if (typeof path !== "string") return;
+    const content = await invoke<string>("read_text_file", { path });
+    const entries = parseImportContent(path, content);
+    if (entries.length === 0) {
+      backupFeedback.show("error", t("settings.backup.dictImportEmpty"));
+      return;
+    }
+    const result = await vocabularyStore.importEntries(entries);
+    backupFeedback.show(
+      "success",
+      t("settings.backup.dictImportSuccess", {
+        added: result.added,
+        merged: result.merged,
+        skipped: result.skipped,
+      }),
+    );
+  } catch (err) {
+    const code = extractErrorMessage(err);
+    const msg =
+      code === "FILE_TOO_LARGE"
+        ? t("settings.backup.dictImportTooLarge")
+        : code === "INVALID_JSON" ||
+            code === "INVALID_FORMAT" ||
+            code.includes("Invalid UTF-8")
+          ? t("settings.backup.dictImportInvalid")
+          : t("settings.backup.dictImportFailed");
+    backupFeedback.show("error", msg);
+    captureError(err, { source: "settings-dictionary-import" });
+  } finally {
+    isDictionaryImporting.value = false;
   }
 }
 
@@ -2801,6 +2845,24 @@ onBeforeUnmount(() => {
               </AlertDialogContent>
             </AlertDialog>
           </div>
+        </div>
+
+        <Separator />
+
+        <div class="space-y-3">
+          <h3 class="text-sm font-medium text-foreground">
+            {{ $t("settings.backup.dictImportSection") }}
+          </h3>
+          <p class="text-sm text-muted-foreground">
+            {{ $t("settings.backup.dictImportDescription") }}
+          </p>
+          <Button
+            variant="outline"
+            :disabled="isDictionaryImporting || isRecording"
+            @click="handleExternalDictionaryImport"
+          >
+            <Upload class="mr-1 h-4 w-4" />{{ $t("settings.backup.dictImportButton") }}
+          </Button>
         </div>
 
         <transition name="feedback-fade">

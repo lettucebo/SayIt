@@ -218,7 +218,15 @@
       "errorPasswordRequired": "此备份文件已加密，请输入密码",
       "errorCryptoUnavailable": "此环境不支持加密功能",
       "errorImportFailed": "还原失败",
-      "errorExportFailed": "导出失败"
+      "errorExportFailed": "导出失败",
+      "dictImportSection": "从其他工具导入词典",
+      "dictImportDescription": "导入从其他工具（如 Typeless）整理出的词表：纯文本 .txt/.csv（一行一个词）或 SayIt 词典 JSON。词条会以权重合并进你的词典。",
+      "dictImportButton": "导入词典文件",
+      "dictImportSuccess": "导入完成：新增 {added}、合并 {merged}、跳过 {skipped}",
+      "dictImportEmpty": "文件中没有可导入的词",
+      "dictImportTooLarge": "文件太大，无法导入",
+      "dictImportInvalid": "无法识别的文件格式",
+      "dictImportFailed": "词典导入失败"
     },
     "smartDictionary": {
       "title": "智能字典学习",
@@ -330,7 +338,8 @@
     "description": "字典词汇会在语音识别时提供给 AI，提升专有名词与术语的识别准确度。",
     "weightDescription": "每次语音识别时，系统会将权重最高的前 {limit} 个词汇加入 AI 识别提示。当 AI 检测到你重复修正同一个词时，该词的权重会自动提升。",
     "noAiSuggestions": "暂无 AI 推荐词汇，启用智能字典学习后系统会自动学习",
-    "aiTermCount": "{count} 个词"
+    "aiTermCount": "{count} 个词",
+    "importHint": "要从其他工具（如 Typeless）迁移吗？请到「设置 → 备份与还原」导入词表（.txt/.csv/.json）。"
   },
   "accessibility": {
     "title": "需要辅助使用权限",

@@ -138,6 +138,7 @@ onBeforeUnmount(() => {
         <div class="space-y-1 text-sm text-muted-foreground">
           <p>{{ $t("dictionary.description") }}</p>
           <p>{{ $t("dictionary.weightDescription", { limit: 50 }) }}</p>
+          <p>{{ $t("dictionary.importHint") }}</p>
         </div>
       </div>
     </div>
