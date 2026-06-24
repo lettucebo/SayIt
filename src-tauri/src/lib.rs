@@ -38,10 +38,10 @@ fn configure_macos_notch_window(window: &tauri::WebviewWindow) {
                 // 防止視窗被拖動
                 let _: () = objc::msg_send![ns_win, setMovable: false];
             }
-            println!("[macos] Notch window configured: level=27");
+            log::info!("[macos] Notch window configured: level=27");
         }
         Err(e) => {
-            eprintln!("[macos] Failed to get NSWindow: {e}");
+            log::error!("[macos] Failed to get NSWindow: {e}");
         }
     }
 }
@@ -75,28 +75,19 @@ fn configure_windows_topmost_window(window: &tauri::WebviewWindow) {
                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED,
             );
 
-            println!("[windows] Topmost window configured: HWND_TOPMOST + WS_EX_TOOLWINDOW");
+            log::info!("[windows] Topmost window configured: HWND_TOPMOST + WS_EX_TOOLWINDOW");
         },
         Err(e) => {
-            eprintln!("[windows] Failed to get HWND: {}", e);
+            log::error!("[windows] Failed to get HWND: {}", e);
         }
     }
 }
 
 #[command]
 fn request_app_restart<R: Runtime>(app: AppHandle<R>) {
-    println!("[app] Restart requested via command");
+    log::info!("[app] Restart requested via command");
     RESTART_REQUESTED.store(true, Ordering::SeqCst);
     app.exit(0);
-}
-
-#[command]
-fn debug_log(level: String, message: String) {
-    match level.as_str() {
-        "error" => eprintln!("[webview:ERROR] {message}"),
-        "warn" => println!("[webview:WARN] {message}"),
-        _ => println!("[webview] {message}"),
-    }
 }
 
 #[command]
@@ -106,9 +97,7 @@ fn update_hotkey_config(
     trigger_mode: plugins::hotkey_listener::TriggerMode,
 ) -> Result<(), String> {
     let state = app.state::<plugins::hotkey_listener::HotkeyListenerState>();
-    println!(
-        "[hotkey-listener] Config updated: key={trigger_key:?}, mode={trigger_mode:?}"
-    );
+    log::info!("[hotkey-listener] Config updated: key={trigger_key:?}, mode={trigger_mode:?}");
     state.update_config(trigger_key, trigger_mode);
     Ok(())
 }
@@ -151,7 +140,7 @@ fn get_cursor_position() -> (f64, f64) {
     unsafe {
         let event = CGEventCreate(std::ptr::null());
         if event.is_null() {
-            eprintln!("[hud-tracking] CGEventCreate returned null");
+            log::error!("[hud-tracking] CGEventCreate returned null");
             return (0.0, 0.0);
         }
         let _guard = CgEventGuard(event);
@@ -169,7 +158,7 @@ fn get_cursor_position() -> (f64, f64) {
     let mut point = POINT::default();
     unsafe {
         if let Err(e) = GetCursorPos(&mut point) {
-            eprintln!("[hud-tracking] GetCursorPos failed: {}", e);
+            log::error!("[hud-tracking] GetCursorPos failed: {}", e);
         }
     }
     (point.x as f64, point.y as f64)
@@ -401,6 +390,29 @@ pub fn run() {
     };
 
     tauri::Builder::default()
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                // 用 targets() 覆蓋預設 targets（Builder 預設含 Stdout + LogDir{None}），
+                // 否則 .target() 會 append → stdout 重複輸出、且預設 LogDir 與本 target
+                // 同寫 sayit.log 造成雙寫衝突。
+                .targets([
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
+                        file_name: Some(plugins::logging::LOG_FILE_NAME.to_string()),
+                    }),
+                ])
+                .level(log::LevelFilter::Trace)
+                .max_file_size(5_000_000)
+                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepAll)
+                .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)
+                // 檔案/輸出寫入由 FILE_LOG_ENABLED 旗標控制（前端設定開關）；
+                // dev build 永遠保留 stdout 方便開發。
+                .filter(|_metadata| {
+                    cfg!(debug_assertions)
+                        || plugins::logging::FILE_LOG_ENABLED.load(Ordering::Relaxed)
+                })
+                .build(),
+        )
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             show_main_window(app);
         }))
@@ -416,8 +428,10 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(plugins::hotkey_listener::init())
         .invoke_handler(tauri::generate_handler![
-            debug_log,
             request_app_restart,
+            plugins::logging::set_file_logging_enabled,
+            plugins::logging::open_log_folder,
+            plugins::logging::cleanup_old_logs,
             update_hotkey_config,
             get_hud_target_position,
             plugins::audio_control::mute_system_audio,
@@ -467,6 +481,17 @@ pub fn run() {
                     .unwrap_or(false);
                 if hide_dock_icon {
                     let _ = app.handle().set_dock_visibility(false);
+                }
+            }
+
+            // 早期套用持久化的檔案 Log 開關，讓啟動期（含 Rust setup）logs 也能被捕捉。
+            // 失敗（首次啟動無 settings.json）時保持預設關閉。
+            {
+                use tauri_plugin_store::StoreExt;
+                if let Ok(store) = app.store("settings.json") {
+                    if let Some(enabled) = store.get("debugLogEnabled").and_then(|v| v.as_bool()) {
+                        plugins::logging::FILE_LOG_ENABLED.store(enabled, Ordering::Relaxed);
+                    }
                 }
             }
 
@@ -531,7 +556,7 @@ pub fn run() {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                     api.prevent_close();
                     let _ = window.hide();
-                    println!("[main-window] Close requested → hidden (not destroyed)");
+                    log::info!("[main-window] Close requested → hidden (not destroyed)");
                 }
             }
         })
@@ -544,26 +569,36 @@ pub fn run() {
                     show_main_window(app_handle);
                 }
                 tauri::RunEvent::Exit => {
-                    println!("[app] Exit: starting graceful shutdown...");
+                    log::info!("[app] Exit: starting graceful shutdown...");
 
                     // 1. 恢復系統音量（避免永久靜音）
-                    if let Some(state) = app_handle.try_state::<plugins::audio_control::AudioControlState>() {
+                    if let Some(state) =
+                        app_handle.try_state::<plugins::audio_control::AudioControlState>()
+                    {
                         state.shutdown();
                     }
                     // 2. 停止音量預覽（在 cpal 錄音之前，避免兩者同時釋放裝置）
-                    if let Some(state) = app_handle.try_state::<plugins::audio_recorder::AudioPreviewState>() {
+                    if let Some(state) =
+                        app_handle.try_state::<plugins::audio_recorder::AudioPreviewState>()
+                    {
                         state.shutdown();
                     }
                     // 3. 停止 cpal 錄音（join thread, drop AudioUnit）
-                    if let Some(state) = app_handle.try_state::<plugins::audio_recorder::AudioRecorderState>() {
+                    if let Some(state) =
+                        app_handle.try_state::<plugins::audio_recorder::AudioRecorderState>()
+                    {
                         state.shutdown();
                     }
                     // 4. 取消 keyboard monitor CGEventTap
-                    if let Some(state) = app_handle.try_state::<plugins::keyboard_monitor::KeyboardMonitorState>() {
+                    if let Some(state) =
+                        app_handle.try_state::<plugins::keyboard_monitor::KeyboardMonitorState>()
+                    {
                         state.shutdown();
                     }
                     // 5. 停止 hotkey listener CGEventTap
-                    if let Some(state) = app_handle.try_state::<plugins::hotkey_listener::HotkeyListenerState>() {
+                    if let Some(state) =
+                        app_handle.try_state::<plugins::hotkey_listener::HotkeyListenerState>()
+                    {
                         state.shutdown();
                     }
                     // 6. 等待背景 thread 完成清理
@@ -579,17 +614,17 @@ pub fn run() {
                     if RESTART_REQUESTED.load(Ordering::SeqCst) {
                         match std::env::current_exe() {
                             Ok(exe_path) => {
-                                println!("[app] Spawning new process for restart: {exe_path:?}");
+                                log::info!("[app] Spawning new process for restart: {exe_path:?}");
                                 match std::process::Command::new(&exe_path).spawn() {
-                                    Ok(_) => println!("[app] New process spawned successfully"),
-                                    Err(e) => eprintln!("[app] Failed to spawn new process: {e}"),
+                                    Ok(_) => log::info!("[app] New process spawned successfully"),
+                                    Err(e) => log::error!("[app] Failed to spawn new process: {e}"),
                                 }
                             }
-                            Err(e) => eprintln!("[app] Failed to get current exe path: {e}"),
+                            Err(e) => log::error!("[app] Failed to get current exe path: {e}"),
                         }
                     }
 
-                    println!("[app] Graceful shutdown complete");
+                    log::info!("[app] Graceful shutdown complete");
                     extern "C" {
                         fn _exit(status: i32) -> !;
                     }
