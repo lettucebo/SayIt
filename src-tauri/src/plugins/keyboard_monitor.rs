@@ -83,7 +83,7 @@ impl KeyboardMonitorState {
         }
 
         #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-        println!("[keyboard-monitor] Platform not supported, keyboard monitoring disabled");
+        log::info!("[keyboard-monitor] Platform not supported, keyboard monitoring disabled");
 
         Self {
             is_monitoring,
@@ -127,9 +127,7 @@ fn emit_quality_result<R: Runtime>(app_handle: &AppHandle<R>, was_modified: bool
     let payload = QualityMonitorResultPayload { was_modified };
     let _ = app_handle.emit("quality-monitor:result", payload);
     #[cfg(debug_assertions)]
-    println!(
-        "[keyboard-monitor] Emitted quality result: wasModified={was_modified}"
-    );
+    log::info!("[keyboard-monitor] Emitted quality result: wasModified={was_modified}");
 }
 
 fn emit_correction_result<R: Runtime>(
@@ -145,7 +143,7 @@ fn emit_correction_result<R: Runtime>(
     };
     let _ = app_handle.emit("correction-monitor:result", payload);
     #[cfg(debug_assertions)]
-    println!(
+    log::info!(
         "[keyboard-monitor] Emitted correction result: anyKeyPressed={any_key_pressed}, enterPressed={enter_pressed}, idleTimeout={idle_timeout}"
     );
 }
@@ -180,19 +178,18 @@ fn run_persistent_event_tap(
         CGEventTapOptions::ListenOnly,
         vec![CGEventType::KeyDown],
         move |_proxy, _event_type, event| {
-            let keycode = event.get_integer_value_field(
-                core_graphics::event::EventField::KEYBOARD_EVENT_KEYCODE,
-            ) as u16;
+            let keycode = event
+                .get_integer_value_field(core_graphics::event::EventField::KEYBOARD_EVENT_KEYCODE)
+                as u16;
 
             // Quality monitor logic (unchanged)
             if is_monitoring.load(Ordering::SeqCst)
-                && (keycode == macos_keycodes::BACKSPACE || keycode == macos_keycodes::DELETE) {
-                    was_modified.store(true, Ordering::SeqCst);
-                    #[cfg(debug_assertions)]
-                    println!(
-                        "[keyboard-monitor] Quality: detected modify key: keycode={keycode}"
-                    );
-                }
+                && (keycode == macos_keycodes::BACKSPACE || keycode == macos_keycodes::DELETE)
+            {
+                was_modified.store(true, Ordering::SeqCst);
+                #[cfg(debug_assertions)]
+                log::info!("[keyboard-monitor] Quality: detected modify key: keycode={keycode}");
+            }
 
             // Correction monitor logic (independent)
             if correction_monitoring.load(Ordering::SeqCst) {
@@ -203,7 +200,7 @@ fn run_persistent_event_tap(
                 if keycode == macos_keycodes::ENTER || keycode == macos_keycodes::KEYPAD_ENTER {
                     correction_enter_pressed.store(true, Ordering::SeqCst);
                     #[cfg(debug_assertions)]
-                    println!("[keyboard-monitor] Correction: detected Enter key");
+                    log::info!("[keyboard-monitor] Correction: detected Enter key");
                 }
             }
 
@@ -213,7 +210,7 @@ fn run_persistent_event_tap(
 
     match tap_result {
         Ok(tap) => {
-            println!("[keyboard-monitor] Persistent CGEventTap created");
+            log::info!("[keyboard-monitor] Persistent CGEventTap created");
             unsafe {
                 let loop_source = tap
                     .mach_port
@@ -223,11 +220,11 @@ fn run_persistent_event_tap(
                 run_loop.add_source(&loop_source, kCFRunLoopCommonModes);
                 tap.enable();
                 CFRunLoop::run_current();
-                println!("[keyboard-monitor] Persistent CGEventTap stopped");
+                log::info!("[keyboard-monitor] Persistent CGEventTap stopped");
             }
         }
         Err(()) => {
-            eprintln!(
+            log::error!(
                 "[keyboard-monitor] Failed to create CGEventTap (no Accessibility permission?)"
             );
         }
@@ -289,7 +286,7 @@ fn run_persistent_hook(
                     {
                         state.was_modified.store(true, Ordering::SeqCst);
                         #[cfg(debug_assertions)]
-                        println!(
+                        log::info!(
                             "[keyboard-monitor] Quality: detected modify key: vkCode=0x{:02X}",
                             kbd.vkCode
                         );
@@ -297,14 +294,16 @@ fn run_persistent_hook(
 
                     // Correction monitor logic (independent)
                     if state.correction_monitoring.load(Ordering::SeqCst) {
-                        state.correction_any_key_pressed.store(true, Ordering::SeqCst);
+                        state
+                            .correction_any_key_pressed
+                            .store(true, Ordering::SeqCst);
                         if let Ok(mut t) = state.correction_last_key_time.lock() {
                             *t = Instant::now();
                         }
                         if kbd.vkCode == VK_RETURN {
                             state.correction_enter_pressed.store(true, Ordering::SeqCst);
                             #[cfg(debug_assertions)]
-                            println!("[keyboard-monitor] Correction: detected Enter key");
+                            log::info!("[keyboard-monitor] Correction: detected Enter key");
                         }
                     }
                 }
@@ -319,17 +318,20 @@ fn run_persistent_hook(
 
         match SetWindowsHookExW(WH_KEYBOARD_LL, Some(hook_proc), None, 0) {
             Ok(hook) => {
-                println!("[keyboard-monitor] Persistent Windows hook installed");
+                log::info!("[keyboard-monitor] Persistent Windows hook installed");
                 let mut msg = MSG::default();
                 while GetMessageW(&mut msg, None, 0, 0).as_bool() {
                     let _ = TranslateMessage(&msg);
                     DispatchMessageW(&msg);
                 }
                 let _ = UnhookWindowsHookEx(hook);
-                println!("[keyboard-monitor] Persistent Windows hook removed");
+                log::info!("[keyboard-monitor] Persistent Windows hook removed");
             }
             Err(e) => {
-                eprintln!("[keyboard-monitor] Failed to install persistent hook: {}", e);
+                log::error!(
+                    "[keyboard-monitor] Failed to install persistent hook: {}",
+                    e
+                );
             }
         }
     }
@@ -344,7 +346,7 @@ pub fn start_quality_monitor<R: Runtime>(app: AppHandle<R>) {
     // 若已有監控進行中，先取消
     if state.is_monitoring.load(Ordering::SeqCst) {
         #[cfg(debug_assertions)]
-        println!("[keyboard-monitor] Cancelling previous quality monitor session");
+        log::info!("[keyboard-monitor] Cancelling previous quality monitor session");
         state.cancel_token.store(true, Ordering::SeqCst);
         std::thread::sleep(Duration::from_millis(150));
     }
@@ -355,7 +357,7 @@ pub fn start_quality_monitor<R: Runtime>(app: AppHandle<R>) {
     state.cancel_token.store(false, Ordering::SeqCst);
 
     #[cfg(debug_assertions)]
-    println!("[keyboard-monitor] Starting quality monitor");
+    log::info!("[keyboard-monitor] Starting quality monitor");
 
     // 計時器：5 秒後結束監控並回傳結果
     // 持久 CGEventTap/Hook 已在背景運行，這裡只控制 flag 和計時
@@ -364,14 +366,11 @@ pub fn start_quality_monitor<R: Runtime>(app: AppHandle<R>) {
     let cancel_token = state.cancel_token.clone();
 
     std::thread::spawn(move || {
-        let cancelled = wait_with_cancellation(
-            &cancel_token,
-            MONITOR_DURATION_MS,
-            CANCEL_CHECK_INTERVAL_MS,
-        );
+        let cancelled =
+            wait_with_cancellation(&cancel_token, MONITOR_DURATION_MS, CANCEL_CHECK_INTERVAL_MS);
         if cancelled {
             #[cfg(debug_assertions)]
-            println!("[keyboard-monitor] Quality monitoring cancelled");
+            log::info!("[keyboard-monitor] Quality monitoring cancelled");
         }
         is_monitoring.store(false, Ordering::SeqCst);
         emit_quality_result(&app, was_modified.load(Ordering::SeqCst));
@@ -385,7 +384,7 @@ pub fn start_correction_monitor<R: Runtime>(app: AppHandle<R>) {
     // 若已有 correction 監控進行中，先取消
     if state.correction_monitoring.load(Ordering::SeqCst) {
         #[cfg(debug_assertions)]
-        println!("[keyboard-monitor] Cancelling previous correction monitor session");
+        log::info!("[keyboard-monitor] Cancelling previous correction monitor session");
         state.correction_cancel_token.store(true, Ordering::SeqCst);
         std::thread::sleep(Duration::from_millis(150));
     }
@@ -401,12 +400,10 @@ pub fn start_correction_monitor<R: Runtime>(app: AppHandle<R>) {
         *t = Instant::now();
     }
     state.correction_monitoring.store(true, Ordering::SeqCst);
-    state
-        .correction_cancel_token
-        .store(false, Ordering::SeqCst);
+    state.correction_cancel_token.store(false, Ordering::SeqCst);
 
     #[cfg(debug_assertions)]
-    println!("[keyboard-monitor] Starting correction monitor");
+    log::info!("[keyboard-monitor] Starting correction monitor");
 
     let correction_monitoring = state.correction_monitoring.clone();
     let any_key_pressed = state.correction_any_key_pressed.clone();
@@ -427,7 +424,7 @@ pub fn start_correction_monitor<R: Runtime>(app: AppHandle<R>) {
             if any_key_pressed.load(Ordering::SeqCst) {
                 // 偵測到首次按鍵，立即進入 Phase 2
                 #[cfg(debug_assertions)]
-                println!("[keyboard-monitor] Correction: Phase 1 → Phase 2 (key detected)");
+                log::info!("[keyboard-monitor] Correction: Phase 1 → Phase 2 (key detected)");
                 break;
             }
 
@@ -459,7 +456,7 @@ pub fn start_correction_monitor<R: Runtime>(app: AppHandle<R>) {
                 let key_time_at_enter = last_key_time.lock().map(|t| *t).unwrap_or(enter_time);
 
                 #[cfg(debug_assertions)]
-                println!("[keyboard-monitor] Correction: Enter debounce started ({CORRECTION_ENTER_DEBOUNCE_MS}ms)");
+                log::info!("[keyboard-monitor] Correction: Enter debounce started ({CORRECTION_ENTER_DEBOUNCE_MS}ms)");
 
                 let mut ime_followup = false;
                 while enter_time.elapsed() < Duration::from_millis(CORRECTION_ENTER_DEBOUNCE_MS) {
@@ -480,13 +477,13 @@ pub fn start_correction_monitor<R: Runtime>(app: AppHandle<R>) {
                 if ime_followup {
                     // IME 選字後繼續打字，不是真正的 Enter 送出
                     #[cfg(debug_assertions)]
-                    println!("[keyboard-monitor] Correction: Enter was IME confirm, continuing");
+                    log::info!("[keyboard-monitor] Correction: Enter was IME confirm, continuing");
                     continue;
                 }
 
                 // debounce 期間無新按鍵 → 真正的 Enter 送出
                 #[cfg(debug_assertions)]
-                println!("[keyboard-monitor] Correction: Enter confirmed (real send)");
+                log::info!("[keyboard-monitor] Correction: Enter confirmed (real send)");
                 correction_monitoring.store(false, Ordering::SeqCst);
                 emit_correction_result(&app, true, true, false);
                 return;

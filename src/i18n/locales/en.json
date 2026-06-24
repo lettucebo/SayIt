@@ -183,6 +183,18 @@
       "deleteConfirmDescription": "This will permanently delete all saved recording files. History records will be preserved, but playback will no longer be available.",
       "deleteSuccess": "Deleted {count} recording files"
     },
+    "debugLog": {
+      "title": "Debug Logging (Advanced)",
+      "description": "When enabled, the app writes runtime logs (frontend and backend) to a log file, useful for providing diagnostics when reporting issues. Keep it off during normal use.",
+      "enable": "Enable logging",
+      "enableDescription": "Write runtime logs to a file",
+      "retentionDays": "Retention days",
+      "daysUnit": "days",
+      "daysSaved": "Retention days saved",
+      "openFolder": "Open log folder",
+      "enabledMessage": "Debug logging enabled",
+      "disabledMessage": "Debug logging disabled"
+    },
     "backup": {
       "title": "Backup & Restore",
       "description": "Export your settings and dictionary to a single file for easy migration or reinstall. Optional password encryption.",
