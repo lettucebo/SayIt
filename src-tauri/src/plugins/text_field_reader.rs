@@ -347,8 +347,10 @@ mod windows_impl {
 
     /// 游標前後各取的字數（對齊 macOS CONTEXT_CHARS）。
     const CONTEXT_CHARS: i32 = 50;
-    /// GetText 硬上限，避免異常 provider 回傳整份文件。
-    const GET_TEXT_CAP: i32 = 512;
+    /// TextPattern GetText 上限＝游標前後 excerpt 寬度（caret ± CONTEXT_CHARS）。
+    /// 設成 excerpt 寬度，確保即使 provider 未照 MoveEndpointByUnit 收斂，
+    /// 回傳的仍是「從 range 起點（caret 前緣）」起算的 caret 區段，不會被 cap_tail 從尾端截掉。
+    const GET_TEXT_CAP: i32 = CONTEXT_CHARS * 2;
     /// ValuePattern 整欄值 fallback 的字元上限（隱私 / 成本保護）。
     const MAX_VALUE_CHARS: usize = 600;
     /// 單次 UIA 讀取 timeout，需小於前端輪詢間隔（500ms），避免阻塞 command thread。
@@ -375,17 +377,24 @@ mod windows_impl {
             return Ok(None);
         }
 
+        // 由「呼叫端」在所有路徑（成功 / 逾時 / 送出失敗）後清掉 IN_FLIGHT，
+        // 不依賴 worker 清旗標：若某次 UIA 呼叫永久卡死、worker 回不來，
+        // 旗標才不會永久卡 true 而使功能靜默失效。每次呼叫各有獨立 oneshot
+        // channel，卡死 worker 的遲到結果只會送進已 drop 的 receiver 而被丟棄。
+        let outcome = read_once(&sender);
+        IN_FLIGHT.store(false, Ordering::Release);
+        Ok(outcome)
+    }
+
+    /// 送一次讀取請求並等 `READ_TIMEOUT_MS`；逾時 / 送出失敗一律回 `None`。
+    fn read_once(sender: &SyncSender<RespTx>) -> Option<String> {
         let (resp_tx, resp_rx) = sync_channel::<Option<String>>(1);
         if sender.try_send(resp_tx).is_err() {
-            IN_FLIGHT.store(false, Ordering::Release);
-            return Ok(None);
+            return None;
         }
-
-        match resp_rx.recv_timeout(Duration::from_millis(READ_TIMEOUT_MS)) {
-            Ok(opt) => Ok(opt),
-            // 逾時：worker 仍在處理，完成後會自行把 IN_FLIGHT 設回 false。
-            Err(_) => Ok(None),
-        }
+        resp_rx
+            .recv_timeout(Duration::from_millis(READ_TIMEOUT_MS))
+            .unwrap_or(None)
     }
 
     fn worker_sender() -> Option<SyncSender<RespTx>> {
@@ -432,9 +441,8 @@ mod windows_impl {
 
         while let Ok(resp_tx) = req_rx.recv() {
             let result = read_excerpt(&automation);
-            // 即使呼叫端已逾時離開（receiver 被 drop）也不阻塞。
+            // 即使呼叫端已逾時離開（receiver 被 drop）也不阻塞；IN_FLIGHT 由呼叫端清。
             let _ = resp_tx.try_send(result);
-            IN_FLIGHT.store(false, Ordering::Release);
         }
 
         unsafe { CoUninitialize() };
@@ -443,6 +451,11 @@ mod windows_impl {
     /// 讀取目前聚焦元素游標附近文字。全程在 worker 執行緒上跑。
     fn read_excerpt(automation: &IUIAutomation) -> Option<String> {
         let element = unsafe { automation.GetFocusedElement() }.ok()?;
+
+        // 隱私保護：聚焦在密碼 / 受保護欄位時不讀取，避免把密碼 / token / API key 送 LLM。
+        if is_password_element(&element) {
+            return None;
+        }
 
         // 1) 優先：TextPattern 游標附近 excerpt（涵蓋 contenteditable，如 Teams / 文件編輯器）。
         if let Some(text) = read_via_text_pattern(&element) {
@@ -461,6 +474,13 @@ mod windows_impl {
         }
 
         None
+    }
+
+    /// 聚焦元素是否為密碼 / 受保護欄位（讀不到屬性時保守視為「否」以免誤關功能）。
+    fn is_password_element(element: &IUIAutomationElement) -> bool {
+        unsafe { element.CurrentIsPassword() }
+            .map(|b| b.as_bool())
+            .unwrap_or(false)
     }
 
     fn read_via_text_pattern(element: &IUIAutomationElement) -> Option<String> {
