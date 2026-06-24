@@ -1,6 +1,8 @@
 /// 讀取當前 focused text field 游標附近的文字。
-/// macOS: 透過 AXUIElement Accessibility API
-/// Windows: 目前為 no-op placeholder（後續補上 UI Automation）
+/// macOS: 透過 AXUIElement Accessibility API。
+/// Windows: 透過 UI Automation（IUIAutomation + TextPattern/ValuePattern，跑在專用 MTA 執行緒）。
+///
+/// 契約：回傳「游標附近、有上限」的文字（非整份文件）；讀不到一律回 `Ok(None)`。
 #[tauri::command]
 pub fn read_focused_text_field() -> Result<Option<String>, String> {
     #[cfg(target_os = "macos")]
@@ -10,8 +12,7 @@ pub fn read_focused_text_field() -> Result<Option<String>, String> {
 
     #[cfg(target_os = "windows")]
     {
-        // Windows UI Automation 實作延後，先回傳 None
-        Ok(None)
+        windows_impl::read_focused_text_field_impl()
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
@@ -320,6 +321,243 @@ mod macos {
             assert!(is_text_input_role("AXWebArea"));
             assert!(!is_text_input_role("AXButton"));
             assert!(!is_text_input_role("AXStaticText"));
+        }
+    }
+}
+
+// ========== Windows: UI Automation ==========
+
+#[cfg(target_os = "windows")]
+mod windows_impl {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
+    use std::sync::{Mutex, OnceLock};
+    use std::time::Duration;
+
+    use windows::core::BOOL;
+    use windows::Win32::System::Com::{
+        CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_MULTITHREADED,
+    };
+    use windows::Win32::UI::Accessibility::{
+        CUIAutomation, IUIAutomation, IUIAutomationElement, IUIAutomationTextPattern,
+        IUIAutomationTextPattern2, IUIAutomationTextRange, IUIAutomationValuePattern,
+        TextPatternRangeEndpoint_End, TextPatternRangeEndpoint_Start, TextUnit_Character,
+        UIA_TextPattern2Id, UIA_TextPatternId, UIA_ValuePatternId,
+    };
+
+    /// 游標前後各取的字數（對齊 macOS CONTEXT_CHARS）。
+    const CONTEXT_CHARS: i32 = 50;
+    /// GetText 硬上限，避免異常 provider 回傳整份文件。
+    const GET_TEXT_CAP: i32 = 512;
+    /// ValuePattern 整欄值 fallback 的字元上限（隱私 / 成本保護）。
+    const MAX_VALUE_CHARS: usize = 600;
+    /// 單次 UIA 讀取 timeout，需小於前端輪詢間隔（500ms），避免阻塞 command thread。
+    const READ_TIMEOUT_MS: u64 = 250;
+
+    type RespTx = SyncSender<Option<String>>;
+
+    static IN_FLIGHT: AtomicBool = AtomicBool::new(false);
+    static WORKER: OnceLock<Option<Mutex<SyncSender<RespTx>>>> = OnceLock::new();
+
+    /// 入口：把讀取請求送到專用 UIA 執行緒，最多等 `READ_TIMEOUT_MS`。
+    /// 任何失敗 / 逾時 / 忙碌一律回 `Ok(None)`（與 macOS 一致，靜默降級）。
+    ///
+    /// 契約：回傳游標附近「有上限」的文字（TextPattern excerpt ≤ ~100 字，
+    /// 或 ValuePattern 整欄值 ≤ `MAX_VALUE_CHARS` 字），絕不回傳整份文件。
+    pub fn read_focused_text_field_impl() -> Result<Option<String>, String> {
+        let sender = match worker_sender() {
+            Some(s) => s,
+            None => return Ok(None),
+        };
+
+        // single-flight：已有讀取進行中就放棄這次，避免輪詢呼叫堆疊阻塞。
+        if IN_FLIGHT.swap(true, Ordering::AcqRel) {
+            return Ok(None);
+        }
+
+        let (resp_tx, resp_rx) = sync_channel::<Option<String>>(1);
+        if sender.try_send(resp_tx).is_err() {
+            IN_FLIGHT.store(false, Ordering::Release);
+            return Ok(None);
+        }
+
+        match resp_rx.recv_timeout(Duration::from_millis(READ_TIMEOUT_MS)) {
+            Ok(opt) => Ok(opt),
+            // 逾時：worker 仍在處理，完成後會自行把 IN_FLIGHT 設回 false。
+            Err(_) => Ok(None),
+        }
+    }
+
+    fn worker_sender() -> Option<SyncSender<RespTx>> {
+        let cell = WORKER.get_or_init(spawn_worker);
+        let mutex = cell.as_ref()?;
+        let guard = mutex.lock().ok()?;
+        Some(guard.clone())
+    }
+
+    /// 啟動長壽 MTA 執行緒，內含快取的 `IUIAutomation`。
+    /// 回傳 `None` 代表 COM / UIA 初始化失敗（此平台功能等同 no-op）。
+    fn spawn_worker() -> Option<Mutex<SyncSender<RespTx>>> {
+        let (req_tx, req_rx) = sync_channel::<RespTx>(1);
+        let (ready_tx, ready_rx) = sync_channel::<bool>(0);
+
+        std::thread::Builder::new()
+            .name("uia-reader".into())
+            .spawn(move || worker_loop(req_rx, ready_tx))
+            .ok()?;
+
+        match ready_rx.recv() {
+            Ok(true) => Some(Mutex::new(req_tx)),
+            _ => None,
+        }
+    }
+
+    fn worker_loop(req_rx: Receiver<RespTx>, ready_tx: SyncSender<bool>) {
+        // 此執行緒專用 MTA COM，存活整個 process 生命週期；COM 物件不跨執行緒傳遞。
+        unsafe {
+            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        }
+
+        let automation: IUIAutomation =
+            match unsafe { CoCreateInstance(&CUIAutomation, None, CLSCTX_ALL) } {
+                Ok(a) => a,
+                Err(_) => {
+                    let _ = ready_tx.send(false);
+                    unsafe { CoUninitialize() };
+                    return;
+                }
+            };
+
+        let _ = ready_tx.send(true);
+
+        while let Ok(resp_tx) = req_rx.recv() {
+            let result = read_excerpt(&automation);
+            // 即使呼叫端已逾時離開（receiver 被 drop）也不阻塞。
+            let _ = resp_tx.try_send(result);
+            IN_FLIGHT.store(false, Ordering::Release);
+        }
+
+        unsafe { CoUninitialize() };
+    }
+
+    /// 讀取目前聚焦元素游標附近文字。全程在 worker 執行緒上跑。
+    fn read_excerpt(automation: &IUIAutomation) -> Option<String> {
+        let element = unsafe { automation.GetFocusedElement() }.ok()?;
+
+        // 1) 優先：TextPattern 游標附近 excerpt（涵蓋 contenteditable，如 Teams / 文件編輯器）。
+        if let Some(text) = read_via_text_pattern(&element) {
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                return Some(cap_tail(trimmed, (CONTEXT_CHARS as usize) * 2));
+            }
+        }
+
+        // 2) Fallback：ValuePattern 整欄值（涵蓋原生 input / textarea），capped。
+        if let Some(text) = read_via_value_pattern(&element) {
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                return Some(cap_tail(trimmed, MAX_VALUE_CHARS));
+            }
+        }
+
+        None
+    }
+
+    fn read_via_text_pattern(element: &IUIAutomationElement) -> Option<String> {
+        let range = caret_range(element)?;
+        unsafe {
+            let _ = range.MoveEndpointByUnit(
+                TextPatternRangeEndpoint_Start,
+                TextUnit_Character,
+                -CONTEXT_CHARS,
+            );
+            let _ = range.MoveEndpointByUnit(
+                TextPatternRangeEndpoint_End,
+                TextUnit_Character,
+                CONTEXT_CHARS,
+            );
+            let bstr = range.GetText(GET_TEXT_CAP).ok()?;
+            Some(bstr.to_string())
+        }
+    }
+
+    /// 取得游標 range：先試 `TextPattern2.GetCaretRange`，再 fallback 到 `TextPattern.GetSelection()[0]`。
+    fn caret_range(element: &IUIAutomationElement) -> Option<IUIAutomationTextRange> {
+        unsafe {
+            if let Ok(tp2) =
+                element.GetCurrentPatternAs::<IUIAutomationTextPattern2>(UIA_TextPattern2Id)
+            {
+                let mut is_active = BOOL(0);
+                if let Ok(range) = tp2.GetCaretRange(&mut is_active) {
+                    return Some(range);
+                }
+            }
+
+            if let Ok(tp) =
+                element.GetCurrentPatternAs::<IUIAutomationTextPattern>(UIA_TextPatternId)
+            {
+                if let Ok(selection) = tp.GetSelection() {
+                    if matches!(selection.Length(), Ok(len) if len > 0) {
+                        if let Ok(range) = selection.GetElement(0) {
+                            return Some(range);
+                        }
+                    }
+                }
+            }
+
+            None
+        }
+    }
+
+    fn read_via_value_pattern(element: &IUIAutomationElement) -> Option<String> {
+        unsafe {
+            let value_pattern = element
+                .GetCurrentPatternAs::<IUIAutomationValuePattern>(UIA_ValuePatternId)
+                .ok()?;
+            let bstr = value_pattern.CurrentValue().ok()?;
+            Some(bstr.to_string())
+        }
+    }
+
+    /// 取字串末尾最多 `max` 個字元（以 char 計，CJK 安全）。
+    fn cap_tail(s: &str, max: usize) -> String {
+        let chars: Vec<char> = s.chars().collect();
+        if chars.len() <= max {
+            s.to_string()
+        } else {
+            chars[chars.len() - max..].iter().collect()
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::cap_tail;
+
+        #[test]
+        fn test_cap_tail_shorter_than_max() {
+            assert_eq!(cap_tail("hello", 10), "hello");
+        }
+
+        #[test]
+        fn test_cap_tail_equal_to_max() {
+            assert_eq!(cap_tail("hello", 5), "hello");
+        }
+
+        #[test]
+        fn test_cap_tail_keeps_tail() {
+            assert_eq!(cap_tail("abcdefghij", 3), "hij");
+        }
+
+        #[test]
+        fn test_cap_tail_cjk() {
+            let s = "這是一段中文測試文字";
+            assert_eq!(cap_tail(s, 4), "測試文字");
+            assert_eq!(cap_tail(s, 4).chars().count(), 4);
+        }
+
+        #[test]
+        fn test_cap_tail_empty() {
+            assert_eq!(cap_tail("", 5), "");
         }
     }
 }
