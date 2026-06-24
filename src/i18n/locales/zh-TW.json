@@ -255,6 +255,7 @@
     "description": "字典詞彙會在語音辨識時提供給 AI，提升專有名詞與術語的辨識準確度。",
     "weightDescription": "每次語音辨識時，系統會將權重最高的前 {limit} 個詞彙加入 AI 辨識提示。當 AI 偵測到你重複修正同一個詞時，該詞的權重會自動提升。",
     "noAiSuggestions": "尚無 AI 推薦詞彙，啟用智慧字典學習後系統會自動學習",
+    "noAiSuggestionsEnabled": "智慧字典學習已啟用，當你修正轉錄文字時系統會自動學習新詞",
     "aiTermCount": "{count} 個詞"
   },
   "accessibility": {
