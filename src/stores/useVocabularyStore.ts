@@ -213,8 +213,11 @@ export const useVocabularyStore = defineStore("vocabulary", () => {
       });
     }
 
+    // 不使用顯式交易：tauri-plugin-sql 連線池無連線親和性，跨 execute()
+    // 呼叫的 BEGIN/COMMIT 會落在不同連線而失敗
+    // （cannot commit - no transaction is active）。改為逐筆 autocommit；
+    // 已先 fetchTermList 去重 + term UNIQUE + 新 UUID，部分失敗可重新匯入恢復。
     try {
-      await db.execute("BEGIN TRANSACTION");
       for (const entry of entries) {
         const key = entry.term.toLowerCase();
         const existing = existingByTerm.get(key);
@@ -228,23 +231,17 @@ export const useVocabularyStore = defineStore("vocabulary", () => {
           existingByTerm.set(key, { id, weight: entry.weight });
           result.added += 1;
         } else if (entry.weight > existing.weight) {
-          await db.execute(
-            "UPDATE vocabulary SET weight = $1 WHERE id = $2",
-            [entry.weight, existing.id],
-          );
+          await db.execute("UPDATE vocabulary SET weight = $1 WHERE id = $2", [
+            entry.weight,
+            existing.id,
+          ]);
           existing.weight = entry.weight;
           result.merged += 1;
         } else {
           result.skipped += 1;
         }
       }
-      await db.execute("COMMIT");
     } catch (error) {
-      try {
-        await db.execute("ROLLBACK");
-      } catch {
-        // 忽略 rollback 失敗
-      }
       console.error(
         `[vocabulary-store] importEntries failed: ${extractErrorMessage(error)}`,
       );

@@ -273,7 +273,7 @@ describe("useVocabularyStore", () => {
       expect(mockDbExecute).not.toHaveBeenCalled();
     });
 
-    it("不存在的詞 → 以 weight/source 新增（包在交易內）", async () => {
+    it("不存在的詞 → 以 weight/source 新增", async () => {
       // 第一個 select = 現有詞條（空），後續 fetchTermList 用預設 []
       mockDbSelect.mockResolvedValueOnce([]);
 
@@ -289,9 +289,10 @@ describe("useVocabularyStore", () => {
 
       expect(result).toEqual({ added: 2, merged: 0, skipped: 0 });
 
+      // 連線池無連線親和性：不可再以獨立 execute 發出 BEGIN/COMMIT
       const sqlCalls = mockDbExecute.mock.calls.map((c) => c[0] as string);
-      expect(sqlCalls[0]).toBe("BEGIN TRANSACTION");
-      expect(sqlCalls[sqlCalls.length - 1]).toBe("COMMIT");
+      expect(sqlCalls).not.toContain("BEGIN TRANSACTION");
+      expect(sqlCalls).not.toContain("COMMIT");
       const insertCalls = mockDbExecute.mock.calls.filter((c) =>
         (c[0] as string).includes("INSERT INTO vocabulary"),
       );
@@ -346,12 +347,10 @@ describe("useVocabularyStore", () => {
       expect(result).toEqual({ added: 0, merged: 1, skipped: 0 });
     });
 
-    it("DB 失敗時 ROLLBACK 並拋錯", async () => {
+    it("DB 失敗時拋錯（不再依賴 ROLLBACK）", async () => {
       mockDbSelect.mockResolvedValueOnce([]);
-      // BEGIN 成功，INSERT 失敗
-      mockDbExecute
-        .mockResolvedValueOnce(undefined) // BEGIN
-        .mockRejectedValueOnce(new Error("disk full")); // INSERT
+      // 第一個 execute 即 INSERT（不再有 BEGIN），令其失敗
+      mockDbExecute.mockRejectedValueOnce(new Error("disk full")); // INSERT
 
       const { useVocabularyStore } = await import(
         "../../src/stores/useVocabularyStore"
@@ -363,7 +362,7 @@ describe("useVocabularyStore", () => {
       ).rejects.toThrow();
 
       const sqlCalls = mockDbExecute.mock.calls.map((c) => c[0] as string);
-      expect(sqlCalls).toContain("ROLLBACK");
+      expect(sqlCalls).not.toContain("ROLLBACK");
     });
   });
 });
