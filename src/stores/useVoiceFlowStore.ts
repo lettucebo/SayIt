@@ -590,18 +590,28 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
                     );
                     return;
                   }
-                  if (fieldText.includes(pastedText)) {
+                  // fieldText 為游標附近的「excerpt」（非整欄文字），故需雙向比對：
+                  // 整欄仍含 pasted（短輸入）→ includes；或 excerpt 是 pasted 的子字串（長輸入未改）→ 反向 includes。
+                  const trimmedField = fieldText.trim();
+                  if (
+                    fieldText.includes(pastedText) ||
+                    pastedText.includes(trimmedField)
+                  ) {
                     writeInfoLog(
                       "[correction] text unchanged — skipping analysis",
                     );
                     return;
                   }
 
-                  // 相似度檢查：如果 corrected 跟 original 完全無關（AX 讀到錯的東西），跳過
-                  const overlapCharCount = [...pastedText].filter((ch) =>
-                    fieldText.includes(ch),
+                  // 相似度檢查：以 excerpt 為基準（excerpt 多數字元應來自 pasted 區域）。
+                  // 若 excerpt 與 pasted 幾乎無關（AX/UIA 讀到錯的欄位），跳過。
+                  const overlapCharCount = [...trimmedField].filter((ch) =>
+                    pastedText.includes(ch),
                   ).length;
-                  const overlapRatio = overlapCharCount / pastedText.length;
+                  const overlapRatio =
+                    trimmedField.length > 0
+                      ? overlapCharCount / trimmedField.length
+                      : 0;
                   if (overlapRatio < 0.3) {
                     writeInfoLog(
                       `[correction] field text unrelated to original (overlap=${Math.round(overlapRatio * 100)}%) — skipping analysis`,
