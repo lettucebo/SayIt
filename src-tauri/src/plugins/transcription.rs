@@ -180,7 +180,7 @@ async fn send_transcription_request(
         None => (GROQ_API_URL.to_string(), true, true),
     };
 
-    println!(
+    log::info!(
         "[transcription] Sending {} bytes WAV to {} (model={})",
         wav_data.len(),
         if azure.is_some() { "Azure" } else { "Groq" },
@@ -262,7 +262,7 @@ async fn send_transcription_request(
 
     let transcription_duration_ms = start_time.elapsed().as_secs_f64() * 1000.0;
 
-    println!(
+    log::info!(
         "[transcription] Response in {transcription_duration_ms:.0}ms: \"{raw_text}\" (noSpeechProb={no_speech_probability:.3})"
     );
 
@@ -343,7 +343,7 @@ pub async fn retranscribe_from_file(
     let wav_data = std::fs::read(&file_path)
         .map_err(|e| TranscriptionError::RequestFailed(format!("Failed to read WAV file: {e}")))?;
 
-    println!(
+    log::info!(
         "[transcription] Retranscribing from file: {} ({} bytes)",
         file_path,
         wav_data.len()

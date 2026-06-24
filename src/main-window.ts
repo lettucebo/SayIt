@@ -14,6 +14,10 @@ import {
 import { extractErrorMessage } from "./lib/errorUtils";
 import { initSentryForDashboard, captureError } from "./lib/sentry";
 import { useSettingsStore } from "./stores/useSettingsStore";
+import {
+  installConsoleForwarding,
+  setFileLoggingEnabled,
+} from "./lib/logger";
 import i18n from "./i18n";
 import "./style.css";
 
@@ -21,6 +25,9 @@ import "./style.css";
 document.addEventListener("contextmenu", (e) => e.preventDefault());
 
 async function bootstrap() {
+  // 最早期安裝 console → plugin-log 轉送，涵蓋之後所有 console 輸出
+  installConsoleForwarding();
+
   const pinia = createPinia();
   const app = createApp(MainApp);
 
@@ -50,10 +57,6 @@ async function bootstrap() {
     console.error("[main-window] Database init failed:", message);
     captureError(err, { source: "database-init" });
     setDatabaseInitError(message);
-    await invoke("debug_log", {
-      level: "error",
-      message: `Database init failed: ${message}`,
-    });
   }
 
   app.mount("#app");
@@ -61,6 +64,8 @@ async function bootstrap() {
 
   const settingsStore = useSettingsStore();
   await settingsStore.loadSettings();
+  // 套用持久化的檔案 Log 開關到 Rust（即時生效）
+  await setFileLoggingEnabled(settingsStore.isDebugLogEnabled);
   await settingsStore.consumeUpgradeNotice();
   await settingsStore.initializeAutoStart();
 
@@ -103,6 +108,30 @@ async function bootstrap() {
       })();
     });
   }
+
+  // 除錯 Log 自動清理（背景執行，不阻斷啟動）。
+  // 不論目前是否開啟記錄都清理，確保停用後舊 log 仍會依保留天數刪除。
+  queueMicrotask(() => {
+    void (async () => {
+      try {
+        const days = settingsStore.debugLogRetentionDays;
+        const deletedList = await invoke<string[]>("cleanup_old_logs", {
+          days,
+        });
+        if (deletedList.length > 0) {
+          console.log(
+            `[main-window] Auto cleanup: removed ${deletedList.length} old log files (>${days} days)`,
+          );
+        }
+      } catch (err) {
+        console.error(
+          "[main-window] Log auto cleanup failed:",
+          extractErrorMessage(err),
+        );
+        captureError(err, { source: "log-auto-cleanup" });
+      }
+    })();
+  });
 
   // 更新檢查由 MainApp.vue onMounted 的 autoCheckAndDownload() 處理
   console.log("[main-window] Dashboard initialized");

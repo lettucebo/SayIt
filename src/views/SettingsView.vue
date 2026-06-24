@@ -99,9 +99,11 @@ import {
 } from "@/components/ui/alert-dialog";
 import {
   AtSign,
+  Bug,
   CircleAlert,
   Download,
   Facebook,
+  FolderOpen,
   Github,
   Globe,
   Instagram,
@@ -111,6 +113,7 @@ import {
   Trash2,
   Upload,
 } from "lucide-vue-next";
+import { openLogFolder } from "../lib/logger";
 import type { AudioInputDeviceInfo } from "../types/audio";
 import { useAudioPreview } from "../composables/useAudioPreview";
 import ConnectionTestButton from "../components/ConnectionTestButton.vue";
@@ -939,6 +942,51 @@ async function handleDeleteAllRecordings() {
   }
 }
 
+// ── 進階：除錯記錄（Debug Log）────────────────────────────────
+const debugLogFeedback = useFeedbackMessage();
+const debugLogEnabled = ref(false);
+const debugLogRetentionDays = ref(7);
+
+async function handleToggleDebugLog() {
+  debugLogEnabled.value = !debugLogEnabled.value;
+  try {
+    await settingsStore.saveDebugLog(
+      debugLogEnabled.value,
+      debugLogRetentionDays.value,
+    );
+    debugLogFeedback.show(
+      "success",
+      debugLogEnabled.value
+        ? t("settings.debugLog.enabledMessage")
+        : t("settings.debugLog.disabledMessage"),
+    );
+  } catch (err) {
+    debugLogEnabled.value = !debugLogEnabled.value;
+    debugLogFeedback.show("error", extractErrorMessage(err));
+  }
+}
+
+async function handleSaveDebugLogDays() {
+  try {
+    await settingsStore.saveDebugLog(
+      debugLogEnabled.value,
+      debugLogRetentionDays.value,
+    );
+    debugLogRetentionDays.value = settingsStore.debugLogRetentionDays;
+    debugLogFeedback.show("success", t("settings.debugLog.daysSaved"));
+  } catch (err) {
+    debugLogFeedback.show("error", extractErrorMessage(err));
+  }
+}
+
+async function handleOpenLogFolder() {
+  try {
+    await openLogFolder();
+  } catch (err) {
+    debugLogFeedback.show("error", extractErrorMessage(err));
+  }
+}
+
 // ── 應用程式 ────────────────────────────────────────────────
 const autoStartFeedback = useFeedbackMessage();
 const isTogglingAutoStart = ref(false);
@@ -1084,6 +1132,8 @@ function resyncLocalInputsFromStore() {
   recordingAutoCleanupEnabled.value =
     settingsStore.isRecordingAutoCleanupEnabled;
   recordingAutoCleanupDays.value = settingsStore.recordingAutoCleanupDays;
+  debugLogEnabled.value = settingsStore.isDebugLogEnabled;
+  debugLogRetentionDays.value = settingsStore.debugLogRetentionDays;
   const currentKey = settingsStore.hotkeyConfig?.triggerKey;
   isCustomMode.value = !!(
     currentKey &&
@@ -1327,6 +1377,8 @@ onMounted(async () => {
   recordingAutoCleanupEnabled.value =
     settingsStore.isRecordingAutoCleanupEnabled;
   recordingAutoCleanupDays.value = settingsStore.recordingAutoCleanupDays;
+  debugLogEnabled.value = settingsStore.isDebugLogEnabled;
+  debugLogRetentionDays.value = settingsStore.debugLogRetentionDays;
   await settingsStore.loadAutoStartStatus();
 
   // Detect if current key is custom or combo
@@ -1352,6 +1404,7 @@ onBeforeUnmount(() => {
   autoStartFeedback.clearTimer();
   smartDictionaryFeedback.clearTimer();
   recordingCleanupFeedback.clearTimer();
+  debugLogFeedback.clearTimer();
   providerFeedback.clearTimer();
   azureFeedback.clearTimer();
   backupFeedback.clearTimer();
@@ -2876,6 +2929,69 @@ onBeforeUnmount(() => {
             "
           >
             {{ backupFeedback.message.value }}
+          </p>
+        </transition>
+      </CardContent>
+    </Card>
+
+    <!-- 進階：除錯記錄（Debug Log）-->
+    <Card>
+      <CardHeader class="border-b border-border">
+        <CardTitle class="text-base flex items-center gap-2">
+          <Bug class="h-4 w-4" />
+          {{ $t("settings.debugLog.title") }}
+        </CardTitle>
+      </CardHeader>
+      <CardContent class="space-y-4">
+        <p class="text-sm text-muted-foreground leading-relaxed">
+          {{ $t("settings.debugLog.description") }}
+        </p>
+
+        <div class="flex items-center justify-between">
+          <div>
+            <Label for="debug-log-enabled">{{ $t("settings.debugLog.enable") }}</Label>
+            <p class="text-sm text-muted-foreground">{{ $t("settings.debugLog.enableDescription") }}</p>
+          </div>
+          <Switch
+            id="debug-log-enabled"
+            :model-value="debugLogEnabled"
+            @update:model-value="handleToggleDebugLog"
+          />
+        </div>
+
+        <div v-if="debugLogEnabled" class="flex items-center gap-3">
+          <Label for="debug-log-days">{{ $t("settings.debugLog.retentionDays") }}</Label>
+          <Input
+            id="debug-log-days"
+            v-model.number="debugLogRetentionDays"
+            type="number"
+            min="1"
+            class="w-24"
+          />
+          <span class="text-sm text-muted-foreground">{{ $t("settings.debugLog.daysUnit") }}</span>
+          <Button size="sm" @click="handleSaveDebugLogDays">
+            {{ $t("common.save") }}
+          </Button>
+        </div>
+
+        <div class="border-t border-border" />
+
+        <Button variant="outline" @click="handleOpenLogFolder">
+          <FolderOpen class="h-4 w-4 mr-2" />
+          {{ $t("settings.debugLog.openFolder") }}
+        </Button>
+
+        <transition name="feedback-fade">
+          <p
+            v-if="debugLogFeedback.message.value !== ''"
+            class="text-sm"
+            :class="
+              debugLogFeedback.type.value === 'success'
+                ? 'text-green-400'
+                : 'text-red-400'
+            "
+          >
+            {{ debugLogFeedback.message.value }}
           </p>
         </transition>
       </CardContent>

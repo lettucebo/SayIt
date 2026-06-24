@@ -2,8 +2,12 @@ import { createApp } from "vue";
 import { createPinia } from "pinia";
 import App from "./App.vue";
 import { initSentryForHud, captureError } from "./lib/sentry";
+import { installConsoleForwarding } from "./lib/logger";
 import i18n from "./i18n";
 import "./style.css";
+
+// 最早期安裝 console → plugin-log 轉送，涵蓋 HUD 之後所有 console 輸出
+installConsoleForwarding();
 
 const pinia = createPinia();
 const app = createApp(App);
