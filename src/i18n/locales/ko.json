@@ -233,7 +233,7 @@
     "dailyQuota": "오늘 남은 무료 할당량",
     "dailyQuotaDetail": "오늘 남은 무료 할당량 상세",
     "usageTrend": "일별 사용 추이",
-    "last30Days": "최근 30일",
+    "lastNDays": "최근 {days}일",
     "recentTranscriptions": "최근 전사",
     "viewAll": "전체 보기",
     "emptyState": "음성 입력을 시작하면 통계가 여기에 표시됩니다",

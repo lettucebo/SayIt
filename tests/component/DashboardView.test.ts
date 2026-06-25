@@ -45,6 +45,7 @@ function makeHistory(usage: Record<string, number> = {}) {
       },
     },
     dailyUsageTrendList: [],
+    usageTrendDays: 14,
     recentTranscriptionList: [],
     refreshDashboard: vi.fn().mockResolvedValue(undefined),
   };
