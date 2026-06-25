@@ -350,6 +350,7 @@
     "description": "Dictionary terms are provided to the AI during speech recognition to improve accuracy for proper nouns and technical terms.",
     "weightDescription": "During each speech recognition, the top {limit} terms by weight are included in the AI recognition prompt. When the AI detects you repeatedly correcting the same term, its weight increases automatically.",
     "noAiSuggestions": "No AI suggestions yet. Enable Smart Dictionary Learning to auto-learn new terms",
+    "noAiSuggestionsEnabled": "Smart Dictionary Learning is on. New terms are learned automatically when you correct a transcription",
     "aiTermCount": "{count} terms",
     "importHint": "Migrating from another tool (e.g. Typeless)? Import your wordlist (.txt/.csv/.json) from Settings → Backup & Restore."
   },

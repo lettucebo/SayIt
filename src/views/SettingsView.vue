@@ -2296,8 +2296,8 @@ onBeforeUnmount(() => {
       </CardContent>
     </Card>
 
-    <!-- 智慧字典學習（macOS only — Windows 尚未支援 text field 讀取） -->
-    <Card v-if="isMac">
+    <!-- 智慧字典學習（macOS: AXUIElement；Windows: UI Automation） -->
+    <Card>
       <CardHeader class="border-b border-border">
         <CardTitle class="text-base">{{ $t("settings.smartDictionary.title") }}</CardTitle>
       </CardHeader>

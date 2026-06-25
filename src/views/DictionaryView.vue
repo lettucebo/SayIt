@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useVocabularyStore } from "../stores/useVocabularyStore";
+import { useSettingsStore } from "../stores/useSettingsStore";
 import { extractErrorMessage } from "../lib/errorUtils";
 import { useFeedbackMessage } from "../composables/useFeedbackMessage";
 import { useI18n } from "vue-i18n";
@@ -20,6 +21,7 @@ import {
 import { captureError } from "../lib/sentry";
 
 const vocabularyStore = useVocabularyStore();
+const settingsStore = useSettingsStore();
 const { t, locale } = useI18n();
 
 const newTermInput = ref("");
@@ -188,7 +190,11 @@ onBeforeUnmount(() => {
             v-if="vocabularyStore.aiSuggestedTermList.length === 0"
             class="py-4 text-center text-sm text-muted-foreground"
           >
-            {{ $t("dictionary.noAiSuggestions") }}
+            {{
+              settingsStore.isSmartDictionaryEnabled
+                ? $t("dictionary.noAiSuggestionsEnabled")
+                : $t("dictionary.noAiSuggestions")
+            }}
           </div>
           <Table v-else>
             <TableHeader>
