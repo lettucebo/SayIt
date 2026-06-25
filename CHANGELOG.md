@@ -2,6 +2,29 @@
 
 SayIt 版本更新紀錄。
 
+## [0.11.1] - 2026-06-25
+
+### Added
+
+- 每日使用趨勢圖優化：資料稀疏（最近只有少數幾天有使用）時，原本的趨勢圖會把僅有的 2 個資料點連成一條誤導性的斜線，且 X 軸出現重複日期標籤（例如連續三個 06/24）。改為把顯示區間內每一天都補成資料點（沒使用的天數補 0），並把區間從 30 天縮短為 14 天；X 軸刻度改落在實際日期上、自動隱藏重疊標籤；日期一律以本地時間對齊，避免 UTC 時區使用者看到差一天的標籤
+- Azure / Microsoft Foundry provider 支援：AI 整理（chat）走 Azure OpenAI v1 端點、語音轉錄（Whisper）走 deployments 端點，驗證可選 API Key 或 Entra ID（App Registration / client credentials）。Entra token 由 Rust 端取得以避開 WebView 跨來源限制（`AADSTS9002326`），scope 依 API 路徑自動選擇（v1 chat 用 `ai.azure.com`、Whisper 用 `cognitiveservices.azure.com`）。設定中新增獨立「Azure / Microsoft Foundry」連線卡，chat 與 whisper 共用同一組 endpoint 與憑證
+- 完整備份匯入匯出：可把設定與字典一次匯出成 `.sayit-backup` 檔（選用 PBKDF2 + AES-GCM 加密），並在另一台機器匯入還原。匯出會排除 API Key 等敏感欄位；匯入採原生檔案對話框選檔
+- 匯入外部字典檔：支援匯入 Typeless 等外部工具的字典檔，方便從其他工具遷移
+- 字典單檔匯入匯出：字典可單獨匯出／匯入一個檔案，與完整備份分開
+- Dashboard 計費用量顯示：對 OpenAI / Anthropic / Azure 等計費型 provider，卡片改顯示「當日實際用量」而非免費額度百分比；同時使用多個 provider 時於卡片內分列各自的計費用量
+- 選用的 debug 檔案紀錄：設定中可開啟把 log 寫入檔案，方便回報問題時提供診斷資訊，預設關閉
+
+### Fixed
+
+- 字典匯入造成既有字詞遺失的問題：根因是 tauri-plugin-sql 不保證連線親和性，跨 `execute` 呼叫的 `BEGIN`/`COMMIT` 交易可能落在沒有交易的連線上而失效。改為移除 migration 與字典匯入中的跨呼叫交易
+- 首次啟動偶發資料庫初始化失敗（HUD 與 Dashboard 兩視窗同時初始化 SQLite 的競態）：HUD 端的連線池存取改為等待 Dashboard migration 完成（`DATABASE_READY`）後才進行
+- Azure Foundry provider 在實際使用中的多項修正：修正 Entra token scope 應依 API 路徑（而非 endpoint host）選擇、憑證庫信任與錯誤訊息對應，讓 Foundry 串接能端到端正常運作
+
+### Improved
+
+- Dashboard 計費用量列依 code review 微調呈現
+- 字典頁移除與「完整備份」重複的匯出／匯入入口，避免使用者混淆
+
 ## [0.10.0] - 2026-05-08
 
 ### Added
