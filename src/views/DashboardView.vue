@@ -338,7 +338,7 @@ onBeforeUnmount(() => {
     <Card class="mt-6">
       <CardHeader>
         <CardTitle class="text-base">{{ $t("dashboard.usageTrend") }}</CardTitle>
-        <CardDescription>{{ $t("dashboard.last30Days") }}</CardDescription>
+        <CardDescription>{{ $t("dashboard.lastNDays", { days: historyStore.usageTrendDays }) }}</CardDescription>
       </CardHeader>
       <CardContent>
         <DashboardUsageChart :data="historyStore.dailyUsageTrendList" />
