@@ -200,7 +200,7 @@
     "dailyQuota": "今日剩余免费额度",
     "dailyQuotaDetail": "今日剩余免费额度明细",
     "usageTrend": "每日使用趋势",
-    "last30Days": "最近 30 天",
+    "lastNDays": "最近 {days} 天",
     "recentTranscriptions": "最近转录",
     "viewAll": "查看全部",
     "emptyState": "开始使用语音输入，统计数据将在此显示",

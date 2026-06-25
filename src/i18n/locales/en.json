@@ -200,7 +200,7 @@
     "dailyQuota": "Daily Free Quota Remaining",
     "dailyQuotaDetail": "Daily Free Quota Details",
     "usageTrend": "Daily Usage Trend",
-    "last30Days": "Last 30 Days",
+    "lastNDays": "Last {days} Days",
     "recentTranscriptions": "Recent Transcriptions",
     "viewAll": "View All",
     "emptyState": "Start using voice input and your stats will appear here",
