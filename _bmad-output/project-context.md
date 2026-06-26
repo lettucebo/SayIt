@@ -671,7 +671,7 @@ src/
 
 **建構/簽署（CI/CD only）：**
 - **`TAURI_SIGNING_PRIVATE_KEY`** / **`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`** — Updater 簽署
-- **`APPLE_CERTIFICATE` 等 6 個** — Apple Code Signing（見 CLAUDE.md）
+- **`APPLE_CERTIFICATE` 等 6 個** — Apple Code Signing（見 AGENTS.md）
 
 **Sentry（CI/CD 注入，生產環境用）：**
 

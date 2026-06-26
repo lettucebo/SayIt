@@ -2,7 +2,7 @@
 
 > Frontend → Rust 的 Tauri Commands · Rust → Frontend 的 Tauri Events
 > 掃描日期：2026-05-08 · 版本：0.9.5
-> Authoritative source：`src-tauri/src/lib.rs:416-452` 的 `invoke_handler!` macro + `CLAUDE.md` IPC 契約表
+> Authoritative source：`src-tauri/src/lib.rs` 的 `generate_handler!` macro + `AGENTS.md` IPC 契約表
 
 ---
 
@@ -273,7 +273,7 @@ POST https://api.groq.com/openai/v1/audio/transcriptions
   └─ 若 command 用到，可加型別別名於 src/types/
 
 □ 文件
-  ├─ 更新 CLAUDE.md IPC 契約表
+  ├─ 更新 AGENTS.md IPC 契約表
   ├─ 更新 docs/api-contracts-backend.md
   └─ 用 tauri-reviewer subagent 審查兩端對齊
 ```

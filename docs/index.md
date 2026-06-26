@@ -91,7 +91,7 @@
 ### 4.1 規範性文件（authoritative · 必讀）
 
 - [`_bmad-output/project-context.md`](../_bmad-output/project-context.md) — **AI Agent 必讀規則 · 323 條**（最高優先）
-- [`CLAUDE.md`](../CLAUDE.md) — Claude Code 專案記憶、IPC 契約表、Hooks 設定
+- [`AGENTS.md`](../AGENTS.md) — AI Agent 唯一指南、IPC 契約表、Hooks 設定
 - [`_bmad-output/planning-artifacts/architecture.md`](../_bmad-output/planning-artifacts/architecture.md) — 架構決策（ADR）
 - [`_bmad-output/planning-artifacts/ux-ui-design-spec.md`](../_bmad-output/planning-artifacts/ux-ui-design-spec.md) — UI 設計規範
 - [`design.pen`](../design.pen) — Pencil MCP 設計稿（UI 實作前必讀）
@@ -130,7 +130,7 @@
 | 改 hotkey / paste 機制            | `architecture-backend.md` §4.1 / §4.4 + `_bmad-output/project-context.md` |
 | 發版                              | `deployment-guide.md` §四 + `scripts/release.sh`                      |
 | 看實作規則（323 條）              | `_bmad-output/project-context.md`                                     |
-| 看 IPC 契約表                     | `CLAUDE.md` §IPC 契約表（authoritative）                              |
+| 看 IPC 契約表                     | `AGENTS.md` §IPC 契約表（authoritative）                              |
 
 ---
 
@@ -158,7 +158,6 @@
 | ------------------------------------------------------------------- | ------------------------------------------------- |
 | `tauri.conf.json` CSP `connect-src` 缺 OpenAI / Anthropic           | 加入 `https://api.openai.com` + `https://api.anthropic.com` |
 | CI 沒跑 `cargo test`、`cargo clippy`、`eslint`                       | 加進 `ci.yml`                                     |
-| `CLAUDE.md` 開頭聲稱「261 條」，但 `project-context.md` 實為 323 條   | 同步數字                                          |
 | `addApiUsage` FK 失敗（787）偶發                                     | 調查 `transcriptions` 與 `api_usage` 寫入 race    |
 | autoUpdater 用 `window.confirm` 在 Tauri WKWebView 靜默忽略           | 改 in-app UI                                      |
 | `text_field_reader::read_selected_text` Fn-c 字元穿透（issue #25）   | 待修                                              |
