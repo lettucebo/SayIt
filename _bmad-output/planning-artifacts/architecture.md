@@ -520,7 +520,7 @@ async function processTranscription() {
 
 **All AI Agents MUST：**
 
-1. 嚴格遵循 CLAUDE.md 的命名規範（camelCase / PascalCase / UPPER_SNAKE_CASE / kebab-case）
+1. 嚴格遵循 AGENTS.md 的命名規範（camelCase / PascalCase / UPPER_SNAKE_CASE / kebab-case）
 2. 新增檔案前確認目錄歸屬（components/ vs views/ vs lib/ vs stores/）
 3. SQLite 欄位使用 snake_case，TypeScript 介面使用 camelCase，在 store action 中做映射
 4. Tauri Events 使用 `{domain}:{action}` kebab-case 命名

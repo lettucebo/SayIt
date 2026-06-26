@@ -80,7 +80,7 @@ jobs:
 
 ### 未來注意
 
-- 此 guard 是**硬規則**，CLAUDE.md 與 `_bmad-output/project-context.md` 都已記載「禁止移除」
+- 此 guard 是**硬規則**，AGENTS.md 與 `_bmad-output/project-context.md` 都已記載「禁止移除」
 - 若 GitHub 未來放寬 OIDC 對 fork PR 的限制，可重新評估是否解除 guard
 
 ## Alternatives Considered

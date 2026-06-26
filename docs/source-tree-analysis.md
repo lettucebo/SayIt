@@ -34,7 +34,7 @@ say-it/
 │   └── claude-code-review.yml
 ├── .claude/                # Claude Code skills + hooks 設定
 ├── design.pen              # Pencil MCP 設計稿（UI 實作前必讀）
-├── CLAUDE.md               # Claude Code 專案記憶檔
+├── AGENTS.md               # AI Agent 唯一指南（IPC 契約表 / Hooks / 發版）
 ├── CHANGELOG.md
 ├── README.md
 ├── package.json            # pnpm@10.28.2 / type=module

@@ -66,7 +66,7 @@ say-it/
 | 文件                                                     | 用途                                         |
 | -------------------------------------------------------- | -------------------------------------------- |
 | `_bmad-output/project-context.md`                        | 全部 AI Agent 實作規則（323 條）             |
-| `CLAUDE.md`                                              | Claude Code 專案記憶 + IPC 契約表 + Hook 設定 |
+| `AGENTS.md`                                              | AI Agent 唯一指南 + IPC 契約表 + Hook 設定 |
 | `_bmad-output/planning-artifacts/architecture.md`        | 架構決策（ADR）                              |
 | `_bmad-output/planning-artifacts/ux-ui-design-spec.md`   | UI 設計、色彩、元件規範                      |
 | `design.pen`                                             | Pencil MCP 設計稿（UI 實作前必讀）           |
