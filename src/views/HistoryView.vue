@@ -19,7 +19,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Search, ChevronDown, Copy, Check, Trash2, Play, Pause } from "lucide-vue-next";
+import { Search, ChevronDown, Copy, Check, Trash2, Play, Pause, RefreshCw, Sparkles, Loader2 } from "lucide-vue-next";
 import { captureError } from "../lib/sentry";
 
 const historyStore = useHistoryStore();
@@ -30,6 +30,8 @@ const copiedRecordId = ref<string | null>(null);
 const copiedRawRecordId = ref<string | null>(null);
 const sentinelRef = ref<HTMLElement | null>(null);
 const playingRecordId = ref<string | null>(null);
+const retryingId = ref<string | null>(null);
+const retryError = ref<{ id: string; key: string } | null>(null);
 let currentAudio: HTMLAudioElement | null = null;
 let currentBlobUrl: string | null = null;
 
@@ -145,6 +147,46 @@ async function handlePlayRecording(record: TranscriptionRecord) {
     cleanupAudio();
     playingRecordId.value = null;
     captureError(err, { source: "history-view", step: "play-recording" });
+  }
+}
+
+async function handleRetranscribe(record: TranscriptionRecord) {
+  if (retryingId.value) return;
+  retryingId.value = record.id;
+  retryError.value = null;
+  try {
+    const result = await historyStore.retranscribeRecord(record);
+    if (!result.ok) {
+      retryError.value = {
+        id: record.id,
+        key: result.errorKey ?? "history.retranscribeFailed",
+      };
+    }
+  } catch (err) {
+    captureError(err, { source: "history-view", step: "retranscribe" });
+    retryError.value = { id: record.id, key: "history.retranscribeFailed" };
+  } finally {
+    retryingId.value = null;
+  }
+}
+
+async function handleReEnhance(record: TranscriptionRecord) {
+  if (retryingId.value) return;
+  retryingId.value = record.id;
+  retryError.value = null;
+  try {
+    const result = await historyStore.reEnhanceRecord(record);
+    if (!result.ok) {
+      retryError.value = {
+        id: record.id,
+        key: result.errorKey ?? "history.reEnhanceFailed",
+      };
+    }
+  } catch (err) {
+    captureError(err, { source: "history-view", step: "reenhance" });
+    retryError.value = { id: record.id, key: "history.reEnhanceFailed" };
+  } finally {
+    retryingId.value = null;
   }
 }
 
@@ -341,6 +383,33 @@ onBeforeUnmount(() => {
 
               <!-- 操作按鈕 -->
               <div class="flex justify-end gap-2 mt-3">
+                <!-- 重新辨識：僅失敗紀錄，需錄音檔 -->
+                <Button
+                  v-if="record.status === 'failed'"
+                  variant="outline"
+                  size="sm"
+                  data-testid="retranscribe-button"
+                  :disabled="!record.audioFilePath || retryingId !== null"
+                  :title="record.audioFilePath ? $t('history.retranscribe') : $t('history.noRecordingFile')"
+                  @click.stop="handleRetranscribe(record)"
+                >
+                  <Loader2 v-if="retryingId === record.id" class="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                  <RefreshCw v-else class="h-3.5 w-3.5 mr-1.5" />
+                  {{ retryingId === record.id ? $t("history.retranscribing") : $t("history.retranscribe") }}
+                </Button>
+                <!-- 重新整理：成功但尚未整理且有原文 -->
+                <Button
+                  v-if="record.status === 'success' && !record.wasEnhanced && record.rawText.trim() !== ''"
+                  variant="outline"
+                  size="sm"
+                  data-testid="reenhance-button"
+                  :disabled="retryingId !== null"
+                  @click.stop="handleReEnhance(record)"
+                >
+                  <Loader2 v-if="retryingId === record.id" class="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                  <Sparkles v-else class="h-3.5 w-3.5 mr-1.5" />
+                  {{ retryingId === record.id ? $t("history.reEnhancing") : $t("history.reEnhance") }}
+                </Button>
                 <Button
                   variant="outline"
                   size="sm"
@@ -359,6 +428,14 @@ onBeforeUnmount(() => {
                   {{ $t("history.delete") }}
                 </Button>
               </div>
+              <!-- 重試錯誤訊息 -->
+              <p
+                v-if="retryError && retryError.id === record.id"
+                class="text-xs text-destructive text-right"
+                data-testid="retry-error"
+              >
+                {{ $t(retryError.key) }}
+              </p>
             </div>
           </div>
         </template>
