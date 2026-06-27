@@ -9,7 +9,7 @@
 set -uo pipefail
 
 INPUT=$(cat)
-FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
+FILE_PATH=$(printf '%s' "$INPUT" | sed -n 's/.*"file_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
 
 # 無 file_path → 靜默通過
 if [[ -z "$FILE_PATH" ]]; then
@@ -26,6 +26,9 @@ esac
 case "$FILE_PATH" in
   *.test.ts|*.spec.ts|*.d.ts) exit 0 ;;
 esac
+
+# 工具鏈不可用時靜默略過（例如 WSL bash 找不到 npx）
+command -v npx >/dev/null 2>&1 || exit 0
 
 # 執行 vue-tsc 型別檢查
 OUTPUT=$(npx vue-tsc --noEmit 2>&1 | head -30) || true

@@ -9,14 +9,16 @@
 set -euo pipefail
 
 INPUT=$(cat)
-FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
+FILE_PATH=$(printf '%s' "$INPUT" | sed -n 's/.*"file_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
 
 # 無 file_path → 靜默通過
 if [[ -z "$FILE_PATH" ]]; then
   exit 0
 fi
 
-BASENAME=$(basename "$FILE_PATH")
+# 取檔名（同時處理 / 與 \ 路徑分隔；Windows 路徑用反斜線）
+BASENAME=${FILE_PATH##*/}
+BASENAME=${BASENAME##*\\}
 
 # Lock 檔：hard block
 case "$BASENAME" in

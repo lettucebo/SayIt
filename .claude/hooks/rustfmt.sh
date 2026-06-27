@@ -9,7 +9,7 @@
 set -uo pipefail
 
 INPUT=$(cat)
-FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
+FILE_PATH=$(printf '%s' "$INPUT" | sed -n 's/.*"file_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
 
 # 無 file_path → 靜默通過
 if [[ -z "$FILE_PATH" ]]; then
@@ -26,6 +26,9 @@ esac
 if [[ ! -f "$FILE_PATH" ]]; then
   exit 0
 fi
+
+# 工具鏈不可用時靜默略過
+command -v rustfmt >/dev/null 2>&1 || exit 0
 
 # 執行 rustfmt
 OUTPUT=$(rustfmt "$FILE_PATH" 2>&1) || true

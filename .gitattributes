@@ -1,0 +1,3 @@
+# Keep shell scripts LF so bash hooks (.claude/hooks/*.sh) don't break on Windows.
+# core.autocrlf=true would otherwise convert LF->CRLF on checkout and crash bash.
+*.sh text eol=lf

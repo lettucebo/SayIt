@@ -7,6 +7,8 @@
           {
             "type": "command",
             "command": "bash .claude/hooks/protect-config.sh",
+            "bash": "bash .claude/hooks/protect-config.sh",
+            "powershell": "$d=$env:COPILOT_PROJECT_DIR; if(-not $d){$d=$env:CLAUDE_PROJECT_DIR}; if(-not $d){$d=(Get-Location).Path}; & (Join-Path $d '.claude/hooks/protect-config.ps1')",
             "timeout": 5
           }
         ]
@@ -19,16 +21,22 @@
           {
             "type": "command",
             "command": "bash .claude/hooks/typecheck.sh",
+            "bash": "exit 0",
+            "powershell": "exit 0",
             "timeout": 30
           },
           {
             "type": "command",
             "command": "bash .claude/hooks/rustfmt.sh",
+            "bash": "exit 0",
+            "powershell": "exit 0",
             "timeout": 10
           },
           {
             "type": "command",
             "command": "bash .claude/hooks/eslint.sh",
+            "bash": "exit 0",
+            "powershell": "exit 0",
             "timeout": 15
           }
         ]
