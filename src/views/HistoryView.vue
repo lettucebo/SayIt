@@ -389,7 +389,7 @@ onBeforeUnmount(() => {
                   variant="outline"
                   size="sm"
                   data-testid="retranscribe-button"
-                  :disabled="!record.audioFilePath || retryingId === record.id"
+                  :disabled="!record.audioFilePath || retryingId !== null"
                   :title="record.audioFilePath ? $t('history.retranscribe') : $t('history.noRecordingFile')"
                   @click.stop="handleRetranscribe(record)"
                 >
@@ -403,7 +403,7 @@ onBeforeUnmount(() => {
                   variant="outline"
                   size="sm"
                   data-testid="reenhance-button"
-                  :disabled="retryingId === record.id"
+                  :disabled="retryingId !== null"
                   @click.stop="handleReEnhance(record)"
                 >
                   <Loader2 v-if="retryingId === record.id" class="h-3.5 w-3.5 mr-1.5 animate-spin" />

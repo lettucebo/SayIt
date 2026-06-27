@@ -335,8 +335,7 @@
     "retranscribing": "Re-transcribing…",
     "reEnhancing": "Re-enhancing…",
     "retranscribeFailed": "Re-transcription failed, please try again",
-    "reEnhanceFailed": "Re-enhancement failed, please try again",
-    "retrySuccess": "Updated"
+    "reEnhanceFailed": "Re-enhancement failed, please try again"
   },
   "dictionary": {
     "termCount": "{count} terms",

@@ -189,7 +189,7 @@ export interface EnhanceWithGuardResult {
 /**
  * enhanceText 外加「增強後長度爆炸」防護：偵測到異常時最多重試 maxRetries 次，
  * 仍異常則 fallback 回 rawText 並標記 wasAnomalous=true。
- * 供 HUD 即時流程與歷史紀錄重新整理共用，確保兩端套用相同的異常防護。
+ * 目前由歷史紀錄重新整理使用；邏輯與 useVoiceFlowStore 即時流程的 inline 迴圈一致，未來可收斂共用。
  */
 export async function enhanceWithAnomalyGuard(
   rawText: string,

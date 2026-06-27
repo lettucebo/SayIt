@@ -160,4 +160,37 @@ describe("HistoryView 重試按鈕", () => {
     expect(historyState.reEnhanceRecord).toHaveBeenCalledTimes(1);
     expect(historyState.reEnhanceRecord).toHaveBeenCalledWith(record);
   });
+
+  it("[P2] 重試進行中切換展開到其他紀錄，其重試按鈕應 disabled（全域鎖）", async () => {
+    let resolveRetry: (v: { ok: boolean }) => void = () => {};
+    const recordA = createRecord({
+      id: "rec-A",
+      status: "failed",
+      audioFilePath: "C:/a.wav",
+    });
+    const recordB = createRecord({
+      id: "rec-B",
+      status: "failed",
+      audioFilePath: "C:/b.wav",
+    });
+    historyState = makeHistory([recordA, recordB]);
+    historyState.retranscribeRecord = vi.fn(
+      () => new Promise<{ ok: boolean }>((r) => (resolveRetry = r)),
+    );
+    const wrapper = mount(HistoryView, {
+      global: { plugins: [i18n], stubs: { Button: ButtonStub } },
+    });
+    // 展開 A 並觸發重試（pending）
+    await wrapper.findAll(".cursor-pointer")[0].trigger("click");
+    await wrapper.vm.$nextTick();
+    await wrapper.find('[data-testid="retranscribe-button"]').trigger("click");
+    await wrapper.vm.$nextTick();
+    // 切換展開到 B（A 收合）；B 的重試按鈕應因全域鎖 disabled
+    await wrapper.findAll(".cursor-pointer")[1].trigger("click");
+    await wrapper.vm.$nextTick();
+    const bButton = wrapper.find('[data-testid="retranscribe-button"]');
+    expect(bButton.exists()).toBe(true);
+    expect(bButton.attributes("disabled")).toBeDefined();
+    resolveRetry({ ok: true });
+  });
 });

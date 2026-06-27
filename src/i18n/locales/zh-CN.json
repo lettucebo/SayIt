@@ -335,8 +335,7 @@
     "retranscribing": "重新识别中…",
     "reEnhancing": "重新整理中…",
     "retranscribeFailed": "重新识别失败，请稍后再试",
-    "reEnhanceFailed": "重新整理失败，请稍后再试",
-    "retrySuccess": "已更新"
+    "reEnhanceFailed": "重新整理失败，请稍后再试"
   },
   "dictionary": {
     "termCount": "{count} 词汇",

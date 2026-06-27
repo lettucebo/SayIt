@@ -719,11 +719,14 @@ export const useHistoryStore = defineStore("history", () => {
 
     // 空轉錄或幻覺 → 保留 failed、不覆寫原文
     const isEmpty = !result.rawText || !result.rawText.trim();
-    const safeRecordingDurationMs =
-      record.recordingDurationMs > 0 ? record.recordingDurationMs : 0;
+    // 時長未知/非正時跳過語速異常層（無法判斷語速），仍保留能量/NSP 偵測
+    const recordingDurationForDetection =
+      record.recordingDurationMs > 0
+        ? record.recordingDurationMs
+        : Number.MAX_SAFE_INTEGER;
     const hallucination = detectHallucination({
       rawText: result.rawText,
-      recordingDurationMs: safeRecordingDurationMs,
+      recordingDurationMs: recordingDurationForDetection,
       peakEnergyLevel: result.peakEnergyLevel,
       rmsEnergyLevel: result.rmsEnergyLevel,
       noSpeechProbability: result.noSpeechProbability,

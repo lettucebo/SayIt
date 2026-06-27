@@ -171,6 +171,16 @@ describe("useHistoryStore retry", () => {
       expect(res.ok).toBe(false);
       expect(store.transcriptionList[0].status).toBe("failed");
     });
+
+    it("[P2] recordingDurationMs<=0 仍可成功（跳過語速異常層、保留能量/NSP）", async () => {
+      h.mockInvoke.mockResolvedValue(GOOD_TRANSCRIBE_RESULT);
+      const store = useHistoryStore();
+      const record = createRecord({ recordingDurationMs: 0 });
+      store.transcriptionList.push(record);
+      const res = await store.retranscribeRecord(record);
+      expect(res.ok).toBe(true);
+      expect(store.transcriptionList[0].status).toBe("success");
+    });
   });
 
   describe("reEnhanceRecord", () => {
