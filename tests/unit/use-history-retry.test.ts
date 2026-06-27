@@ -181,6 +181,26 @@ describe("useHistoryStore retry", () => {
       expect(res.ok).toBe(true);
       expect(store.transcriptionList[0].status).toBe("success");
     });
+
+    it("[P2] 已整理的成功紀錄重新辨識 → 清空整理、status 仍 success", async () => {
+      h.mockInvoke.mockResolvedValue(GOOD_TRANSCRIBE_RESULT);
+      const store = useHistoryStore();
+      const record = createRecord({
+        status: "success",
+        wasEnhanced: true,
+        processedText: "舊的整理結果",
+        rawText: "舊原文",
+      });
+      store.transcriptionList.push(record);
+      const res = await store.retranscribeRecord(record);
+      expect(res.ok).toBe(true);
+      expect(store.transcriptionList[0].status).toBe("success");
+      expect(store.transcriptionList[0].rawText).toBe(
+        GOOD_TRANSCRIBE_RESULT.rawText,
+      );
+      expect(store.transcriptionList[0].processedText).toBeNull();
+      expect(store.transcriptionList[0].wasEnhanced).toBe(false);
+    });
   });
 
   describe("reEnhanceRecord", () => {
@@ -232,6 +252,26 @@ describe("useHistoryStore retry", () => {
       expect(res.errorKey).toBe("history.reEnhanceFailed");
       expect(store.transcriptionList[0].wasEnhanced).toBe(false);
       expect(store.transcriptionList[0].processedText).toBeNull();
+    });
+
+    it("[P2] 已整理紀錄可再次重新整理（覆寫整理結果）", async () => {
+      h.mockEnhanceGuard.mockResolvedValue({
+        text: "新的整理結果。",
+        usage: null,
+        wasAnomalous: false,
+      });
+      const store = useHistoryStore();
+      const record = createRecord({
+        status: "success",
+        wasEnhanced: true,
+        processedText: "舊整理",
+        rawText: "原始口語內容",
+      });
+      store.transcriptionList.push(record);
+      const res = await store.reEnhanceRecord(record);
+      expect(res.ok).toBe(true);
+      expect(store.transcriptionList[0].processedText).toBe("新的整理結果。");
+      expect(store.transcriptionList[0].wasEnhanced).toBe(true);
     });
   });
 });

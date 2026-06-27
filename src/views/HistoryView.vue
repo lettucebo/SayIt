@@ -383,9 +383,8 @@ onBeforeUnmount(() => {
 
               <!-- 操作按鈕 -->
               <div class="flex justify-end gap-2 mt-3">
-                <!-- 重新辨識：僅失敗紀錄，需錄音檔 -->
+                <!-- 重新辨識：每筆皆可，需錄音檔 -->
                 <Button
-                  v-if="record.status === 'failed'"
                   variant="outline"
                   size="sm"
                   data-testid="retranscribe-button"
@@ -397,13 +396,12 @@ onBeforeUnmount(() => {
                   <RefreshCw v-else class="h-3.5 w-3.5 mr-1.5" />
                   {{ retryingId === record.id ? $t("history.retranscribing") : $t("history.retranscribe") }}
                 </Button>
-                <!-- 重新整理：成功但尚未整理且有原文 -->
+                <!-- 重新整理：每筆皆可，需原文 -->
                 <Button
-                  v-if="record.status === 'success' && !record.wasEnhanced && record.rawText.trim() !== ''"
                   variant="outline"
                   size="sm"
                   data-testid="reenhance-button"
-                  :disabled="retryingId !== null"
+                  :disabled="!record.rawText.trim() || retryingId !== null"
                   @click.stop="handleReEnhance(record)"
                 >
                   <Loader2 v-if="retryingId === record.id" class="h-3.5 w-3.5 mr-1.5 animate-spin" />

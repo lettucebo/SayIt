@@ -36,7 +36,7 @@ function createRecord(
     wasModified: null,
     createdAt: "",
     audioFilePath: "C:/rec/rec-1.wav",
-    status: "failed",
+    status: "success",
     isEditMode: false,
     editSourceText: null,
     ...overrides,
@@ -86,63 +86,64 @@ describe("HistoryView 重試按鈕", () => {
     vi.stubGlobal("IntersectionObserver", IOStub);
   });
 
-  it("[P1] 失敗紀錄（有錄音檔）顯示可用的重新辨識、不顯示重新整理", async () => {
-    const wrapper = await mountExpanded(
-      createRecord({ status: "failed", audioFilePath: "C:/rec/rec-1.wav" }),
-    );
-    const retranscribe = wrapper.find('[data-testid="retranscribe-button"]');
-    expect(retranscribe.exists()).toBe(true);
-    expect(retranscribe.attributes("disabled")).toBeUndefined();
-    expect(wrapper.find('[data-testid="reenhance-button"]').exists()).toBe(
-      false,
-    );
-  });
-
-  it("[P1] 失敗紀錄（無錄音檔）重新辨識 disabled", async () => {
-    const wrapper = await mountExpanded(
-      createRecord({ status: "failed", audioFilePath: null }),
-    );
-    const retranscribe = wrapper.find('[data-testid="retranscribe-button"]');
-    expect(retranscribe.exists()).toBe(true);
-    expect(retranscribe.attributes("disabled")).toBeDefined();
-  });
-
-  it("[P1] 成功但未整理且有原文 → 顯示重新整理、不顯示重新辨識", async () => {
-    const wrapper = await mountExpanded(
-      createRecord({
-        status: "success",
-        wasEnhanced: false,
-        rawText: "可整理的原文",
-      }),
-    );
-    expect(wrapper.find('[data-testid="reenhance-button"]').exists()).toBe(true);
-    expect(wrapper.find('[data-testid="retranscribe-button"]').exists()).toBe(
-      false,
-    );
-  });
-
-  it("[P2] 已整理的成功紀錄 → 兩顆重試按鈕都不顯示", async () => {
+  it("[P1] 每筆紀錄都顯示兩顆重試按鈕（含已整理的成功紀錄）", async () => {
     const wrapper = await mountExpanded(
       createRecord({
         status: "success",
         wasEnhanced: true,
         processedText: "整理後文字",
         rawText: "原文",
+        audioFilePath: "C:/rec/rec-1.wav",
       }),
     );
     expect(wrapper.find('[data-testid="retranscribe-button"]').exists()).toBe(
-      false,
+      true,
     );
-    expect(wrapper.find('[data-testid="reenhance-button"]').exists()).toBe(
-      false,
+    expect(wrapper.find('[data-testid="reenhance-button"]').exists()).toBe(true);
+  });
+
+  it("[P1] 有錄音檔與原文 → 兩顆皆可用（未 disabled）", async () => {
+    const wrapper = await mountExpanded(
+      createRecord({ audioFilePath: "C:/rec/rec-1.wav", rawText: "有原文" }),
     );
+    expect(
+      wrapper.find('[data-testid="retranscribe-button"]').attributes("disabled"),
+    ).toBeUndefined();
+    expect(
+      wrapper.find('[data-testid="reenhance-button"]').attributes("disabled"),
+    ).toBeUndefined();
+  });
+
+  it("[P1] 無錄音檔 → 重新辨識 disabled、重新整理仍可用", async () => {
+    const wrapper = await mountExpanded(
+      createRecord({ audioFilePath: null, rawText: "有原文" }),
+    );
+    expect(
+      wrapper.find('[data-testid="retranscribe-button"]').attributes("disabled"),
+    ).toBeDefined();
+    expect(
+      wrapper.find('[data-testid="reenhance-button"]').attributes("disabled"),
+    ).toBeUndefined();
+  });
+
+  it("[P1] 空原文 → 重新整理 disabled、重新辨識仍可用", async () => {
+    const wrapper = await mountExpanded(
+      createRecord({
+        status: "failed",
+        audioFilePath: "C:/rec/rec-1.wav",
+        rawText: "   ",
+      }),
+    );
+    expect(
+      wrapper.find('[data-testid="reenhance-button"]').attributes("disabled"),
+    ).toBeDefined();
+    expect(
+      wrapper.find('[data-testid="retranscribe-button"]').attributes("disabled"),
+    ).toBeUndefined();
   });
 
   it("[P1] 點擊重新辨識會呼叫 store.retranscribeRecord", async () => {
-    const record = createRecord({
-      status: "failed",
-      audioFilePath: "C:/rec/rec-1.wav",
-    });
+    const record = createRecord({ audioFilePath: "C:/rec/rec-1.wav" });
     const wrapper = await mountExpanded(record);
     await wrapper.find('[data-testid="retranscribe-button"]').trigger("click");
     expect(historyState.retranscribeRecord).toHaveBeenCalledTimes(1);
@@ -150,11 +151,7 @@ describe("HistoryView 重試按鈕", () => {
   });
 
   it("[P1] 點擊重新整理會呼叫 store.reEnhanceRecord", async () => {
-    const record = createRecord({
-      status: "success",
-      wasEnhanced: false,
-      rawText: "可整理的原文",
-    });
+    const record = createRecord({ rawText: "可整理的原文" });
     const wrapper = await mountExpanded(record);
     await wrapper.find('[data-testid="reenhance-button"]').trigger("click");
     expect(historyState.reEnhanceRecord).toHaveBeenCalledTimes(1);
@@ -165,12 +162,10 @@ describe("HistoryView 重試按鈕", () => {
     let resolveRetry: (v: { ok: boolean }) => void = () => {};
     const recordA = createRecord({
       id: "rec-A",
-      status: "failed",
       audioFilePath: "C:/a.wav",
     });
     const recordB = createRecord({
       id: "rec-B",
-      status: "failed",
       audioFilePath: "C:/b.wav",
     });
     historyState = makeHistory([recordA, recordB]);

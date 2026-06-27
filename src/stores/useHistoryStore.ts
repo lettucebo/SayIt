@@ -179,7 +179,7 @@ const UPDATE_ON_RETRANSCRIBE_SQL = `
       enhancement_duration_ms = NULL,
       was_enhanced = 0,
       char_count = $3
-  WHERE id = $4 AND status = 'failed'
+  WHERE id = $4
 `;
 
 const UPDATE_ON_REENHANCE_SQL = `
@@ -187,7 +187,7 @@ const UPDATE_ON_REENHANCE_SQL = `
   SET processed_text = $1,
       was_enhanced = 1,
       enhancement_duration_ms = $2
-  WHERE id = $3 AND status = 'success' AND was_enhanced = 0
+  WHERE id = $3
 `;
 
 const DELETE_API_USAGE_BY_TRANSCRIPTION_SQL = `
