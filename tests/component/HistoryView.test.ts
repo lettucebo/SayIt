@@ -158,16 +158,10 @@ describe("HistoryView 重試按鈕", () => {
     expect(historyState.reEnhanceRecord).toHaveBeenCalledWith(record);
   });
 
-  it("[P2] 重試進行中切換展開到其他紀錄，其重試按鈕應 disabled（全域鎖）", async () => {
+  it("[P2] 重試進行中，其他紀錄的重試按鈕應 disabled（全域鎖）", async () => {
     let resolveRetry: (v: { ok: boolean }) => void = () => {};
-    const recordA = createRecord({
-      id: "rec-A",
-      audioFilePath: "C:/a.wav",
-    });
-    const recordB = createRecord({
-      id: "rec-B",
-      audioFilePath: "C:/b.wav",
-    });
+    const recordA = createRecord({ id: "rec-A", audioFilePath: "C:/a.wav" });
+    const recordB = createRecord({ id: "rec-B", audioFilePath: "C:/b.wav" });
     historyState = makeHistory([recordA, recordB]);
     historyState.retranscribeRecord = vi.fn(
       () => new Promise<{ ok: boolean }>((r) => (resolveRetry = r)),
@@ -175,17 +169,15 @@ describe("HistoryView 重試按鈕", () => {
     const wrapper = mount(HistoryView, {
       global: { plugins: [i18n], stubs: { Button: ButtonStub } },
     });
-    // 展開 A 並觸發重試（pending）
-    await wrapper.findAll(".cursor-pointer")[0].trigger("click");
+    // 重試按鈕常駐於摘要列，每筆一顆
+    const buttons = wrapper.findAll('[data-testid="retranscribe-button"]');
+    expect(buttons.length).toBe(2);
+    // 觸發 A 的重試（pending）
+    await buttons[0].trigger("click");
     await wrapper.vm.$nextTick();
-    await wrapper.find('[data-testid="retranscribe-button"]').trigger("click");
-    await wrapper.vm.$nextTick();
-    // 切換展開到 B（A 收合）；B 的重試按鈕應因全域鎖 disabled
-    await wrapper.findAll(".cursor-pointer")[1].trigger("click");
-    await wrapper.vm.$nextTick();
-    const bButton = wrapper.find('[data-testid="retranscribe-button"]');
-    expect(bButton.exists()).toBe(true);
-    expect(bButton.attributes("disabled")).toBeDefined();
+    // B 的重試按鈕應因全域鎖 disabled
+    const after = wrapper.findAll('[data-testid="retranscribe-button"]');
+    expect(after[1].attributes("disabled")).toBeDefined();
     resolveRetry({ ok: true });
   });
 });
