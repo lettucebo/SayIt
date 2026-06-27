@@ -8,7 +8,7 @@
             "type": "command",
             "command": "bash .claude/hooks/protect-config.sh",
             "bash": "bash .claude/hooks/protect-config.sh",
-            "powershell": "$d=$env:COPILOT_PROJECT_DIR; if(-not $d){$d=$env:CLAUDE_PROJECT_DIR}; if(-not $d){$d=(Get-Location).Path}; & (Join-Path $d '.claude/hooks/protect-config.ps1')",
+            "powershell": "$d=$env:COPILOT_PROJECT_DIR; if(-not $d){$d=$env:CLAUDE_PROJECT_DIR}; if(-not $d){$d=(Get-Location).Path}; $s=Join-Path $d '.claude/hooks/protect-config.ps1'; if(Test-Path $s){try{& $s}catch{exit 0}}else{exit 0}",
             "timeout": 5
           }
         ]

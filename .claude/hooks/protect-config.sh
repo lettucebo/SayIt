@@ -9,7 +9,8 @@
 set -euo pipefail
 
 INPUT=$(cat)
-FILE_PATH=$(printf '%s' "$INPUT" | sed -n 's/.*"file_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+# Claude 用 "file_path"；Copilot CLI 的 create/edit 參數是 "path" — 兩者都解析
+FILE_PATH=$(printf '%s' "$INPUT" | sed -n 's/.*"\(file_path\|path\)"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\2/p')
 
 # 無 file_path → 靜默通過
 if [[ -z "$FILE_PATH" ]]; then
