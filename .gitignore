@@ -44,3 +44,31 @@ src-tauri/gen/
 
 # Git worktrees
 .worktrees/
+
+# Test coverage (vitest v8 - pnpm test:coverage)
+coverage/
+
+# TypeScript / ESLint caches
+*.tsbuildinfo
+.eslintcache
+
+# Playwright merged/sharded report (complements test-results/ & playwright-report/)
+blob-report/
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Visual Studio
+.vs/
+
+# Editor backups / merge leftovers
+*~
+*.bak
+*.tmp
+*.orig
+
+# Sentry CLI auth (never commit a local auth token)
+.sentryclirc
