@@ -1,12 +1,18 @@
 # ADR: Claude Code Review workflow 對 fork PR 的處理
 
+> **⚠️ SUPERSEDED（2026-06）**：本 ADR 描述的 fork-PR `if` guard 解法已**失效**。
+> SayIt 已將 PR 自動 review 與 `@claude` 互動**整體遷移至原生 GitHub Copilot**
+> （原生 Copilot code review + `@copilot`）。兩支 Claude workflow（`claude.yml`、
+> `claude-code-review.yml`）已停用：`on:` 改為 `workflow_dispatch`-only，並於 repo 端
+> `gh workflow disable`。原「禁止移除 fork-PR guard」硬規則不再適用。本檔保留作為歷史決策紀錄。
+
 | 項目 | 內容 |
 |------|------|
-| 狀態 | Accepted |
+| 狀態 | Superseded（原 Accepted；2026-06 由原生 GitHub Copilot 取代） |
 | 決議日期 | 2026-05-08 |
 | 引入版本 | v0.9.5 之後（commit `01e1f06`） |
 | 影響範圍 | GitHub Actions workflow |
-| 程式碼位置 | `.github/workflows/claude-code-review.yml` |
+| 程式碼位置 | `.github/workflows/claude-code-review.yml`（已停用） |
 
 ## Context
 

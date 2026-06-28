@@ -198,7 +198,7 @@ pnpm tauri dev
 | SQLite tables           | 4（v8）             |
 | LLM Providers           | 4（Groq / OpenAI / Anthropic / Gemini） |
 | External APIs           | 5（含 Whisper）     |
-| GitHub Workflows        | 4（ci, release, claude, claude-code-review） |
+| GitHub Workflows        | 4（ci, release；claude、claude-code-review 已停用→原生 Copilot） |
 | GitHub Secrets          | 13                  |
 
 ---

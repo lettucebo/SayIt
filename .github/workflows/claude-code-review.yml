@@ -1,14 +1,13 @@
 name: Claude Code Review
 
+# DISABLED (2026-06): migrated to native GitHub Copilot code review.
+# Enable native automatic review in repo Settings -> Copilot -> Code review.
+# This file is kept for reference only and is also disabled at the repo level
+# via `gh workflow disable "Claude Code Review"`.
+# To re-enable: restore the `pull_request` trigger below AND run
+# `gh workflow enable "Claude Code Review"`.
 on:
-  pull_request:
-    types: [opened, synchronize, ready_for_review, reopened]
-    # Optional: Only run on specific file changes
-    # paths:
-    #   - "src/**/*.ts"
-    #   - "src/**/*.tsx"
-    #   - "src/**/*.js"
-    #   - "src/**/*.jsx"
+  workflow_dispatch:
 
 jobs:
   claude-review:

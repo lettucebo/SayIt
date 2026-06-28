@@ -30,8 +30,8 @@ say-it/
 ├── .github/workflows/      # CI/CD
 │   ├── ci.yml              #   PR/push 檢查
 │   ├── release.yml         #   tag → 多平台建構 + Apple notarize
-│   ├── claude.yml          #   Claude Code GitHub Actions
-│   └── claude-code-review.yml
+│   ├── claude.yml          #   已停用（遷移至原生 Copilot；workflow_dispatch-only）
+│   └── claude-code-review.yml  #   已停用（遷移至原生 Copilot code review）
 ├── .claude/                # Claude Code skills + hooks 設定
 ├── design.pen              # Pencil MCP 設計稿（UI 實作前必讀）
 ├── AGENTS.md               # AI Agent 唯一指南（IPC 契約表 / Hooks / 發版）
