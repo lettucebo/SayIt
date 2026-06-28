@@ -6,8 +6,10 @@ import type {
   DailyQuotaUsage,
   ApiUsageRecord,
   DailyUsageTrend,
+  ChatUsageData,
 } from "../types/transcription";
 import type { TriggerMode } from "../types";
+import type { TranscriptionResult } from "../types/audio";
 import type { TranscriptionCompletedPayload } from "../types/events";
 import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "../lib/database";
@@ -15,9 +17,27 @@ import { buildDailyUsageSeries } from "../lib/usageTrend";
 import { extractErrorMessage } from "../lib/errorUtils";
 import { captureError } from "../lib/sentry";
 import {
+  calculateChatCostCeiling,
+  calculateWhisperCostCeiling,
+} from "../lib/apiPricing";
+import {
+  enhanceWithAnomalyGuard,
+  type EnhanceWithGuardResult,
+} from "../lib/enhancer";
+import { detectHallucination } from "../lib/hallucinationDetector";
+import { useSettingsStore } from "./useSettingsStore";
+import { useVocabularyStore } from "./useVocabularyStore";
+import {
   emitToWindow,
   TRANSCRIPTION_COMPLETED,
 } from "../composables/useTauriEvents";
+
+/** 歷史紀錄重試（重新辨識／重新整理）的結果；errorKey 為 i18n key，供 UI 顯示。 */
+export interface HistoryRetryResult {
+  ok: boolean;
+  record?: TranscriptionRecord;
+  errorKey?: string;
+}
 
 const PAGE_SIZE = 20;
 const USAGE_TREND_DAYS = 14;
@@ -148,6 +168,26 @@ const UPDATE_ON_RETRY_SUCCESS_SQL = `
       was_enhanced = $5,
       char_count = $6
   WHERE id = $7
+`;
+
+const UPDATE_ON_RETRANSCRIBE_SQL = `
+  UPDATE transcriptions
+  SET status = 'success',
+      raw_text = $1,
+      processed_text = NULL,
+      transcription_duration_ms = $2,
+      enhancement_duration_ms = NULL,
+      was_enhanced = 0,
+      char_count = $3
+  WHERE id = $4 AND raw_text = $5
+`;
+
+const UPDATE_ON_REENHANCE_SQL = `
+  UPDATE transcriptions
+  SET processed_text = $1,
+      was_enhanced = 1,
+      enhancement_duration_ms = $2
+  WHERE id = $3 AND raw_text = $4
 `;
 
 const DELETE_API_USAGE_BY_TRANSCRIPTION_SQL = `
@@ -565,6 +605,238 @@ export const useHistoryStore = defineStore("history", () => {
     return deletedCount;
   }
 
+  function applyLocalRecordUpdate(
+    id: string,
+    patch: Partial<TranscriptionRecord>,
+  ): TranscriptionRecord | undefined {
+    const target = transcriptionList.value.find((r) => r.id === id);
+    if (!target) return undefined;
+    const updated: TranscriptionRecord = { ...target, ...patch };
+    transcriptionList.value = transcriptionList.value.map((r) =>
+      r.id === id ? updated : r,
+    );
+    return updated;
+  }
+
+  function recordWhisperUsage(
+    transcriptionId: string,
+    audioDurationMs: number,
+    model: string,
+  ): void {
+    void addApiUsage({
+      id: crypto.randomUUID(),
+      transcriptionId,
+      apiType: "whisper",
+      model,
+      promptTokens: null,
+      completionTokens: null,
+      totalTokens: null,
+      promptTimeMs: null,
+      completionTimeMs: null,
+      totalTimeMs: null,
+      audioDurationMs,
+      estimatedCostCeiling: calculateWhisperCostCeiling(audioDurationMs, model),
+    }).catch((err) =>
+      captureError(err, { source: "history", step: "retranscribe-usage" }),
+    );
+  }
+
+  function recordChatUsage(
+    transcriptionId: string,
+    usage: ChatUsageData | null,
+    model: string,
+  ): void {
+    if (!usage) return;
+    void addApiUsage({
+      id: crypto.randomUUID(),
+      transcriptionId,
+      apiType: "chat",
+      model,
+      promptTokens: usage.promptTokens,
+      completionTokens: usage.completionTokens,
+      totalTokens: usage.totalTokens,
+      promptTimeMs: usage.promptTimeMs ?? null,
+      completionTimeMs: usage.completionTimeMs ?? null,
+      totalTimeMs: usage.totalTimeMs ?? null,
+      audioDurationMs: null,
+      estimatedCostCeiling: calculateChatCostCeiling(usage.totalTokens, model),
+    }).catch((err) =>
+      captureError(err, { source: "history", step: "reenhance-usage" }),
+    );
+  }
+
+  /**
+   * 歷史紀錄「重新辨識」：以保存的錄音檔重送轉錄。成功即把該筆 failed → success
+   * 並清空整理結果（等待使用者另行「重新整理」）。只更新該筆，不貼上、不碰 HUD 狀態機。
+   */
+  async function retranscribeRecord(
+    record: TranscriptionRecord,
+  ): Promise<HistoryRetryResult> {
+    if (!record.audioFilePath) {
+      return { ok: false, errorKey: "history.noRecordingFile" };
+    }
+
+    const settingsStore = useSettingsStore();
+    const vocabularyStore = useVocabularyStore();
+
+    if (
+      settingsStore.whisperProviderId === "groq" &&
+      !settingsStore.getApiKey()
+    ) {
+      await settingsStore.refreshApiKey();
+    }
+
+    const whisperCfg = await settingsStore.getWhisperRequestConfig();
+    if (!whisperCfg.apiKey) {
+      return { ok: false, errorKey: "errors.apiKeyMissing" };
+    }
+
+    const whisperTermList = await vocabularyStore.getTopTermListByWeight(50);
+    const model = settingsStore.selectedWhisperModelId;
+
+    let result: TranscriptionResult;
+    try {
+      result = await invoke<TranscriptionResult>("retranscribe_from_file", {
+        filePath: record.audioFilePath,
+        apiKey: whisperCfg.apiKey,
+        vocabularyTermList:
+          whisperTermList.length > 0 ? whisperTermList : null,
+        modelId: model,
+        language: settingsStore.getWhisperLanguageCode(),
+        provider: whisperCfg.provider,
+        endpoint: whisperCfg.endpoint ?? null,
+        deployment: whisperCfg.deployment ?? null,
+        apiVersion: whisperCfg.apiVersion ?? null,
+        authMode: whisperCfg.authMode ?? null,
+      });
+    } catch (err) {
+      captureError(err, { source: "history", step: "retranscribe-invoke" });
+      return { ok: false, errorKey: "history.retranscribeFailed" };
+    }
+
+    // HTTP 成功即計費（不論轉錄內容）→ 記錄 whisper 用量
+    recordWhisperUsage(record.id, record.recordingDurationMs, model);
+
+    // 空轉錄或幻覺 → 保留 failed、不覆寫原文
+    const isEmpty = !result.rawText || !result.rawText.trim();
+    // 時長未知/非正時跳過語速異常層（無法判斷語速），仍保留能量/NSP 偵測
+    const recordingDurationForDetection =
+      record.recordingDurationMs > 0
+        ? record.recordingDurationMs
+        : Number.MAX_SAFE_INTEGER;
+    const hallucination = detectHallucination({
+      rawText: result.rawText,
+      recordingDurationMs: recordingDurationForDetection,
+      peakEnergyLevel: result.peakEnergyLevel,
+      rmsEnergyLevel: result.rmsEnergyLevel,
+      noSpeechProbability: result.noSpeechProbability,
+    });
+    if (isEmpty || hallucination.isHallucination) {
+      return { ok: false, errorKey: "history.retranscribeFailed" };
+    }
+
+    const charCount = result.rawText.length;
+    const transcriptionDurationMs = Math.round(result.transcriptionDurationMs);
+
+    const db = getDatabase();
+    const res = await db.execute(UPDATE_ON_RETRANSCRIBE_SQL, [
+      result.rawText,
+      transcriptionDurationMs,
+      charCount,
+      record.id,
+      record.rawText,
+    ]);
+    if (!res?.rowsAffected) {
+      // 樂觀鎖：紀錄已被刪除或 raw_text 已被並行修改 → 放棄，不覆寫
+      return { ok: false, errorKey: "history.retranscribeFailed" };
+    }
+
+    const updated = applyLocalRecordUpdate(record.id, {
+      status: "success",
+      rawText: result.rawText,
+      processedText: null,
+      wasEnhanced: false,
+      transcriptionDurationMs,
+      enhancementDurationMs: null,
+      charCount,
+    });
+    return { ok: true, record: updated };
+  }
+
+  /**
+   * 歷史紀錄「重新整理」：用既有原文重跑 AI 校對，套用與即時流程相同的長度爆炸防護。
+   * 成功則寫入 processed_text 並標記 was_enhanced。只更新該筆，不貼上、不碰 HUD 狀態機。
+   */
+  async function reEnhanceRecord(
+    record: TranscriptionRecord,
+  ): Promise<HistoryRetryResult> {
+    if (!record.rawText.trim()) {
+      return { ok: false, errorKey: "history.reEnhanceFailed" };
+    }
+
+    const settingsStore = useSettingsStore();
+    const vocabularyStore = useVocabularyStore();
+
+    await settingsStore.refreshLlmApiKey();
+    const llmCfg = await settingsStore.getLlmRequestConfig();
+    if (!llmCfg.apiKey) {
+      return { ok: false, errorKey: "errors.apiKeyMissing" };
+    }
+
+    const termList = await vocabularyStore.getTopTermListByWeight(50);
+    const startTime = performance.now();
+
+    let enhanceResult: EnhanceWithGuardResult;
+    try {
+      enhanceResult = await enhanceWithAnomalyGuard(
+        record.rawText,
+        llmCfg.apiKey,
+        {
+          systemPrompt: settingsStore.getAiPrompt(),
+          vocabularyTermList: termList.length > 0 ? termList : undefined,
+          modelId: llmCfg.modelId,
+          provider: llmCfg.provider,
+          azure: llmCfg.azure,
+        },
+      );
+    } catch (err) {
+      captureError(err, { source: "history", step: "reenhance" });
+      return { ok: false, errorKey: "history.reEnhanceFailed" };
+    }
+
+    const enhancementDurationMs = Math.round(performance.now() - startTime);
+
+    // API 已呼叫（即使 anomaly fallback）→ 記錄 chat 用量
+    recordChatUsage(
+      record.id,
+      enhanceResult.usage,
+      settingsStore.getEffectiveChatModel(),
+    );
+
+    if (enhanceResult.wasAnomalous) {
+      return { ok: false, errorKey: "history.reEnhanceFailed" };
+    }
+
+    const db = getDatabase();
+    const res = await db.execute(UPDATE_ON_REENHANCE_SQL, [
+      enhanceResult.text,
+      enhancementDurationMs,
+      record.id,
+      record.rawText,
+    ]);
+    if (!res?.rowsAffected) {
+      // 樂觀鎖：紀錄已被刪除或 raw_text 已被並行修改（整理結果基於舊原文）→ 放棄
+      return { ok: false, errorKey: "history.reEnhanceFailed" };
+    }
+
+    const updated = applyLocalRecordUpdate(record.id, {
+      processedText: enhanceResult.text,
+      wasEnhanced: true,
+      enhancementDurationMs,
+    });
+    return { ok: true, record: updated };
+  }
+
   return {
     transcriptionList,
     isLoading,
@@ -589,5 +861,7 @@ export const useHistoryStore = defineStore("history", () => {
     clearAudioFilePathByIdList,
     deleteTranscription,
     deleteAllRecordingFiles,
+    retranscribeRecord,
+    reEnhanceRecord,
   };
 });
