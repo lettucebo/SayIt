@@ -474,7 +474,7 @@
     },
     "upgradeNotice": {
       "title": "SayIt 更新摘要",
-      "item1": "每日使用趋势图更好读：之前只有少数几天有使用时，趋势图会变成一条奇怪的斜线、日期还重复；现在会完整显示最近 14 天（没使用的日子补 0），一眼就能看出使用节奏",
+      "item1": "智能词典学习现在支持 Windows：在 Windows 上改用 UI Automation 读取光标附近的文字，转录粘贴后会自动检测你手动修正的地方，让 AI 逐步学会你的常用词汇与专有名词，之后转录更准（只读取光标附近文字用于当下分析，不保存原文）",
       "item2": "新增 Azure / Microsoft Foundry 支持：除了 Groq、OpenAI、Anthropic、Gemini，现在也能用 Azure（Microsoft Foundry）做语音转录与 AI 整理，并可用 Entra ID 公司账号验证，无需另外申请 API key",
       "item3": "设置与字典可整包备份：把设置和字典导出成一个文件（可选择加密），换电脑或重装时导入就能还原，不用一项一项重新设置",
       "dismiss": "了解"

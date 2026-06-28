@@ -474,7 +474,7 @@
     },
     "upgradeNotice": {
       "title": "SayIt Update Summary",
-      "item1": "Daily usage trend is easier to read: when only a few recent days had activity, the chart used to collapse into a misleading diagonal with duplicate date labels. It now shows the full last 14 days (idle days filled with 0), so your usage rhythm is clear at a glance",
+      "item1": "Smart dictionary learning now works on Windows: it reads the text near your cursor via UI Automation, so after a transcription is pasted it detects your manual edits and gradually teaches the AI your frequent terms and proper nouns for more accurate transcriptions over time (only nearby text is read for in-the-moment analysis — the original text is not stored)",
       "item2": "Azure / Microsoft Foundry support added: alongside Groq, OpenAI, Anthropic and Gemini, you can now use Azure (Microsoft Foundry) for transcription and AI cleanup — with Entra ID (corporate account) authentication, so you don't need a separate API key",
       "item3": "Back up settings and dictionary together: export your settings and dictionary into a single file (optionally encrypted) and import it on another machine or after a reinstall — no need to reconfigure everything one by one",
       "dismiss": "Got it"

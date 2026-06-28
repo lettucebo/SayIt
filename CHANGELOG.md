@@ -2,6 +2,17 @@
 
 SayIt 版本更新紀錄。
 
+## [0.11.5] - 2026-06-28
+
+### Added
+
+- 智慧字典學習 Windows 支援：智慧字典的「讀取游標附近文字供 AI 分析」原本只在 macOS 運作，現在 Windows 改用 UI Automation 實作，讓 Windows 使用者也能在轉錄貼上後自動偵測手動修正、由 AI 逐步學習常用詞彙與專有名詞（隱私：只讀取游標附近文字用於當下分析，不儲存原文）
+
+### Improved
+
+- CI 由 Claude Code 遷移至原生 GitHub Copilot：原本依賴 `anthropics/claude-code-action` 的 PR 自動審查在本 fork 每次都失敗（未安裝 Claude Code GitHub App、`CLAUDE_CODE_OAUTH_TOKEN` 為空導致 401）。改用原生 Copilot code review 與 `@copilot` 互動後，PR 檢查不再出現紅色雜訊
+- 本 fork 改為自走 release：macOS 改未簽名建置（無 Apple Developer 憑證）、自動更新改用本 fork 專屬簽章金鑰並把 updater endpoint 指向本 repo、release 用到的非機密設定（Sentry DSN/Org/Project）改用 GitHub variable（私鑰/token 才用 secret）、發布工作改用 `ubuntu-24.04-arm` runner
+
 ## [0.11.1] - 2026-06-25
 
 ### Added
