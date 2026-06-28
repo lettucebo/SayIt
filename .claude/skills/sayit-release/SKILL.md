@@ -265,6 +265,11 @@ rg -n "^## \[X.Y.Z\]" C:/Source/Repos/SayIt/CHANGELOG.md
 cd C:/Source/Repos/SayIt && ./scripts/release.sh X.Y.Z
 ```
 
+> ⚠️ **Windows 注意（本機無 `jq`）**：`release.sh` 依賴 bash+jq+python3，在 `C:\Source\Repos\SayIt` 無法直接跑（jq 不存在、bash 為 WSL）。改用**等價手動 bump**（已驗證可行）：
+> 1. node 改 `package.json` 與 `src-tauri/tauri.conf.json` 的 `"version"`；位元組替換改 `src-tauri/Cargo.toml`（`version = "X"`，第一個出現）與 `src-tauri/Cargo.lock`（`name = "sayit"\r\nversion = "X"`，**Cargo.lock 是 CRLF**）。
+> 2. 驗證四處皆為新版本、`git diff` 只有版本行。
+> 3. `git add` 四檔 → `git commit -S -m "chore: bump version to X.Y.Z"` → `git tag vX.Y.Z` → 分開 `git push origin main` 與 `git push origin vX.Y.Z`（與 release.sh 等價，分開推送避免 tag 事件遺失）。
+
 ### release.sh 可能擋下來的情況
 
 | 訊息 | 原因 | 處理方式 |
