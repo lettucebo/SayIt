@@ -663,8 +663,8 @@ src/
 - **Release 公開流程** — `tauri-action` 先建立 Draft release，待 matrix build 全部成功後由 `publish-release` job 自動執行 `gh release edit --draft=false`
 - **Tag 推送陷阱** — `git push origin main --tags` 可能不觸發 tag 事件，必須分開推送（release.sh 已修正）
 - **版本同步硬規則** — 發版時 `git tag`、`package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml` 必須一致，Sentry release 一律綁定同一個版本號
-- **Claude Code Review workflows** — `.github/workflows/claude.yml`（`@claude` comment 觸發）+ `.github/workflows/claude-code-review.yml`（PR 自動 review）。前置條件：安裝 [Claude Code GitHub App](https://github.com/apps/claude) 至 repo + 設定 `CLAUDE_CODE_OAUTH_TOKEN` secret（不是 `ANTHROPIC_API_KEY`）
-- **Fork PR Claude review 跳過硬規則** — `claude-code-review.yml` 的 `claude-review` job 必須保留 `if: github.event.pull_request.head.repo.full_name == github.repository`，**禁止移除**。GitHub 不授予 fork PR `id-token: write` 權限（即使 workflow 寫了也被忽略），`anthropics/claude-code-action@v1` 的 OIDC 兌換永遠失敗。`@claude` comment 不受此限制（`issue_comment` 事件由 base repo 觸發）。詳見 [`docs/adr-claude-code-review-fork-pr.md`](../docs/adr-claude-code-review-fork-pr.md)
+- **Claude Code Review workflows（2026-06 已停用，遷移至原生 GitHub Copilot）** — 原 `.github/workflows/claude.yml`（`@claude` 觸發）+ `.github/workflows/claude-code-review.yml`（PR 自動 review）依賴 `anthropics/claude-code-action@v1`；因本 fork 未安裝 [Claude Code GitHub App](https://github.com/apps/claude) 且 `CLAUDE_CODE_OAUTH_TOKEN` 為空，PR review 每次 401 失敗。現已停用：兩支 workflow `on:` 改為 `workflow_dispatch`-only + 於 repo 端 `gh workflow disable`（檔案保留供參考）。PR 審查改用**原生 Copilot code review**（repo Settings → Copilot → Code review），互動改用原生 **`@copilot`**（issue/PR mention 或指派 issue）
+- **~~Fork PR Claude review 跳過硬規則~~（已失效）** — 原「`claude-code-review.yml` 的 `claude-review` job 必須保留 `if: github.event.pull_request.head.repo.full_name == github.repository`、禁止移除」硬規則已隨上述停用**失效**（本遷移取代之）。詳見 [`docs/adr-claude-code-review-fork-pr.md`](../docs/adr-claude-code-review-fork-pr.md)（Superseded）
 - **Fork PR 第一次 workflow 需手動 approve** — GitHub 安全機制；可用 `gh api -X POST /repos/{owner}/{repo}/actions/runs/{id}/approve`
 
 #### 環境變數
