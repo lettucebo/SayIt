@@ -61,6 +61,21 @@ jobs:
           echo "SENTRY_RELEASE=sayit@$RELEASE_VERSION" >> "$GITHUB_ENV"
           echo "VITE_SENTRY_RELEASE=sayit@$RELEASE_VERSION" >> "$GITHUB_ENV"
 
+          # Extract this version's section from CHANGELOG.md for the GitHub Release body
+          NOTES=$(awk -v ver="$RELEASE_VERSION" '
+            $0 ~ ("^## \\[" ver "\\]") { flag=1; next }
+            /^## \[/ { flag=0 }
+            flag { print }
+          ' CHANGELOG.md)
+          if [ -z "$NOTES" ]; then
+            NOTES="See the assets to download and install this version."
+          fi
+          {
+            echo "RELEASE_NOTES<<__SAYIT_NOTES_EOF__"
+            echo "$NOTES"
+            echo "__SAYIT_NOTES_EOF__"
+          } >> "$GITHUB_ENV"
+
       - uses: actions/setup-node@v4
         with:
           node-version-file: ".nvmrc"
@@ -96,7 +111,7 @@ jobs:
         with:
           tagName: ${{ env.RELEASE_TAG }}
           releaseName: "SayIt v${{ env.RELEASE_VERSION }}"
-          releaseBody: "See the assets to download and install this version."
+          releaseBody: ${{ env.RELEASE_NOTES }}
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
