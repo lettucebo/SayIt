@@ -3,6 +3,8 @@
 > CI/CD pipeline、Apple Code Signing、Notarization、發版流程
 > 掃描日期：2026-05-08 · 版本：0.9.5
 
+> ⚠️ **本文件部分內容已過時（描述上游 `chenjackle45` 設定）。** 本 fork（`lettucebo/SayIt`）自走 release 的權威程序見 `AGENTS.md`「CI/CD 與發版」段：macOS 改**未簽名**（不需 Apple secrets）、updater 用 **fork 專屬金鑰**並指向本 repo、Sentry 等非機密改用 GitHub **variable**。
+
 ---
 
 ## 一、CI/CD 概覽
@@ -276,9 +278,9 @@ tag push 後自動觸發 `release.yml`：
 
 `tauri-plugin-updater` 用 minisign 簽名：
 
-- 私鑰：`~/.tauri/sayit.key`，密碼：`sayit-updater-2026`
+- 私鑰：`~/.tauri/sayit.key`（fork 已換新金鑰；密碼存於 GitHub secret `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`，不寫入文件）
 - 公鑰：嵌入 `tauri.conf.json` 的 `plugins.updater.pubkey`
-- Updater endpoint：`https://github.com/chenjackle45/SayIt/releases/latest/download/latest.json`
+- Updater endpoint：`https://github.com/lettucebo/SayIt/releases/latest/download/latest.json`
 
 每次 release.yml 跑時：
 - tauri-action 用 `TAURI_SIGNING_PRIVATE_KEY` + 密碼產 `latest.json` + 各平台 `.sig` 檔
@@ -321,16 +323,16 @@ tag push 後自動觸發 `release.yml`：
 
 ```
 macOS ARM:
-  https://github.com/chenjackle45/SayIt/releases/latest/download/SayIt-mac-arm64.dmg
+  https://github.com/lettucebo/SayIt/releases/latest/download/SayIt-mac-arm64.dmg
 
 macOS Intel:
-  https://github.com/chenjackle45/SayIt/releases/latest/download/SayIt-mac-x64.dmg
+  https://github.com/lettucebo/SayIt/releases/latest/download/SayIt-mac-x64.dmg
 
 Windows:
-  https://github.com/chenjackle45/SayIt/releases/latest/download/SayIt-windows-x64.exe
+  https://github.com/lettucebo/SayIt/releases/latest/download/SayIt-windows-x64.exe
 
 Updater latest.json:
-  https://github.com/chenjackle45/SayIt/releases/latest/download/latest.json
+  https://github.com/lettucebo/SayIt/releases/latest/download/latest.json
 ```
 
 ---

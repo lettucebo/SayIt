@@ -1452,11 +1452,11 @@ onBeforeUnmount(() => {
         <Separator />
 
         <div class="flex flex-wrap gap-x-4 gap-y-2">
-          <a href="https://github.com/chenjackle45/SayIt" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors">
+          <a href="https://github.com/lettucebo/SayIt" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors">
             <Github class="size-4" />
             <span>{{ $t("settings.about.sourceCode") }}</span>
           </a>
-          <a href="https://github.com/chenjackle45/SayIt/issues" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors">
+          <a href="https://github.com/lettucebo/SayIt/issues" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors">
             <CircleAlert class="size-4" />
             <span>{{ $t("settings.about.reportIssue") }}</span>
           </a>
