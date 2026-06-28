@@ -12,8 +12,10 @@ import {
 import { getMinimalPromptForLocale } from "../i18n/prompts";
 import type { SupportedLocale } from "../i18n/languageConfig";
 import i18n from "../i18n";
+import { detectEnhancementAnomaly } from "./hallucinationDetector";
 
 const MAX_VOCABULARY_TERMS = 50;
+const DEFAULT_ENHANCEMENT_RETRY_COUNT = 3;
 
 export class EnhancerApiError extends Error {
   constructor(
@@ -166,4 +168,50 @@ export async function enhanceText(
 
   const enhancedContent = stripReasoningTags(result.text);
   return { text: enhancedContent || rawText, usage };
+}
+
+export interface EnhanceWithGuardResult {
+  text: string;
+  usage: ChatUsageData | null;
+  /** true 表示重試後仍偵測到長度爆炸異常，text 已 fallback 回 rawText。 */
+  wasAnomalous: boolean;
+}
+
+/**
+ * enhanceText 外加「增強後長度爆炸」防護：偵測到異常時最多重試 maxRetries 次，
+ * 仍異常則 fallback 回 rawText 並標記 wasAnomalous=true。
+ * 目前由歷史紀錄重新整理使用；邏輯與 useVoiceFlowStore 即時流程的 inline 迴圈一致，未來可收斂共用。
+ */
+export async function enhanceWithAnomalyGuard(
+  rawText: string,
+  apiKey: string,
+  options?: EnhanceOptions,
+  maxRetries = DEFAULT_ENHANCEMENT_RETRY_COUNT,
+): Promise<EnhanceWithGuardResult> {
+  let enhanceResult = await enhanceText(rawText, apiKey, options);
+
+  let retryCount = 0;
+  while (
+    retryCount < maxRetries &&
+    detectEnhancementAnomaly({ rawText, enhancedText: enhanceResult.text })
+      .isAnomaly
+  ) {
+    retryCount++;
+    enhanceResult = await enhanceText(rawText, apiKey, options);
+  }
+
+  const finalAnomaly = detectEnhancementAnomaly({
+    rawText,
+    enhancedText: enhanceResult.text,
+  });
+
+  if (finalAnomaly.isAnomaly) {
+    return { text: rawText, usage: enhanceResult.usage, wasAnomalous: true };
+  }
+
+  return {
+    text: enhanceResult.text,
+    usage: enhanceResult.usage,
+    wasAnomalous: false,
+  };
 }
