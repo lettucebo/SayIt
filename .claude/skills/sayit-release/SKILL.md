@@ -45,7 +45,7 @@ release.sh 的 guard 設計（working tree 乾淨、CHANGELOG 含目標版本區
 
 讀取當前版本：
 ```bash
-jq -r .version /Users/jackle/workspace/say-it/src-tauri/tauri.conf.json
+jq -r .version C:/Source/Repos/SayIt/src-tauri/tauri.conf.json
 ```
 
 如果使用者已經在指令裡明說（「發 v0.11.0」），直接用。如果沒明說，用 semver 規則推薦：
@@ -61,10 +61,10 @@ jq -r .version /Users/jackle/workspace/say-it/src-tauri/tauri.conf.json
 
 ```bash
 # 上一個 tag 到目前的 commit
-git -C /Users/jackle/workspace/say-it log "$(git -C /Users/jackle/workspace/say-it describe --tags --abbrev=0)..HEAD" --no-merges --pretty='%h %s'
+git -C C:/Source/Repos/SayIt log "$(git -C C:/Source/Repos/SayIt describe --tags --abbrev=0)..HEAD" --no-merges --pretty='%h %s'
 
 # 確認 working tree 狀態
-git -C /Users/jackle/workspace/say-it status --short
+git -C C:/Source/Repos/SayIt status --short
 ```
 
 如果 working tree 不乾淨，先告知使用者「目前有 N 個未 commit 變更，release.sh 會擋下來，要先處理」。讓他決定是先 commit 那些變更、還是先繼續 skill 流程（變更可能會被一起包進這次 release）。
@@ -236,13 +236,13 @@ SayIt 版本更新紀錄。
 
 ```bash
 # 1. 5 個 .json 的 upgradeNotice 區塊都對齊到 N 個 item + title + dismiss
-rg -n '"upgradeNotice"' /Users/jackle/workspace/say-it/src/i18n/locales/ -A $((N+2))
+rg -n '"upgradeNotice"' C:/Source/Repos/SayIt/src/i18n/locales/ -A $((N+2))
 
 # 2. MainApp.vue 的 itemCount 等於 N
-rg -n 'upgradeNoticeItemCount = ' /Users/jackle/workspace/say-it/src/MainApp.vue
+rg -n 'upgradeNoticeItemCount = ' C:/Source/Repos/SayIt/src/MainApp.vue
 
 # 3. CHANGELOG.md 含 [X.Y.Z] 區塊
-rg -n "^## \[X.Y.Z\]" /Users/jackle/workspace/say-it/CHANGELOG.md
+rg -n "^## \[X.Y.Z\]" C:/Source/Repos/SayIt/CHANGELOG.md
 ```
 
 任何一項對不上，回去把它修好再走步驟 ⑥。
@@ -262,7 +262,7 @@ rg -n "^## \[X.Y.Z\]" /Users/jackle/workspace/say-it/CHANGELOG.md
 ## 步驟 ⑦ 跑 release.sh
 
 ```bash
-cd /Users/jackle/workspace/say-it && ./scripts/release.sh X.Y.Z
+cd C:/Source/Repos/SayIt && ./scripts/release.sh X.Y.Z
 ```
 
 ### release.sh 可能擋下來的情況
