@@ -1,0 +1,277 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createPinia, setActivePinia } from "pinia";
+import type { TranscriptionRecord } from "../../src/types/transcription";
+
+const h = vi.hoisted(() => {
+  const mockDbExecute = vi.fn();
+  const mockInvoke = vi.fn();
+  const mockEnhanceGuard = vi.fn();
+  const mockGetTopTerms = vi.fn();
+  const settingsStub = {
+    whisperProviderId: "groq",
+    getApiKey: () => "whisper-key",
+    refreshApiKey: vi.fn(),
+    getWhisperRequestConfig: vi.fn(),
+    selectedWhisperModelId: "whisper-large-v3-turbo",
+    getWhisperLanguageCode: () => "zh",
+    refreshLlmApiKey: vi.fn(),
+    getLlmRequestConfig: vi.fn(),
+    getAiPrompt: () => "prompt",
+    getEffectiveChatModel: () => "llama-3.3-70b-versatile",
+  };
+  return {
+    mockDbExecute,
+    mockInvoke,
+    mockEnhanceGuard,
+    mockGetTopTerms,
+    settingsStub,
+  };
+});
+
+vi.mock("../../src/lib/database", () => ({
+  getDatabase: () => ({ execute: h.mockDbExecute, select: vi.fn() }),
+}));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: h.mockInvoke }));
+vi.mock("../../src/composables/useTauriEvents", () => ({
+  emitToWindow: vi.fn().mockResolvedValue(undefined),
+  TRANSCRIPTION_COMPLETED: "transcription:completed",
+}));
+vi.mock("../../src/lib/sentry", () => ({ captureError: vi.fn() }));
+vi.mock("../../src/lib/enhancer", () => ({
+  enhanceWithAnomalyGuard: h.mockEnhanceGuard,
+}));
+vi.mock("../../src/stores/useSettingsStore", () => ({
+  useSettingsStore: () => h.settingsStub,
+}));
+vi.mock("../../src/stores/useVocabularyStore", () => ({
+  useVocabularyStore: () => ({ getTopTermListByWeight: h.mockGetTopTerms }),
+}));
+
+import { useHistoryStore } from "../../src/stores/useHistoryStore";
+
+function createRecord(
+  overrides: Partial<TranscriptionRecord> = {},
+): TranscriptionRecord {
+  return {
+    id: "rec-1",
+    timestamp: 1700000000000,
+    rawText: "",
+    processedText: null,
+    recordingDurationMs: 3000,
+    transcriptionDurationMs: 0,
+    enhancementDurationMs: null,
+    charCount: 0,
+    triggerMode: "hold",
+    wasEnhanced: false,
+    wasModified: null,
+    createdAt: "",
+    audioFilePath: "C:/rec/rec-1.wav",
+    status: "failed",
+    isEditMode: false,
+    editSourceText: null,
+    ...overrides,
+  };
+}
+
+const GOOD_TRANSCRIBE_RESULT = {
+  rawText: "這是重新辨識後得到的完整句子內容。",
+  transcriptionDurationMs: 280,
+  noSpeechProbability: 0.01,
+  peakEnergyLevel: 0.5,
+  rmsEnergyLevel: 0.1,
+};
+
+describe("useHistoryStore retry", () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    h.mockDbExecute
+      .mockReset()
+      .mockResolvedValue({ rowsAffected: 1, lastInsertId: 0 });
+    h.mockInvoke.mockReset();
+    h.mockEnhanceGuard.mockReset();
+    h.mockGetTopTerms.mockReset().mockResolvedValue([]);
+    h.settingsStub.refreshApiKey.mockReset().mockResolvedValue(undefined);
+    h.settingsStub.refreshLlmApiKey.mockReset().mockResolvedValue(undefined);
+    h.settingsStub.getWhisperRequestConfig
+      .mockReset()
+      .mockResolvedValue({ apiKey: "whisper-key", provider: "groq" });
+    h.settingsStub.getLlmRequestConfig.mockReset().mockResolvedValue({
+      apiKey: "llm-key",
+      provider: "groq",
+      modelId: "llama-3.3-70b-versatile",
+    });
+  });
+
+  describe("retranscribeRecord", () => {
+    it("[P1] 成功重新辨識 → flip success、更新原文、清空整理結果", async () => {
+      h.mockInvoke.mockResolvedValue(GOOD_TRANSCRIBE_RESULT);
+      const store = useHistoryStore();
+      const record = createRecord();
+      store.transcriptionList.push(record);
+
+      const res = await store.retranscribeRecord(record);
+
+      expect(res.ok).toBe(true);
+      expect(h.mockInvoke).toHaveBeenCalledWith(
+        "retranscribe_from_file",
+        expect.objectContaining({ filePath: record.audioFilePath }),
+      );
+      expect(store.transcriptionList[0].status).toBe("success");
+      expect(store.transcriptionList[0].rawText).toBe(
+        GOOD_TRANSCRIBE_RESULT.rawText,
+      );
+      expect(store.transcriptionList[0].processedText).toBeNull();
+      expect(store.transcriptionList[0].wasEnhanced).toBe(false);
+    });
+
+    it("[P1] 無錄音檔 → 不呼叫後端並回 noRecordingFile", async () => {
+      const store = useHistoryStore();
+      const record = createRecord({ audioFilePath: null });
+      const res = await store.retranscribeRecord(record);
+      expect(res.ok).toBe(false);
+      expect(res.errorKey).toBe("history.noRecordingFile");
+      expect(h.mockInvoke).not.toHaveBeenCalled();
+    });
+
+    it("[P1] 空轉錄結果 → 保留 failed、不覆寫原文", async () => {
+      h.mockInvoke.mockResolvedValue({ ...GOOD_TRANSCRIBE_RESULT, rawText: "  " });
+      const store = useHistoryStore();
+      const record = createRecord({ rawText: "原本失敗" });
+      store.transcriptionList.push(record);
+      const res = await store.retranscribeRecord(record);
+      expect(res.ok).toBe(false);
+      expect(res.errorKey).toBe("history.retranscribeFailed");
+      expect(store.transcriptionList[0].status).toBe("failed");
+      expect(store.transcriptionList[0].rawText).toBe("原本失敗");
+    });
+
+    it("[P2] 幻覺結果（靜音 + 高 NSP）→ 保留 failed", async () => {
+      h.mockInvoke.mockResolvedValue({
+        rawText: "幻覺出來的一長串文字但其實完全沒有人聲",
+        transcriptionDurationMs: 280,
+        noSpeechProbability: 0.95,
+        peakEnergyLevel: 0,
+        rmsEnergyLevel: 0,
+      });
+      const store = useHistoryStore();
+      const record = createRecord();
+      store.transcriptionList.push(record);
+      const res = await store.retranscribeRecord(record);
+      expect(res.ok).toBe(false);
+      expect(store.transcriptionList[0].status).toBe("failed");
+    });
+
+    it("[P2] 樂觀鎖 rowsAffected=0 → 回失敗、紀錄不變", async () => {
+      h.mockInvoke.mockResolvedValue(GOOD_TRANSCRIBE_RESULT);
+      h.mockDbExecute.mockResolvedValue({ rowsAffected: 0, lastInsertId: 0 });
+      const store = useHistoryStore();
+      const record = createRecord();
+      store.transcriptionList.push(record);
+      const res = await store.retranscribeRecord(record);
+      expect(res.ok).toBe(false);
+      expect(store.transcriptionList[0].status).toBe("failed");
+    });
+
+    it("[P2] recordingDurationMs<=0 仍可成功（跳過語速異常層、保留能量/NSP）", async () => {
+      h.mockInvoke.mockResolvedValue(GOOD_TRANSCRIBE_RESULT);
+      const store = useHistoryStore();
+      const record = createRecord({ recordingDurationMs: 0 });
+      store.transcriptionList.push(record);
+      const res = await store.retranscribeRecord(record);
+      expect(res.ok).toBe(true);
+      expect(store.transcriptionList[0].status).toBe("success");
+    });
+
+    it("[P2] 已整理的成功紀錄重新辨識 → 清空整理、status 仍 success", async () => {
+      h.mockInvoke.mockResolvedValue(GOOD_TRANSCRIBE_RESULT);
+      const store = useHistoryStore();
+      const record = createRecord({
+        status: "success",
+        wasEnhanced: true,
+        processedText: "舊的整理結果",
+        rawText: "舊原文",
+      });
+      store.transcriptionList.push(record);
+      const res = await store.retranscribeRecord(record);
+      expect(res.ok).toBe(true);
+      expect(store.transcriptionList[0].status).toBe("success");
+      expect(store.transcriptionList[0].rawText).toBe(
+        GOOD_TRANSCRIBE_RESULT.rawText,
+      );
+      expect(store.transcriptionList[0].processedText).toBeNull();
+      expect(store.transcriptionList[0].wasEnhanced).toBe(false);
+    });
+  });
+
+  describe("reEnhanceRecord", () => {
+    it("[P1] 成功整理 → 寫入 processed_text、標記 was_enhanced", async () => {
+      h.mockEnhanceGuard.mockResolvedValue({
+        text: "整理後的書面語句子。",
+        usage: null,
+        wasAnomalous: false,
+      });
+      const store = useHistoryStore();
+      const record = createRecord({
+        status: "success",
+        rawText: "原始口語內容",
+        wasEnhanced: false,
+      });
+      store.transcriptionList.push(record);
+      const res = await store.reEnhanceRecord(record);
+      expect(res.ok).toBe(true);
+      expect(store.transcriptionList[0].processedText).toBe(
+        "整理後的書面語句子。",
+      );
+      expect(store.transcriptionList[0].wasEnhanced).toBe(true);
+    });
+
+    it("[P1] 空原文 → 不呼叫 LLM 並回失敗", async () => {
+      const store = useHistoryStore();
+      const record = createRecord({ status: "success", rawText: "   " });
+      const res = await store.reEnhanceRecord(record);
+      expect(res.ok).toBe(false);
+      expect(res.errorKey).toBe("history.reEnhanceFailed");
+      expect(h.mockEnhanceGuard).not.toHaveBeenCalled();
+    });
+
+    it("[P1] 長度爆炸 anomaly → 不 finalize、保留未整理", async () => {
+      h.mockEnhanceGuard.mockResolvedValue({
+        text: "原始口語內容",
+        usage: null,
+        wasAnomalous: true,
+      });
+      const store = useHistoryStore();
+      const record = createRecord({
+        status: "success",
+        rawText: "原始口語內容",
+        wasEnhanced: false,
+      });
+      store.transcriptionList.push(record);
+      const res = await store.reEnhanceRecord(record);
+      expect(res.ok).toBe(false);
+      expect(res.errorKey).toBe("history.reEnhanceFailed");
+      expect(store.transcriptionList[0].wasEnhanced).toBe(false);
+      expect(store.transcriptionList[0].processedText).toBeNull();
+    });
+
+    it("[P2] 已整理紀錄可再次重新整理（覆寫整理結果）", async () => {
+      h.mockEnhanceGuard.mockResolvedValue({
+        text: "新的整理結果。",
+        usage: null,
+        wasAnomalous: false,
+      });
+      const store = useHistoryStore();
+      const record = createRecord({
+        status: "success",
+        wasEnhanced: true,
+        processedText: "舊整理",
+        rawText: "原始口語內容",
+      });
+      store.transcriptionList.push(record);
+      const res = await store.reEnhanceRecord(record);
+      expect(res.ok).toBe(true);
+      expect(store.transcriptionList[0].processedText).toBe("新的整理結果。");
+      expect(store.transcriptionList[0].wasEnhanced).toBe(true);
+    });
+  });
+});
