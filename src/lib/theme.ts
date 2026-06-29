@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 import { load } from "@tauri-apps/plugin-store";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { THEME_MODE_VALUES, type ThemeMode } from "../types/settings";
@@ -17,6 +18,7 @@ let activeMode: ThemeMode = DEFAULT_THEME_MODE;
 // 故快取 Tauri 回報的 OS 主題，matchMedia 僅作為非 Tauri / null 時的 fallback。
 let osThemeDark: boolean | null = null;
 let osWatcherInit = false;
+let unlistenOsThemeWatcher: (() => void) | null = null;
 
 export function isThemeMode(value: unknown): value is ThemeMode {
   return (
@@ -55,15 +57,26 @@ async function ensureOsThemeWatcher(): Promise<void> {
   if (osWatcherInit) return;
   osWatcherInit = true;
   try {
-    await getCurrentWindow().onThemeChanged(({ payload }) => {
-      osThemeDark = payload === "dark";
-      if (activeMode === "system") {
-        document.documentElement.classList.toggle("dark", osThemeDark);
-      }
-    });
+    unlistenOsThemeWatcher = await getCurrentWindow().onThemeChanged(
+      ({ payload }) => {
+        osThemeDark = payload === "dark";
+        if (activeMode === "system") {
+          document.documentElement.classList.toggle("dark", osThemeDark);
+        }
+      },
+    );
   } catch {
     osWatcherInit = false; // 失敗允許之後重試
   }
+}
+
+// Vite HMR：模組熱替換時解除舊訂閱，避免 dev 期間重複監聽
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    unlistenOsThemeWatcher?.();
+    unlistenOsThemeWatcher = null;
+    osWatcherInit = false;
+  });
 }
 
 // 只在 system 模式時掛系統偏好監聽（matchMedia fallback），其餘模式移除
