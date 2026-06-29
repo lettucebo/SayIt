@@ -2,6 +2,16 @@
 
 SayIt 版本更新紀錄。
 
+## [0.11.7] - 2026-06-30
+
+### Fixed
+
+- HUD 浮窗不跟隨「跟隨系統」主題的問題：根因是 system 模式下各視窗各自用 CSS `matchMedia('(prefers-color-scheme: dark)')` 判斷系統明暗，但透明的 HUD 浮窗 WebView（Windows WebView2）不一定正確回報系統外觀，導致切到「跟隨系統」時儀表板會跟著變、HUD 卻停在淺色。改以 Tauri 視窗主題 API（`getCurrentWindow().theme()` + `onThemeChanged`）取得權威系統外觀並即時跟隨，`matchMedia` 僅作為非 Tauri 環境的 fallback（新增 capability `core:window:allow-theme`）
+
+### Improved
+
+- 關於頁更新維護者資訊：作者改為現任維護者（含個人網站與社群連結），原作者保留為頁尾小字 credit
+
 ## [0.11.6] - 2026-06-30
 
 ### Added

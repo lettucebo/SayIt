@@ -480,7 +480,7 @@
     },
     "upgradeNotice": {
       "title": "SayIt Update Summary",
-      "item1": "Theme switching: choose Light, Dark, or System under Settings → App — your preference is saved automatically and synced to the floating HUD.",
+      "item1": "Follow-system theme fix: when set to System, the floating HUD now switches light/dark together with the dashboard — instead of staying stuck on its previous color.",
       "dismiss": "Got it"
     }
   },
