@@ -9,6 +9,7 @@
       "title": "SayIt 정보",
       "description": "길게 눌러 말하고, 놓으면 붙여넣기. SayIt은 MIT 라이선스의 오픈소스 데스크톱 음성 텍스트 변환 도구입니다.",
       "author": "개발자:",
+      "originalAuthor": "원작자 ·",
       "website": "개인 웹사이트",
       "sourceCode": "소스 코드 보기",
       "reportIssue": "문제 신고"

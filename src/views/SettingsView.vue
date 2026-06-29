@@ -107,6 +107,7 @@ import {
   Github,
   Globe,
   Instagram,
+  Linkedin,
   Lock,
   Mic,
   RefreshCw,
@@ -1434,32 +1435,39 @@ onBeforeUnmount(() => {
         <CardTitle class="text-base">{{ $t("settings.about.title") }}</CardTitle>
       </CardHeader>
       <CardContent class="space-y-4">
-        <div class="space-y-1">
-          <p class="text-sm text-muted-foreground">
-            {{ $t("settings.about.description") }}
-          </p>
-          <p class="text-sm text-muted-foreground">
-            {{ $t("settings.about.author") }}<a href="https://jackle.pro" target="_blank" rel="noopener noreferrer" class="font-medium text-foreground hover:text-primary transition-colors">Jackle Chen</a>
-          </p>
-        </div>
+        <p class="text-sm text-muted-foreground">
+          {{ $t("settings.about.description") }}
+        </p>
 
-        <div class="flex flex-wrap gap-x-4 gap-y-2">
-          <a href="https://jackle.pro" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors">
-            <Globe class="size-4" />
-            <span>{{ $t("settings.about.website") }}</span>
-          </a>
-          <a href="https://www.facebook.com/jackle45" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors">
-            <Facebook class="size-4" />
-            <span>Facebook</span>
-          </a>
-          <a href="https://www.instagram.com/jackle9527" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors">
-            <Instagram class="size-4" />
-            <span>Instagram</span>
-          </a>
-          <a href="https://www.threads.com/@jackle9527" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors">
-            <AtSign class="size-4" />
-            <span>Threads</span>
-          </a>
+        <!-- 作者：Money Yu（主要資訊，顯眼） -->
+        <div class="space-y-3">
+          <div class="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+            <span class="text-sm text-muted-foreground">{{ $t("settings.about.author") }}</span>
+            <a href="https://github.com/lettucebo" target="_blank" rel="noopener noreferrer" class="text-base font-semibold text-foreground hover:text-primary transition-colors">Money Yu</a>
+          </div>
+
+          <div class="flex flex-wrap gap-x-4 gap-y-2">
+            <a href="https://github.com/lettucebo" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors">
+              <Globe class="size-4" />
+              <span>{{ $t("settings.about.website") }}</span>
+            </a>
+            <a href="https://www.facebook.com/lettucebo" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors">
+              <Facebook class="size-4" />
+              <span>Facebook</span>
+            </a>
+            <a href="https://www.instagram.com/moneyyu816/" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors">
+              <Instagram class="size-4" />
+              <span>Instagram</span>
+            </a>
+            <a href="https://www.threads.com/@moneyyu816" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors">
+              <AtSign class="size-4" />
+              <span>Threads</span>
+            </a>
+            <a href="https://www.linkedin.com/in/abc12207/" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors">
+              <Linkedin class="size-4" />
+              <span>LinkedIn</span>
+            </a>
+          </div>
         </div>
 
         <Separator />
@@ -1474,6 +1482,12 @@ onBeforeUnmount(() => {
             <span>{{ $t("settings.about.reportIssue") }}</span>
           </a>
         </div>
+
+        <!-- 原作者（不起眼小字 credit） -->
+        <p class="text-xs text-muted-foreground/60">
+          {{ $t("settings.about.originalAuthor") }}
+          <a href="https://jackle.pro" target="_blank" rel="noopener noreferrer" class="underline-offset-2 hover:text-muted-foreground hover:underline">Jackle Chen</a>
+        </p>
       </CardContent>
     </Card>
 
