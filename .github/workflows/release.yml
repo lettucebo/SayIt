@@ -145,6 +145,8 @@ jobs:
           DMG=$(find src-tauri/target -path "*/bundle/dmg/*.dmg" | head -1)
           cp "$DMG" "${{ matrix.stable_name }}"
           gh release upload "$RELEASE_TAG" "${{ matrix.stable_name }}" --clobber
+          shasum -a 256 "${{ matrix.stable_name }}" > "${{ matrix.stable_name }}.sha256"
+          gh release upload "$RELEASE_TAG" "${{ matrix.stable_name }}.sha256" --clobber
 
       - name: Upload stable-name asset (Windows)
         if: runner.os == 'Windows'
@@ -155,6 +157,9 @@ jobs:
           $exe = Get-ChildItem -Path "src-tauri\target" -Recurse -Filter "*-setup.exe" | Select-Object -First 1
           Copy-Item $exe.FullName "${{ matrix.stable_name }}"
           gh release upload "$env:RELEASE_TAG" "${{ matrix.stable_name }}" --clobber
+          $hash = (Get-FileHash "${{ matrix.stable_name }}" -Algorithm SHA256).Hash.ToLower()
+          "$hash  ${{ matrix.stable_name }}" | Set-Content -NoNewline "${{ matrix.stable_name }}.sha256"
+          gh release upload "$env:RELEASE_TAG" "${{ matrix.stable_name }}.sha256" --clobber
 
   publish-release:
     needs: build
