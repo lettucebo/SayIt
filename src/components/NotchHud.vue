@@ -485,7 +485,10 @@ onUnmounted(() => {
 }
 
 .notch-hud {
-  background: black;
+  --notch-bg: #ffffff;
+  --notch-fg: #18181b;
+  --notch-fg-soft: rgba(24, 24, 27, 0.4);
+  background: var(--notch-bg);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -494,6 +497,12 @@ onUnmounted(() => {
     height 0.35s cubic-bezier(0.32, 0.72, 0, 1),
     clip-path 0.35s cubic-bezier(0.32, 0.72, 0, 1),
     background 0.3s ease;
+}
+
+:global(html.dark) .notch-hud {
+  --notch-bg: #000000;
+  --notch-fg: #ffffff;
+  --notch-fg-soft: rgba(255, 255, 255, 0.4);
 }
 
 @keyframes notchEnter {
@@ -544,7 +553,7 @@ onUnmounted(() => {
 
 /* ---- Shared Waveform Element ---- */
 .waveform-element {
-  background: white;
+  background: var(--notch-fg);
   transition:
     height 0.3s cubic-bezier(0.32, 0.72, 0, 1),
     width 0.3s cubic-bezier(0.32, 0.72, 0, 1),
@@ -577,7 +586,7 @@ onUnmounted(() => {
   height: 6px;
   border-radius: 50%;
   background: transparent;
-  border: 1.5px solid rgba(255, 255, 255, 0.4);
+  border: 1.5px solid var(--notch-fg-soft);
   animation: dotSlide 1.5s ease-in-out infinite;
 }
 .waveform-dot:nth-child(1) { animation-delay: 0s; }
@@ -590,10 +599,10 @@ onUnmounted(() => {
 }
 
 @keyframes dotSlide {
-  0%     { background: white; border-color: white; }
-  50%    { background: white; border-color: white; }
-  50.01% { background: transparent; border-color: rgba(255, 255, 255, 0.4); }
-  100%   { background: transparent; border-color: rgba(255, 255, 255, 0.4); }
+  0%     { background: var(--notch-fg); border-color: var(--notch-fg); }
+  50%    { background: var(--notch-fg); border-color: var(--notch-fg); }
+  50.01% { background: transparent; border-color: var(--notch-fg-soft); }
+  100%   { background: transparent; border-color: var(--notch-fg-soft); }
 }
 
 /* ---- Success: converge + SVG checkmark ---- */
@@ -717,6 +726,7 @@ onUnmounted(() => {
 
 /* ---- Cancelled: X icon + label ---- */
 .cancelled-icon-svg {
+  stroke: var(--notch-fg-soft);
   animation: cancelledIconFadeIn 0.3s ease-out;
 }
 
@@ -726,7 +736,7 @@ onUnmounted(() => {
 }
 
 .cancelled-label {
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--notch-fg-soft);
   font-size: 14px;
   font-weight: 500;
   white-space: nowrap;
@@ -760,7 +770,7 @@ onUnmounted(() => {
   white-space: nowrap;
   margin-right: 6px;
 }
-.prompt-mode-badge { background: rgba(255, 255, 255, 0.15); color: rgba(255, 255, 255, 0.7); }
+.prompt-mode-badge { background: var(--notch-fg-soft); color: var(--notch-fg); opacity: 0.7; }
 .edit-mode-badge   { background: rgba(251, 191, 36, 0.25);  color: rgba(251, 191, 36, 0.9); }
 
 /* ---- Error: scatter + shake ---- */
@@ -805,7 +815,7 @@ onUnmounted(() => {
 /* ---- Gap 7: Timer font ---- */
 .elapsed-timer {
   font-family: 'JetBrains Mono', monospace;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--notch-fg-soft);
   font-size: 12px;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
