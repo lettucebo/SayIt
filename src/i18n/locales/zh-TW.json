@@ -479,9 +479,7 @@
     },
     "upgradeNotice": {
       "title": "SayIt 更新摘要",
-      "item1": "智慧字典學習現在支援 Windows：在 Windows 上改用 UI Automation 讀取游標附近的文字，轉錄貼上後會自動偵測你手動修正的地方，讓 AI 逐步學會你的常用詞彙與專有名詞，之後轉錄更準（只讀取游標附近文字用於當下分析，不儲存原文）",
-      "item2": "新增 Azure / Microsoft Foundry 支援：除了 Groq、OpenAI、Anthropic、Gemini，現在也能用 Azure（Microsoft Foundry）做語音轉錄與 AI 整理，並可用 Entra ID 公司帳號驗證，不必另外申請 API key",
-      "item3": "設定與字典可整包備份：把設定和字典匯出成一個檔案（可選擇加密），換電腦或重灌時匯入就能還原，不用一項一項重設",
+      "item1": "主題切換：現在可在「設定 → 應用程式」選擇淺色、深色或跟隨系統，偏好會自動儲存並同步到浮窗。",
       "dismiss": "了解"
     }
   },

@@ -2,6 +2,17 @@
 
 SayIt 版本更新紀錄。
 
+## [0.11.6] - 2026-06-30
+
+### Added
+
+- 淺色 / 深色 / 跟隨系統 佈景主題切換（#5）：先前介面僅深色，白天或亮環境較刺眼。新增「設定 → 應用程式」的主題下拉，可選淺色、深色或跟隨系統；「跟隨系統」會隨 OS 日夜模式自動切換。偏好以 `tauri-plugin-store` 持久化、納入備份匯出/匯入，HUD 浮窗與 Dashboard 雙視窗透過 `SETTINGS_UPDATED` 即時同步；並在首次繪製前由 `localStorage` 快取套用，避免啟動瞬間閃黑
+
+### Improved
+
+- 發版產物新增 SHA256 checksums，並補上 Windows SmartScreen 開啟說明
+- GitHub Release 內文改用對應版本的 CHANGELOG 區塊自動帶入
+
 ## [0.11.5] - 2026-06-28
 
 ### Added
