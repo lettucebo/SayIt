@@ -15,6 +15,19 @@ vi.mock("@tauri-apps/plugin-store", () => ({
   })),
 }));
 
+// Tauri 視窗主題 API mock：osTheme 為權威 OS 外觀（null → 改用 matchMedia fallback）
+const tauriWindow = vi.hoisted(() => ({
+  osTheme: null as "light" | "dark" | null,
+  onThemeChanged: vi.fn(async () => () => {}),
+}));
+
+vi.mock("@tauri-apps/api/window", () => ({
+  getCurrentWindow: () => ({
+    theme: vi.fn(async () => tauriWindow.osTheme),
+    onThemeChanged: tauriWindow.onThemeChanged,
+  }),
+}));
+
 function stubMatchMedia(dark: boolean) {
   vi.stubGlobal(
     "matchMedia",
@@ -32,6 +45,8 @@ describe("theme lib", () => {
     mockStoreGet.mockClear();
     mockStoreSet.mockClear();
     mockStoreSave.mockClear();
+    tauriWindow.osTheme = null;
+    tauriWindow.onThemeChanged.mockClear();
     document.documentElement.classList.remove("dark");
     vi.resetModules();
   });
@@ -87,5 +102,23 @@ describe("theme lib", () => {
     const mode = await initThemeFromStore();
     expect(mode).toBe("light");
     expect(document.documentElement.classList.contains("dark")).toBe(false);
+  });
+
+  it("[P0] system 模式以 Tauri 視窗主題為權威（matchMedia 不準時仍正確）", async () => {
+    // matchMedia 回報淺色（模擬 HUD WebView 不準），但 OS 實為深色
+    stubMatchMedia(false);
+    tauriWindow.osTheme = "dark";
+    mockStoreData.set("themeMode", "system");
+    const { initThemeFromStore } = await import("../../src/lib/theme");
+    await initThemeFromStore();
+    // 應以 Tauri 權威值（dark）為準
+    expect(document.documentElement.classList.contains("dark")).toBe(true);
+  });
+
+  it("[P1] initThemeFromStore 應訂閱 OS 主題變更（onThemeChanged）", async () => {
+    stubMatchMedia(false);
+    const { initThemeFromStore } = await import("../../src/lib/theme");
+    await initThemeFromStore();
+    expect(tauriWindow.onThemeChanged).toHaveBeenCalledTimes(1);
   });
 });
