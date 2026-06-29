@@ -9,6 +9,7 @@
       "title": "關於 SayIt",
       "description": "按住說話，放開貼上。SayIt 是開源的桌面語音轉文字工具，採用 MIT 授權。",
       "author": "作者：",
+      "originalAuthor": "原作者 ·",
       "website": "個人網站",
       "sourceCode": "查看原始碼",
       "reportIssue": "回報問題"

@@ -9,6 +9,7 @@
       "title": "About SayIt",
       "description": "Hold to speak, release to paste. SayIt is an open-source desktop speech-to-text tool, licensed under MIT.",
       "author": "Author:",
+      "originalAuthor": "Original author ·",
       "website": "Website",
       "sourceCode": "View Source Code",
       "reportIssue": "Report an Issue"
