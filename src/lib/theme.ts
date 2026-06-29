@@ -3,6 +3,8 @@ import { THEME_MODE_VALUES, type ThemeMode } from "../types/settings";
 
 const STORE_NAME = "settings.json";
 const THEME_STORE_KEY = "themeMode";
+// 同步快取，供 HTML inline script 在首次繪製前讀取，避免閃色
+const THEME_LOCAL_KEY = "sayit-theme-mode";
 export const DEFAULT_THEME_MODE: ThemeMode = "system";
 
 let mediaQuery: MediaQueryList | null = null;
@@ -53,6 +55,11 @@ function ensureSystemListener(mode: ThemeMode): void {
 export function applyTheme(mode: ThemeMode): void {
   activeMode = mode;
   document.documentElement.classList.toggle("dark", resolveTheme(mode) === "dark");
+  try {
+    localStorage.setItem(THEME_LOCAL_KEY, mode);
+  } catch {
+    // localStorage 不可用時略過快取，不影響套用
+  }
   ensureSystemListener(mode);
 }
 

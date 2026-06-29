@@ -488,6 +488,10 @@ onUnmounted(() => {
   --notch-bg: #ffffff;
   --notch-fg: #18181b;
   --notch-fg-soft: rgba(24, 24, 27, 0.4);
+  --notch-learned: #1d4ed8;
+  --notch-mode: #6d28d9;
+  --notch-edit-bg: rgba(180, 83, 9, 0.15);
+  --notch-edit-fg: #b45309;
   background: var(--notch-bg);
   display: flex;
   align-items: center;
@@ -503,6 +507,10 @@ onUnmounted(() => {
   --notch-bg: #000000;
   --notch-fg: #ffffff;
   --notch-fg-soft: rgba(255, 255, 255, 0.4);
+  --notch-learned: rgba(147, 197, 253, 0.95);
+  --notch-mode: rgba(167, 139, 250, 0.95);
+  --notch-edit-bg: rgba(251, 191, 36, 0.25);
+  --notch-edit-fg: rgba(251, 191, 36, 0.9);
 }
 
 @keyframes notchEnter {
@@ -695,7 +703,7 @@ onUnmounted(() => {
 }
 
 .learned-label {
-  color: rgba(147, 197, 253, 0.95);
+  color: var(--notch-learned);
   font-size: 14px;
   font-weight: 600;
   white-space: nowrap;
@@ -711,7 +719,7 @@ onUnmounted(() => {
 }
 
 .learned-terms {
-  color: rgba(147, 197, 253, 0.95);
+  color: var(--notch-learned);
   font-size: 14px;
   font-weight: 500;
   white-space: nowrap;
@@ -750,7 +758,7 @@ onUnmounted(() => {
 
 /* ---- Mode Switch ---- */
 .mode-switch-label {
-  color: rgba(167, 139, 250, 0.95);
+  color: var(--notch-mode);
   font-size: 14px;
   font-weight: 600;
   white-space: nowrap;
@@ -771,7 +779,7 @@ onUnmounted(() => {
   margin-right: 6px;
 }
 .prompt-mode-badge { background: var(--notch-fg-soft); color: var(--notch-fg); opacity: 0.7; }
-.edit-mode-badge   { background: rgba(251, 191, 36, 0.25);  color: rgba(251, 191, 36, 0.9); }
+.edit-mode-badge   { background: var(--notch-edit-bg);  color: var(--notch-edit-fg); }
 
 /* ---- Error: scatter + shake ---- */
 .waveform-scatter {
