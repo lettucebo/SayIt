@@ -13,6 +13,7 @@ import {
 } from "./composables/useTauriEvents";
 import { extractErrorMessage } from "./lib/errorUtils";
 import { initSentryForDashboard, captureError } from "./lib/sentry";
+import { initThemeFromStore } from "./lib/theme";
 import { useSettingsStore } from "./stores/useSettingsStore";
 import {
   installConsoleForwarding,
@@ -27,6 +28,9 @@ document.addEventListener("contextmenu", (e) => e.preventDefault());
 async function bootstrap() {
   // 最早期安裝 console → plugin-log 轉送，涵蓋之後所有 console 輸出
   installConsoleForwarding();
+
+  // mount 前套用持久化主題，避免閃白
+  await initThemeFromStore();
 
   const pinia = createPinia();
   const app = createApp(MainApp);

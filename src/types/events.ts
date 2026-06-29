@@ -38,6 +38,7 @@ export type SettingsKey =
   | "azureChatDeployment"
   | "azureWhisperDeployment"
   | "whisperProvider"
+  | "theme"
   | "imported";
 
 export interface SettingsUpdatedPayload {
