@@ -418,13 +418,17 @@
     "network": "Network connection lost",
     "transcription": {
       "fileTooLarge": "Recording file too large. Please shorten your recording",
+      "noAudio": "No speech detected or recording was too short",
       "invalidAudio": "Invalid audio format or incomplete recording data",
       "invalidApiKey": "API Key is invalid or expired",
       "rateLimited": "Too many requests. Please try again later",
       "serviceUnavailable": "Transcription service temporarily unavailable",
+      "parseError": "Failed to parse the transcription response",
+      "timeout": "Transcription timed out, please try again",
       "failed": "Speech transcription failed",
       "recorderError": "Recording device error",
-      "operationFailed": "Operation failed"
+      "operationFailed": "Operation failed",
+      "operationFailedWithCode": "Operation failed ({code})"
     },
     "enhancement": {
       "timeout": "AI enhancement timed out. Raw text pasted instead",
@@ -433,7 +437,8 @@
       "rateLimited": "Too many requests. Please try again later",
       "badRequest": "Model request error. Please check your settings",
       "serviceUnavailable": "AI enhancement service temporarily unavailable",
-      "failed": "AI enhancement failed"
+      "failed": "AI enhancement failed",
+      "failedWithCode": "AI cleanup failed ({code})"
     },
     "hotkey": {
       "accessibilityPermission": "Accessibility permission required",

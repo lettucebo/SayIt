@@ -418,13 +418,17 @@
     "network": "ネットワーク接続が切断されました",
     "transcription": {
       "fileTooLarge": "録音ファイルが大きすぎます。録音時間を短くしてください",
+      "noAudio": "音声が検出されないか、録音データが不足しています",
       "invalidAudio": "音声ファイルの形式が無効、または録音データが不完全です",
       "invalidApiKey": "API Key が無効または期限切れです",
       "rateLimited": "リクエストが多すぎます。しばらくしてから再試行してください",
       "serviceUnavailable": "文字起こしサービスが一時的に利用できません",
+      "parseError": "文字起こし応答の解析に失敗しました",
+      "timeout": "文字起こしがタイムアウトしました。後でもう一度お試しください",
       "failed": "音声文字起こしに失敗しました",
       "recorderError": "録音デバイスでエラーが発生しました",
-      "operationFailed": "操作に失敗しました"
+      "operationFailed": "操作に失敗しました",
+      "operationFailedWithCode": "操作に失敗しました（{code}）"
     },
     "enhancement": {
       "timeout": "AI 整理がタイムアウトしました。原文を貼り付けました",
@@ -433,7 +437,8 @@
       "rateLimited": "リクエストが多すぎます。しばらくしてから再試行してください",
       "badRequest": "モデルリクエストエラーです。設定を確認してください",
       "serviceUnavailable": "AI 整理サービスが一時的に利用できません",
-      "failed": "AI 整理に失敗しました"
+      "failed": "AI 整理に失敗しました",
+      "failedWithCode": "AI整理に失敗しました（{code}）"
     },
     "hotkey": {
       "accessibilityPermission": "アクセシビリティ権限が必要です",

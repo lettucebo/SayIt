@@ -418,13 +418,17 @@
     "network": "網路連線中斷",
     "transcription": {
       "fileTooLarge": "錄音檔案過大，請縮短錄音時間",
+      "noAudio": "未偵測到語音或錄音資料不足",
       "invalidAudio": "音檔格式無效或錄音資料不完整",
       "invalidApiKey": "API Key 無效或已過期",
       "rateLimited": "請求過於頻繁，稍後再試",
       "serviceUnavailable": "轉錄服務暫時無法使用",
+      "parseError": "轉錄回應解析失敗",
+      "timeout": "轉錄逾時，請稍後再試",
       "failed": "語音轉錄失敗",
       "recorderError": "錄音裝置發生錯誤",
-      "operationFailed": "操作失敗"
+      "operationFailed": "操作失敗",
+      "operationFailedWithCode": "操作失敗（{code}）"
     },
     "enhancement": {
       "timeout": "AI 整理逾時，已貼原始文字",
@@ -433,7 +437,8 @@
       "rateLimited": "請求過於頻繁，稍後再試",
       "badRequest": "模型請求錯誤，請檢查設定",
       "serviceUnavailable": "AI 整理服務暫時無法使用",
-      "failed": "AI 整理失敗"
+      "failed": "AI 整理失敗",
+      "failedWithCode": "AI 整理失敗（{code}）"
     },
     "hotkey": {
       "accessibilityPermission": "需要輔助使用權限",
