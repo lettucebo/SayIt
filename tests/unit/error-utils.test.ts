@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildDiagnosticCode,
   getEnhancementErrorMessage,
   getHotkeyErrorMessage,
   getMicrophoneErrorMessage,
@@ -58,7 +59,7 @@ describe("getTranscriptionErrorMessage", () => {
 
   it("[P0] 轉錄 API 未知狀態碼應映射為語音轉錄失敗", () => {
     const error = new Error("Transcription API error (418): I'm a teapot");
-    expect(getTranscriptionErrorMessage(error)).toBe("語音轉錄失敗");
+    expect(getTranscriptionErrorMessage(error)).toContain("HTTP 418");
   });
 
   it("[P0] 轉錄 API 無狀態碼應映射為語音轉錄失敗", () => {
@@ -104,7 +105,9 @@ describe("getTranscriptionErrorMessage", () => {
   });
 
   it("[P0] 未知錯誤應回傳操作失敗", () => {
-    expect(getTranscriptionErrorMessage("some string error")).toBe("操作失敗");
+    expect(getTranscriptionErrorMessage("some string error")).toBe(
+      "操作失敗（some string error）",
+    );
   });
 
   it("[P0] Tauri HTTP network error 應映射為網路連線中斷", () => {
@@ -144,6 +147,63 @@ describe("getTranscriptionErrorMessage", () => {
         new Error("Transcription API error (500): network issue on server"),
       ),
     ).toBe("轉錄服務暫時無法使用");
+  });
+
+  it("[P2] 無錄音資料應映射為未偵測到語音", () => {
+    expect(
+      getTranscriptionErrorMessage(
+        "No audio data available — call stop_recording first",
+      ),
+    ).toBe("未偵測到語音或錄音資料不足");
+  });
+
+  it("[P2] 錄音資料太小應映射為未偵測到語音", () => {
+    expect(
+      getTranscriptionErrorMessage(
+        "Audio data too small (123 bytes), recording may have failed",
+      ),
+    ).toBe("未偵測到語音或錄音資料不足");
+  });
+
+  it("[P2] 轉錄回應解析失敗應映射為解析失敗", () => {
+    expect(
+      getTranscriptionErrorMessage("Failed to parse API response: xyz"),
+    ).toBe("轉錄回應解析失敗");
+  });
+
+  it("[P2] 轉錄 API 403 應映射為 API Key 無效", () => {
+    expect(
+      getTranscriptionErrorMessage("Transcription API error (403): Forbidden"),
+    ).toBe("API Key 無效或已過期");
+  });
+
+  it("[P2] 轉錄 API 504 應映射為逾時", () => {
+    expect(
+      getTranscriptionErrorMessage("Transcription API error (504): Timeout"),
+    ).toBe("轉錄逾時，請稍後再試");
+  });
+
+  it("[P2] 轉錄 API 未映射狀態碼應包含 HTTP 診斷碼", () => {
+    expect(
+      getTranscriptionErrorMessage("Transcription API error (418): teapot"),
+    ).toContain("HTTP 418");
+  });
+
+  it("[P2] 未知轉錄錯誤應包含原始診斷碼", () => {
+    expect(getTranscriptionErrorMessage("Lock poisoned")).toBe(
+      "操作失敗（Lock poisoned）",
+    );
+  });
+});
+
+describe("buildDiagnosticCode", () => {
+  it("[P2] 空白訊息應回傳 unknown", () => {
+    expect(buildDiagnosticCode("   \n\t  ")).toBe("unknown");
+  });
+
+  it("[P2] 長訊息應截斷為 80 字元並加上省略號", () => {
+    const message = "a".repeat(81);
+    expect(buildDiagnosticCode(message)).toBe(`${"a".repeat(80)}…`);
   });
 });
 

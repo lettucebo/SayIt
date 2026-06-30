@@ -418,13 +418,17 @@
     "network": "네트워크 연결이 끊어졌습니다",
     "transcription": {
       "fileTooLarge": "녹음 파일이 너무 큽니다. 녹음 시간을 줄여주세요",
+      "noAudio": "음성이 감지되지 않았거나 녹음 데이터가 부족합니다",
       "invalidAudio": "오디오 형식이 유효하지 않거나 녹음 데이터가 불완전합니다",
       "invalidApiKey": "API Key가 유효하지 않거나 만료되었습니다",
       "rateLimited": "요청이 너무 빈번합니다. 잠시 후 다시 시도하세요",
       "serviceUnavailable": "전사 서비스를 일시적으로 사용할 수 없습니다",
+      "parseError": "전사 응답을 파싱하지 못했습니다",
+      "timeout": "전사 시간이 초과되었습니다. 나중에 다시 시도하세요",
       "failed": "음성 전사 실패",
       "recorderError": "녹음 장치에 오류가 발생했습니다",
-      "operationFailed": "작업 실패"
+      "operationFailed": "작업 실패",
+      "operationFailedWithCode": "작업 실패 ({code})"
     },
     "enhancement": {
       "timeout": "AI 정리 시간 초과, 원본 텍스트를 붙여넣었습니다",
@@ -433,7 +437,8 @@
       "rateLimited": "요청이 너무 빈번합니다. 잠시 후 다시 시도하세요",
       "badRequest": "모델 요청 오류입니다. 설정을 확인해주세요",
       "serviceUnavailable": "AI 정리 서비스를 일시적으로 사용할 수 없습니다",
-      "failed": "AI 정리 실패"
+      "failed": "AI 정리 실패",
+      "failedWithCode": "AI 정리 실패 ({code})"
     },
     "hotkey": {
       "accessibilityPermission": "손쉬운 사용 권한이 필요합니다",

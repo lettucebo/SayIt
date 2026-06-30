@@ -9,6 +9,12 @@ export function extractErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+export function buildDiagnosticCode(message: string): string {
+  const cleaned = message.replace(/\s+/g, " ").trim();
+  if (cleaned.length === 0) return "unknown";
+  return cleaned.length > 80 ? `${cleaned.slice(0, 80)}…` : cleaned;
+}
+
 export function getMicrophoneErrorMessage(error: unknown): string {
   // Rust AudioRecorderError 字串匹配（透過 Tauri invoke 傳來的字串錯誤）
   const message = extractErrorMessage(error);
@@ -58,6 +64,21 @@ export function getTranscriptionErrorMessage(error: unknown): string {
     return t("errors.network");
   }
 
+  if (
+    message.includes("No audio data") ||
+    message.includes("Audio data too small")
+  ) {
+    return t("errors.transcription.noAudio");
+  }
+
+  if (message.includes("API key is missing")) {
+    return t("errors.apiKeyMissing");
+  }
+
+  if (message.includes("Failed to parse API response")) {
+    return t("errors.transcription.parseError");
+  }
+
   if (message.includes("Audio file too large")) {
     return t("errors.transcription.fileTooLarge");
   }
@@ -68,8 +89,17 @@ export function getTranscriptionErrorMessage(error: unknown): string {
       const status = parseInt(statusMatch[1], 10);
       if (status === 400) return t("errors.transcription.invalidAudio");
       if (status === 401) return t("errors.transcription.invalidApiKey");
+      if (status === 403) return t("errors.transcription.invalidApiKey");
+      if (status === 408 || status === 504) {
+        return t("errors.transcription.timeout");
+      }
+      if (status === 413) return t("errors.transcription.fileTooLarge");
+      if (status === 422) return t("errors.transcription.invalidAudio");
       if (status === 429) return t("errors.transcription.rateLimited");
       if (status >= 500) return t("errors.transcription.serviceUnavailable");
+      return t("errors.transcription.operationFailedWithCode", {
+        code: `HTTP ${status}`,
+      });
     }
     return t("errors.transcription.failed");
   }
@@ -78,7 +108,9 @@ export function getTranscriptionErrorMessage(error: unknown): string {
     return t("errors.transcription.recorderError");
   }
 
-  return t("errors.transcription.operationFailed");
+  return t("errors.transcription.operationFailedWithCode", {
+    code: buildDiagnosticCode(message),
+  });
 }
 
 export function getEnhancementErrorMessage(error: unknown): string {
@@ -107,7 +139,9 @@ export function getEnhancementErrorMessage(error: unknown): string {
     }
   }
 
-  return t("errors.enhancement.failed");
+  return t("errors.enhancement.failedWithCode", {
+    code: buildDiagnosticCode(extractErrorMessage(error)),
+  });
 }
 
 const HOTKEY_ERROR_KEY_MAP: Record<string, string> = {
