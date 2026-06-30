@@ -2,6 +2,17 @@
 
 SayIt 版本更新紀錄。
 
+## [0.11.9] - 2026-06-30
+
+### Fixed
+
+- HUD 浮窗在「跟隨系統」下、執行期切換 OS 明暗主題時不會即時跟著變的問題（Windows）：透明且預設隱藏的 HUD WebView（WebView2）收不到 `WM_THEMECHANGED`，因此 OS 主題在 app 執行期間切換時，HUD 會停在舊配色、與儀表板不一致。改由 Rust 端讀取系統登錄 `AppsUseLightTheme`、以 1.5 秒輪詢廣播 `theme:os-changed`，HUD 收到後即時套用；並修正「在權威讀取之前就先註冊廣播監聽」的競態，避免錯過第一次切換
+- 轉錄失敗時錯誤訊息過於籠統的問題：原本多種 Whisper／轉錄錯誤都落到同一句通用訊息，使用者難以判斷是網路、金鑰、檔案還是服務端問題。新增更多狀態碼對應與錯誤分類（含診斷碼），讓失敗提示更具體、可行動
+
+### Improved
+
+- 錯誤遙測（Sentry）整合改為真正可用且隱私安全：先前前端 `@sentry/vue` 事件因 WebView CSP `connect-src` 未含 Sentry ingest 主機而被靜默封鎖（正式版 90 天內 0 事件）。本版（1）將 ingest 主機加入 CSP 放行前端事件；（2）加入 `beforeSend`／`beforeBreadcrumb` scrubbers 與 Rust `before_send`，以白名單方式確保轉錄／整理文字、字典詞、API 金鑰／Azure 憑證、游標欄位文字、剪貼簿內容等敏感資料絕不上傳；（3）啟用 Rust application-mode Release Health（crash-free sessions，並移除前端 BrowserSession 避免雙視窗重複計數）；（4）發版時關聯 commit（suspect commits）並記錄 production deploy。全程維持 `sendDefaultPii: false`、不啟用 Session Replay
+
 ## [0.11.8] - 2026-06-30
 
 ### Added

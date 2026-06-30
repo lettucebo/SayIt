@@ -491,7 +491,8 @@
     },
     "upgradeNotice": {
       "title": "SayIt Update Summary",
-      "item1": "Redo from history: every history entry can now be re-transcribed or re-enhanced directly — no need to record again when a transcription failed or the result wasn't great; it reuses the original recording.",
+      "item1": "HUD theme follows the OS live (Windows): switch your system to dark or light and the HUD overlay now updates instantly instead of staying on the old colors.",
+      "item2": "Clearer transcription errors: when transcription fails, SayIt now points to the likely cause — network, API key, file, or service — instead of one generic message.",
       "dismiss": "Got it"
     }
   },
