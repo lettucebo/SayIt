@@ -155,10 +155,12 @@ export function applyTheme(mode: ThemeMode): void {
 
 // mount 前盡早讀取持久化主題並套用，避免閃白
 export async function initThemeFromStore(): Promise<ThemeMode> {
-  // 先取得權威 OS 主題並訂閱變更，確保 system 模式在所有視窗解析一致
-  await refreshOsTheme();
+  // 先註冊 OS 外觀廣播監聽，再做權威讀取：避免「監聽就緒前 OS 剛好變更、
+  // Rust poll 已 emit 而前端漏接」的啟動競態（poll 不 replay current state，
+  // 故 listener 須先就緒；之後 refreshOsTheme 直接讀登錄檔取得當下真值補正）。
   void ensureOsThemeWatcher();
-  void ensureOsThemeBroadcastListener();
+  await ensureOsThemeBroadcastListener();
+  await refreshOsTheme();
 
   let mode = DEFAULT_THEME_MODE;
   try {
