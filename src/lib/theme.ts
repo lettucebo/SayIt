@@ -1,7 +1,9 @@
 /// <reference types="vite/client" />
 import { load } from "@tauri-apps/plugin-store";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { invoke } from "@tauri-apps/api/core";
 import { THEME_MODE_VALUES, type ThemeMode } from "../types/settings";
+import { listenToEvent, THEME_OS_CHANGED } from "../composables/useTauriEvents";
 
 const STORE_NAME = "settings.json";
 const THEME_STORE_KEY = "themeMode";
@@ -13,12 +15,14 @@ let mediaQuery: MediaQueryList | null = null;
 let systemListener: ((event: MediaQueryListEvent) => void) | null = null;
 let activeMode: ThemeMode = DEFAULT_THEME_MODE;
 
-// OS 外觀以 Tauri 視窗主題 API 為權威來源（跨平台一致）；
-// 透明的 HUD WebView 在 Windows 下 CSS matchMedia 不一定反映 OS 外觀，
-// 故快取 Tauri 回報的 OS 主題，matchMedia 僅作為非 Tauri / null 時的 fallback。
+// OS 外觀權威來源優先序：Rust `get_os_theme`（Windows 讀登錄檔，不受透明/隱藏
+// 視窗 WebView2 影響）→ Tauri `window.theme()` → matchMedia（最後 fallback）。
+// 透明+隱藏的 HUD 在 Windows 收不到 WM_THEMECHANGED，故 OS 變更改由 Rust 以
+// `theme:os-changed` 自訂事件可靠廣播（見下方 ensureOsThemeBroadcastListener）。
 let osThemeDark: boolean | null = null;
 let osWatcherInit = false;
 let unlistenOsThemeWatcher: (() => void) | null = null;
+let unlistenOsThemeBroadcast: (() => void) | null = null;
 
 export function isThemeMode(value: unknown): value is ThemeMode {
   return (
@@ -40,8 +44,23 @@ export function resolveTheme(mode: ThemeMode): "light" | "dark" {
   return mode === "system" ? (prefersDark() ? "dark" : "light") : mode;
 }
 
-// 以 Tauri 視窗主題 API 取得權威 OS 外觀，快取供同步的 applyTheme 使用
+// 取得權威 OS 外觀，快取供同步的 applyTheme 使用。
+// 優先 Rust `get_os_theme`（Windows 讀登錄檔，最可靠）→ Tauri `window.theme()`。
 async function refreshOsTheme(): Promise<void> {
+  try {
+    const osTheme = await invoke<string | null>("get_os_theme");
+    if (osTheme === "dark") {
+      osThemeDark = true;
+      return;
+    }
+    if (osTheme === "light") {
+      osThemeDark = false;
+      return;
+    }
+    // null（非 Windows / 讀取失敗）→ 往下 fallback
+  } catch {
+    // 非 Tauri 環境或 command 未註冊：往下 fallback
+  }
   try {
     const t = await getCurrentWindow().theme();
     if (t === "dark") osThemeDark = true;
@@ -70,12 +89,33 @@ async function ensureOsThemeWatcher(): Promise<void> {
   }
 }
 
+// 訂閱 Rust 廣播的 OS 外觀變更（`theme:os-changed`）。透明+隱藏的 HUD 在
+// Windows 收不到 WM_THEMECHANGED，此自訂事件走可靠 IPC，所有視窗皆能即時跟隨。
+async function ensureOsThemeBroadcastListener(): Promise<void> {
+  if (unlistenOsThemeBroadcast) return;
+  try {
+    unlistenOsThemeBroadcast = await listenToEvent<string>(
+      THEME_OS_CHANGED,
+      ({ payload }) => {
+        osThemeDark = payload === "dark";
+        if (activeMode === "system") {
+          document.documentElement.classList.toggle("dark", osThemeDark);
+        }
+      },
+    );
+  } catch {
+    // 監聽失敗允許之後重試（下次 initThemeFromStore）
+  }
+}
+
 // Vite HMR：模組熱替換時解除舊訂閱，避免 dev 期間重複監聽
 if (import.meta.hot) {
   import.meta.hot.dispose(() => {
     unlistenOsThemeWatcher?.();
     unlistenOsThemeWatcher = null;
     osWatcherInit = false;
+    unlistenOsThemeBroadcast?.();
+    unlistenOsThemeBroadcast = null;
   });
 }
 
@@ -118,6 +158,7 @@ export async function initThemeFromStore(): Promise<ThemeMode> {
   // 先取得權威 OS 主題並訂閱變更，確保 system 模式在所有視窗解析一致
   await refreshOsTheme();
   void ensureOsThemeWatcher();
+  void ensureOsThemeBroadcastListener();
 
   let mode = DEFAULT_THEME_MODE;
   try {
