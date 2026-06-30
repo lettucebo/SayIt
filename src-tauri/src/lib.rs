@@ -422,6 +422,8 @@ pub fn run() {
                 release: Some(get_sentry_release().into()),
                 environment: Some(get_sentry_environment().into()),
                 send_default_pii: false,
+                auto_session_tracking: true,
+                session_mode: sentry::SessionMode::Application,
                 before_send: Some(std::sync::Arc::new(
                     |mut event: sentry::protocol::Event<'static>| {
                         // 隱私硬規則：不外洩主機名稱與 request（URL/headers/cookies）。
@@ -668,6 +670,9 @@ pub fn run() {
                     std::thread::sleep(std::time::Duration::from_millis(200));
 
                     // 7. Flush Sentry 事件佇列（確保 shutdown 前的事件送出）
+                    //    Application session：_exit(0) 會跳過 _sentry_guard 的 Drop，
+                    //    故在 flush 前顯式結束 session，確保 release health 資料送出。
+                    sentry::end_session();
                     if let Some(client) = sentry::Hub::current().client() {
                         client.flush(Some(std::time::Duration::from_secs(2)));
                     }

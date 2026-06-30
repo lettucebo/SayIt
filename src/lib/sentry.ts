@@ -45,7 +45,10 @@ export function initSentryForHud(app: App): void {
     sendDefaultPii: false,
     beforeSend: (event) => scrubEvent(event),
     beforeBreadcrumb: (breadcrumb) => scrubBreadcrumb(breadcrumb),
-    integrations: [],
+    // Rust Application-mode session 為 release health 的單一來源；
+    // 移除前端 BrowserSession,避免雙視窗各自起 session 造成重複計數。
+    integrations: (defaults) =>
+      defaults.filter((integration) => integration.name !== "BrowserSession"),
     initialScope: {
       tags: { window: "hud" },
     },
@@ -65,8 +68,15 @@ export function initSentryForDashboard(app: App, router: Router): void {
     sendDefaultPii: false,
     beforeSend: (event) => scrubEvent(event),
     beforeBreadcrumb: (breadcrumb) => scrubBreadcrumb(breadcrumb),
-    integrations:
-      tracesSampleRate > 0 ? [Sentry.browserTracingIntegration({ router })] : [],
+    // Rust Application-mode session 為 release health 的單一來源；移除前端 BrowserSession。
+    integrations: (defaults) => {
+      const base = defaults.filter(
+        (integration) => integration.name !== "BrowserSession",
+      );
+      return tracesSampleRate > 0
+        ? [...base, Sentry.browserTracingIntegration({ router })]
+        : base;
+    },
     ...(tracesSampleRate > 0 ? { tracesSampleRate } : {}),
     initialScope: {
       tags: { window: "dashboard" },
