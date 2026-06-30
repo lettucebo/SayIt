@@ -425,7 +425,7 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
     playSoundIfEnabled("play_error_sound");
     writeErrorLog(logMessage);
     if (error) {
-      captureError(error, { userMessage: errorMessage, source: "voice-flow" });
+      captureError(error, { source: "voice-flow", step: "recording" });
     }
   }
 
