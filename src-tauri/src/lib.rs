@@ -422,6 +422,16 @@ pub fn run() {
                 release: Some(get_sentry_release().into()),
                 environment: Some(get_sentry_environment().into()),
                 send_default_pii: false,
+                before_send: Some(std::sync::Arc::new(
+                    |mut event: sentry::protocol::Event<'static>| {
+                        // 隱私硬規則：不外洩主機名稱與 request（URL/headers/cookies）。
+                        // Rust 端僅透過 panic integration 上報，事件不含轉錄文字/字典詞/金鑰，
+                        // 故此處只需防禦性清除識別性欄位。
+                        event.server_name = None;
+                        event.request = None;
+                        Some(event)
+                    },
+                )),
                 ..Default::default()
             },
         )))

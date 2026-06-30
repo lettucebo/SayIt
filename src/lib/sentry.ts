@@ -2,6 +2,11 @@
 import * as Sentry from "@sentry/vue";
 import type { App } from "vue";
 import type { Router } from "vue-router";
+import {
+  isValidSentryDsn,
+  scrubBreadcrumb,
+  scrubEvent,
+} from "./sentryScrubbing";
 
 declare const __APP_VERSION__: string;
 
@@ -26,7 +31,7 @@ function getTracesSampleRate(): number {
 }
 
 function isSentryEnabled(): boolean {
-  return import.meta.env.PROD && Boolean(getSentryDsn());
+  return import.meta.env.PROD && isValidSentryDsn(getSentryDsn());
 }
 
 export function initSentryForHud(app: App): void {
@@ -38,6 +43,8 @@ export function initSentryForHud(app: App): void {
     environment: getSentryEnvironment(),
     release: getSentryRelease(),
     sendDefaultPii: false,
+    beforeSend: (event) => scrubEvent(event),
+    beforeBreadcrumb: (breadcrumb) => scrubBreadcrumb(breadcrumb),
     integrations: [],
     initialScope: {
       tags: { window: "hud" },
@@ -56,6 +63,8 @@ export function initSentryForDashboard(app: App, router: Router): void {
     environment: getSentryEnvironment(),
     release: getSentryRelease(),
     sendDefaultPii: false,
+    beforeSend: (event) => scrubEvent(event),
+    beforeBreadcrumb: (breadcrumb) => scrubBreadcrumb(breadcrumb),
     integrations:
       tracesSampleRate > 0 ? [Sentry.browserTracingIntegration({ router })] : [],
     ...(tracesSampleRate > 0 ? { tracesSampleRate } : {}),
