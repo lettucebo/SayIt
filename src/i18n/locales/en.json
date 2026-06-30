@@ -486,7 +486,7 @@
     },
     "upgradeNotice": {
       "title": "SayIt Update Summary",
-      "item1": "Follow-system theme fix: when set to System, the floating HUD now switches light/dark together with the dashboard — instead of staying stuck on its previous color.",
+      "item1": "Redo from history: every history entry can now be re-transcribed or re-enhanced directly — no need to record again when a transcription failed or the result wasn't great; it reuses the original recording.",
       "dismiss": "Got it"
     }
   },
