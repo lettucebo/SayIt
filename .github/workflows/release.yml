@@ -43,6 +43,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
 
       - name: Resolve release metadata
         shell: bash
@@ -116,7 +117,7 @@ jobs:
           prerelease: false
           args: ${{ matrix.args }}
 
-      - name: Upload frontend sourcemaps to Sentry
+      - name: Sentry release — sourcemaps, commits, deploy
         if: matrix.upload_sourcemaps == 'true'
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
@@ -130,12 +131,18 @@ jobs:
           fi
 
           npx @sentry/cli releases new "$SENTRY_RELEASE" || true
+          # Phase 5: associate commits to enable suspect-commits. Requires the repo
+          # added in Sentry (Settings > Integrations > GitHub); non-fatal so the
+          # release still succeeds if not yet configured.
+          npx @sentry/cli releases set-commits "$SENTRY_RELEASE" --auto || true
           npx @sentry/cli sourcemaps upload dist/assets \
             --release "$SENTRY_RELEASE" \
             --url-prefix "~/assets" \
             --validate \
             --wait
           npx @sentry/cli releases finalize "$SENTRY_RELEASE" || true
+          # Phase 8: mark a production deploy for this release (non-fatal).
+          npx @sentry/cli releases deploys "$SENTRY_RELEASE" new -e production || true
 
       - name: Upload stable-name asset (macOS)
         if: runner.os == 'macOS'
