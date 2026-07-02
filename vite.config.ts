@@ -1,4 +1,4 @@
-import { resolve, sep } from "node:path";
+import { resolve } from "node:path";
 import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
 import tailwindcss from "@tailwindcss/vite";
@@ -43,14 +43,25 @@ export default defineConfig({
         // 明確切分重量級 vendor，讓快取更可預期、避免單一巨型 shared chunk
         // 被兩個 entry 都 preload（perf 稽核 F3）。@sentry/vue 本身已改動態
         // import 而自動獨立成 chunk，這裡另外切出 UI 元件庫與圖表庫。
+        // 依「最後一個 node_modules/ 之後的套件名」精確分組，避免 substring 比對誤傷
+        // （例如 "/vue/" 會誤中 @sentry/vue、@unovis/vue、@floating-ui/vue）。
+        // 亦與平台無關：Rollup/Vite 的 module id 在所有 OS 皆為正斜線。
         manualChunks(id) {
-          if (!id.includes("node_modules")) return undefined;
-          if (id.includes("reka-ui")) return "vendor-reka-ui";
+          if (!id.includes("node_modules/")) return undefined;
+          const afterNodeModules = id.split("node_modules/").pop() ?? "";
+          const segments = afterNodeModules.split("/");
+          const packageName = afterNodeModules.startsWith("@")
+            ? `${segments[0]}/${segments[1]}`
+            : segments[0];
+
+          if (packageName === "reka-ui") return "vendor-reka-ui";
           if (
-            id.includes(`${sep}vue${sep}`) ||
-            id.includes("vue-router") ||
-            id.includes("vue-i18n") ||
-            id.includes(`${sep}pinia${sep}`)
+            packageName === "vue" ||
+            packageName === "vue-router" ||
+            packageName === "vue-i18n" ||
+            packageName === "pinia" ||
+            packageName.startsWith("@vue/") ||
+            packageName.startsWith("@intlify/")
           ) {
             return "vendor-vue";
           }

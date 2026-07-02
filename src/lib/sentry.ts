@@ -111,15 +111,24 @@ export function captureError(
   // 一旦模組載入完成，之後的錯誤都會正常回報。
   if (!sentryModulePromise) return;
 
-  void sentryModulePromise.then((Sentry) => {
-    if (context) {
-      Sentry.withScope((scope) => {
-        scope.setExtras(context);
-        Sentry.captureException(error);
-      });
-      return;
-    }
+  void sentryModulePromise
+    .then((Sentry) => {
+      if (context) {
+        Sentry.withScope((scope) => {
+          scope.setExtras(context);
+          Sentry.captureException(error);
+        });
+        return;
+      }
 
-    Sentry.captureException(error);
-  });
+      Sentry.captureException(error);
+    })
+    .catch((loadErr) => {
+      // 動態 import 失敗時，避免 rejected promise 冒泡成 unhandledrejection →
+      // 觸發全域 handler → 再次呼叫 captureError → 無限迴圈。此處吞掉並落 console。
+      console.error(
+        "[Sentry] capture skipped (module failed to load):",
+        loadErr,
+      );
+    });
 }

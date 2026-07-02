@@ -13,7 +13,7 @@ import type { TranscriptionResult } from "../types/audio";
 import type { TranscriptionCompletedPayload } from "../types/events";
 import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "../lib/database";
-import { buildDailyUsageSeries } from "../lib/usageTrend";
+import { buildDailyUsageSeries, getLocalDayUtcRangeForSqlite } from "../lib/usageTrend";
 import { extractErrorMessage } from "../lib/errorUtils";
 import { captureError } from "../lib/sentry";
 import {
@@ -41,35 +41,6 @@ export interface HistoryRetryResult {
 
 const PAGE_SIZE = 20;
 const USAGE_TREND_DAYS = 14;
-
-/**
- * 計算「本地今天」的起訖時刻，轉為與 `api_usage.created_at`（SQLite `datetime('now')`，
- * UTC、格式 "YYYY-MM-DD HH:MM:SS"）相同格式的字串，供 range 查詢使用。
- * 改用 `created_at >= $1 AND created_at < $2` 取代 `DATE(created_at, 'localtime') = ...`，
- * 避免函式包裹欄位導致索引失效，同時維持「本地日」語意不變（perf 稽核 F7）。
- */
-function getLocalDayUtcRangeForSqlite(
-  now: Date = new Date(),
-): [string, string] {
-  const localStartOfDay = new Date(
-    now.getFullYear(),
-    now.getMonth(),
-    now.getDate(),
-    0,
-    0,
-    0,
-    0,
-  );
-  const localEndOfDay = new Date(
-    localStartOfDay.getTime() + 24 * 60 * 60 * 1000,
-  );
-  const toSqliteUtcDatetime = (date: Date) =>
-    date.toISOString().slice(0, 19).replace("T", " ");
-  return [
-    toSqliteUtcDatetime(localStartOfDay),
-    toSqliteUtcDatetime(localEndOfDay),
-  ];
-}
 
 interface RawTranscriptionRow {
   id: string;
