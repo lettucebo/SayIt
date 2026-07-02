@@ -392,6 +392,28 @@ async function doInitializeDatabase(): Promise<Database> {
     );
   }
 
+  // --- Migration v8 → v9: api_usage.created_at index（daily-quota range 查詢用）---
+  // 對應 useHistoryStore.ts 的 DAILY_QUOTA_USAGE_SQL 改為 created_at >= $1 AND < $2
+  // range 查詢（原本 DATE(created_at, 'localtime') = ... 因欄位被函式包裹而無法用索引，
+  // perf 稽核 F7）。
+  const v9VersionRows = await connection.select<{ version: number }[]>(
+    "SELECT version FROM schema_version ORDER BY version DESC LIMIT 1",
+  );
+  const v9CurrentVersion = v9VersionRows[0]?.version ?? 1;
+
+  if (v9CurrentVersion < 9) {
+    await connection.execute(
+      "CREATE INDEX IF NOT EXISTS idx_api_usage_created_at ON api_usage(created_at);",
+    );
+
+    await connection.execute(
+      "INSERT OR REPLACE INTO schema_version (version) VALUES (9);",
+    );
+    console.log(
+      "[database] Migration v8 → v9: api_usage.created_at index",
+    );
+  }
+
   // --- 關鍵表驗證與恢復 ---
   // 先前版本的 migration 可能因連線池覆蓋導致 DROP TABLE 後未 RENAME，
   // 若 api_usage 不存在則以最新 schema 重建（資料已遺失，但 app 可正常運作）

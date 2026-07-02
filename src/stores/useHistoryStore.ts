@@ -42,6 +42,35 @@ export interface HistoryRetryResult {
 const PAGE_SIZE = 20;
 const USAGE_TREND_DAYS = 14;
 
+/**
+ * 計算「本地今天」的起訖時刻，轉為與 `api_usage.created_at`（SQLite `datetime('now')`，
+ * UTC、格式 "YYYY-MM-DD HH:MM:SS"）相同格式的字串，供 range 查詢使用。
+ * 改用 `created_at >= $1 AND created_at < $2` 取代 `DATE(created_at, 'localtime') = ...`，
+ * 避免函式包裹欄位導致索引失效，同時維持「本地日」語意不變（perf 稽核 F7）。
+ */
+function getLocalDayUtcRangeForSqlite(
+  now: Date = new Date(),
+): [string, string] {
+  const localStartOfDay = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+    0,
+    0,
+    0,
+    0,
+  );
+  const localEndOfDay = new Date(
+    localStartOfDay.getTime() + 24 * 60 * 60 * 1000,
+  );
+  const toSqliteUtcDatetime = (date: Date) =>
+    date.toISOString().slice(0, 19).replace("T", " ");
+  return [
+    toSqliteUtcDatetime(localStartOfDay),
+    toSqliteUtcDatetime(localEndOfDay),
+  ];
+}
+
 interface RawTranscriptionRow {
   id: string;
   timestamp: number;
@@ -142,7 +171,7 @@ const DAILY_QUOTA_USAGE_SQL = `
     COALESCE(SUM(total_tokens), 0) as total_tokens,
     COALESCE(SUM(MAX(COALESCE(audio_duration_ms, 0), 10000)), 0) as billed_audio_ms
   FROM api_usage
-  WHERE DATE(created_at, 'localtime') = DATE('now', 'localtime')
+  WHERE created_at >= $1 AND created_at < $2
   GROUP BY api_type
 `;
 
@@ -423,7 +452,11 @@ export const useHistoryStore = defineStore("history", () => {
 
   async function fetchDailyQuotaUsage(): Promise<DailyQuotaUsage> {
     const db = getDatabase();
-    const rows = await db.select<DailyQuotaUsageRow[]>(DAILY_QUOTA_USAGE_SQL);
+    const [startUtc, endUtc] = getLocalDayUtcRangeForSqlite();
+    const rows = await db.select<DailyQuotaUsageRow[]>(DAILY_QUOTA_USAGE_SQL, [
+      startUtc,
+      endUtc,
+    ]);
 
     const result: DailyQuotaUsage = {
       whisperRequestCount: 0,
