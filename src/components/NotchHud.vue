@@ -503,7 +503,7 @@ onUnmounted(() => {
     background 0.3s ease;
 }
 
-:global(html.dark) .notch-hud {
+html.dark .notch-hud {
   --notch-bg: #000000;
   --notch-fg: #ffffff;
   --notch-fg-soft: rgba(255, 255, 255, 0.4);
