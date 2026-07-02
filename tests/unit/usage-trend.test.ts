@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { buildDailyUsageSeries } from "../../src/lib/usageTrend";
+import {
+  buildDailyUsageSeries,
+  getLocalDayUtcRangeForSqlite,
+} from "../../src/lib/usageTrend";
 import type { DailyUsageTrend } from "../../src/types/transcription";
 
 function toLocalKey(date: Date): string {
@@ -117,5 +120,91 @@ describe("buildDailyUsageSeries", () => {
     expect(series).toHaveLength(14);
     expect(series[series.length - 1].date).toBe(toLocalKey(new Date()));
     expect(series[series.length - 1].count).toBe(2);
+  });
+});
+
+describe("getLocalDayUtcRangeForSqlite", () => {
+  const SQLITE_UTC_PATTERN = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
+  // 把 SQLite UTC 字串（"YYYY-MM-DD HH:MM:SS"，UTC）轉回可比較的 epoch。
+  const sqliteUtcToEpoch = (s: string) =>
+    new Date(`${s.replace(" ", "T")}Z`).getTime();
+
+  it("[P1] 回傳格式為 SQLite datetime('now') 對齊的 'YYYY-MM-DD HH:MM:SS'（UTC，秒精度）", () => {
+    const [start, end] = getLocalDayUtcRangeForSqlite(new Date(2026, 5, 15, 13, 42, 7));
+    expect(start).toMatch(SQLITE_UTC_PATTERN);
+    expect(end).toMatch(SQLITE_UTC_PATTERN);
+  });
+
+  it("[P1] start/end 對應到 now 的本地午夜與隔日本地午夜（TZ 無關的往返驗證）", () => {
+    const now = new Date(2026, 5, 15, 13, 42, 7); // 本地某時刻
+    const [start, end] = getLocalDayUtcRangeForSqlite(now);
+
+    const expectedLocalMidnight = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+    ).getTime();
+    const expectedNextLocalMidnight = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate() + 1,
+    ).getTime();
+
+    expect(sqliteUtcToEpoch(start)).toBe(expectedLocalMidnight);
+    expect(sqliteUtcToEpoch(end)).toBe(expectedNextLocalMidnight);
+  });
+
+  it("[P1] 半開區間 [start, end)：本地當日午夜納入、隔日午夜排除", () => {
+    const now = new Date(2026, 5, 15, 9, 0, 0);
+    const [start, end] = getLocalDayUtcRangeForSqlite(now);
+    const startEpoch = sqliteUtcToEpoch(start);
+    const endEpoch = sqliteUtcToEpoch(end);
+
+    const localMidnight = new Date(2026, 5, 15).getTime();
+    const justBeforeMidnight = localMidnight - 1;
+    const midDay = new Date(2026, 5, 15, 12, 0, 0).getTime();
+    const nextMidnight = new Date(2026, 5, 16).getTime();
+
+    // 當日午夜與白天落在區間內
+    expect(localMidnight >= startEpoch && localMidnight < endEpoch).toBe(true);
+    expect(midDay >= startEpoch && midDay < endEpoch).toBe(true);
+    // 前一刻與隔日午夜落在區間外
+    expect(justBeforeMidnight >= startEpoch && justBeforeMidnight < endEpoch).toBe(false);
+    expect(nextMidnight >= startEpoch && nextMidnight < endEpoch).toBe(false);
+  });
+
+  it("[P2] start 字典序小於 end（可安全用於字串範圍比較）", () => {
+    const [start, end] = getLocalDayUtcRangeForSqlite(new Date(2026, 0, 1, 0, 0, 0));
+    expect(start < end).toBe(true);
+  });
+
+  it("[P2] 跨月/跨年邊界：12/31 當日隔日午夜為次年 1/1", () => {
+    const now = new Date(2026, 11, 31, 23, 30, 0); // 本地 2026-12-31
+    const [, end] = getLocalDayUtcRangeForSqlite(now);
+    expect(sqliteUtcToEpoch(end)).toBe(new Date(2027, 0, 1).getTime());
+  });
+
+  it("[P2] end 一律為「隔日本地午夜」而非 start+24h（DST 日仍正確）", () => {
+    // 對多個日期（含美國 DST 轉換日）驗證：end 轉回本地時皆為隔日 00:00:00。
+    // 此不變式在任何時區皆成立；若實作誤用 start+24h，在 DST 時區的轉換日會失敗。
+    const samples = [
+      new Date(2026, 2, 8, 10, 0, 0), // 2026-03-08（美國 spring-forward）
+      new Date(2026, 10, 1, 10, 0, 0), // 2026-11-01（美國 fall-back）
+      new Date(2026, 5, 15, 9, 0, 0), // 一般日
+    ];
+    for (const now of samples) {
+      const [, end] = getLocalDayUtcRangeForSqlite(now);
+      const endLocal = new Date(sqliteUtcToEpoch(end));
+      const expectedNextMidnight = new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        now.getDate() + 1,
+      );
+      expect(endLocal.getTime()).toBe(expectedNextMidnight.getTime());
+      // 轉回本地時應恰為午夜（time-of-day 全 0）
+      expect(endLocal.getHours()).toBe(0);
+      expect(endLocal.getMinutes()).toBe(0);
+      expect(endLocal.getSeconds()).toBe(0);
+    }
   });
 });

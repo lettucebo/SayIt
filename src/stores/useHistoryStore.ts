@@ -13,7 +13,7 @@ import type { TranscriptionResult } from "../types/audio";
 import type { TranscriptionCompletedPayload } from "../types/events";
 import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "../lib/database";
-import { buildDailyUsageSeries } from "../lib/usageTrend";
+import { buildDailyUsageSeries, getLocalDayUtcRangeForSqlite } from "../lib/usageTrend";
 import { extractErrorMessage } from "../lib/errorUtils";
 import { captureError } from "../lib/sentry";
 import {
@@ -142,7 +142,7 @@ const DAILY_QUOTA_USAGE_SQL = `
     COALESCE(SUM(total_tokens), 0) as total_tokens,
     COALESCE(SUM(MAX(COALESCE(audio_duration_ms, 0), 10000)), 0) as billed_audio_ms
   FROM api_usage
-  WHERE DATE(created_at, 'localtime') = DATE('now', 'localtime')
+  WHERE created_at >= $1 AND created_at < $2
   GROUP BY api_type
 `;
 
@@ -423,7 +423,11 @@ export const useHistoryStore = defineStore("history", () => {
 
   async function fetchDailyQuotaUsage(): Promise<DailyQuotaUsage> {
     const db = getDatabase();
-    const rows = await db.select<DailyQuotaUsageRow[]>(DAILY_QUOTA_USAGE_SQL);
+    const [startUtc, endUtc] = getLocalDayUtcRangeForSqlite();
+    const rows = await db.select<DailyQuotaUsageRow[]>(DAILY_QUOTA_USAGE_SQL, [
+      startUtc,
+      endUtc,
+    ]);
 
     const result: DailyQuotaUsage = {
       whisperRequestCount: 0,

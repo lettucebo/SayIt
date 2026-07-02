@@ -392,6 +392,33 @@ async function doInitializeDatabase(): Promise<Database> {
     );
   }
 
+  // --- Migration v8 → v9: api_usage.created_at index（daily-quota range 查詢用）---
+  // 對應 useHistoryStore.ts 的 DAILY_QUOTA_USAGE_SQL 改為 created_at >= $1 AND < $2
+  // range 查詢（原本 DATE(created_at, 'localtime') = ... 因欄位被函式包裹而無法用索引，
+  // perf 稽核 F7）。
+  const v9VersionRows = await connection.select<{ version: number }[]>(
+    "SELECT version FROM schema_version ORDER BY version DESC LIMIT 1",
+  );
+  const v9CurrentVersion = v9VersionRows[0]?.version ?? 1;
+
+  if (v9CurrentVersion < 9) {
+    // 以 tableExists 護欄：若 api_usage 因先前失敗的 migration 而缺失，直接 CREATE INDEX
+    // 會拋 "no such table: api_usage" 使整個初始化失敗；此時交由下方恢復區塊重建表，
+    // 索引則由該區塊之後「無條件確保 created_at 索引」的冪等步驟補上。
+    if (await tableExists(connection, "api_usage")) {
+      await connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_api_usage_created_at ON api_usage(created_at);",
+      );
+    }
+
+    await connection.execute(
+      "INSERT OR REPLACE INTO schema_version (version) VALUES (9);",
+    );
+    console.log(
+      "[database] Migration v8 → v9: api_usage.created_at index",
+    );
+  }
+
   // --- 關鍵表驗證與恢復 ---
   // 先前版本的 migration 可能因連線池覆蓋導致 DROP TABLE 後未 RENAME，
   // 若 api_usage 不存在則以最新 schema 重建（資料已遺失，但 app 可正常運作）
@@ -444,8 +471,21 @@ async function doInitializeDatabase(): Promise<Database> {
         CREATE INDEX IF NOT EXISTS idx_api_usage_transcription_id
         ON api_usage(transcription_id);
       `);
+      await connection.execute(`
+        CREATE INDEX IF NOT EXISTS idx_api_usage_created_at
+        ON api_usage(created_at);
+      `);
       console.log("[database] Recovery: recreated missing api_usage table");
     }
+  }
+
+  // api_usage.created_at 索引最終保障（perf 稽核 F7）：涵蓋 v9 前表缺失被跳過、
+  // 恢復以 RENAME api_usage_new 重建（該分支不建索引）、或索引隨舊表遺失等情境。
+  // CREATE INDEX IF NOT EXISTS 冪等，存在則為近乎零成本的 metadata 檢查。
+  if (await tableExists(connection, "api_usage")) {
+    await connection.execute(
+      "CREATE INDEX IF NOT EXISTS idx_api_usage_created_at ON api_usage(created_at);",
+    );
   }
 
   // 只有全部 schema 建立成功才設定 singleton

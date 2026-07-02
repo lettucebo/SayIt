@@ -37,7 +37,7 @@ import {
   getPromptForModeAndLocale,
   isKnownDefaultPrompt,
 } from "../i18n/prompts";
-import i18n from "../i18n";
+import i18n, { switchLocale } from "../i18n";
 import {
   type SupportedLocale,
   type TranscriptionLocale,
@@ -412,7 +412,7 @@ export const useSettingsStore = defineStore("settings", () => {
         await store.set("selectedLocale", detected);
         await store.save();
       }
-      i18n.global.locale.value = selectedLocale.value;
+      await switchLocale(selectedLocale.value);
       document.documentElement.lang = getHtmlLangForLocale(
         selectedLocale.value,
       );
@@ -1443,7 +1443,7 @@ export const useSettingsStore = defineStore("settings", () => {
 
       await store.set("selectedLocale", locale);
       selectedLocale.value = locale;
-      i18n.global.locale.value = locale;
+      await switchLocale(locale);
       document.documentElement.lang = getHtmlLangForLocale(locale);
 
       await store.save();
@@ -1743,7 +1743,7 @@ export const useSettingsStore = defineStore("settings", () => {
       // Locale + transcription locale must be synced first — aiPrompt fallback depends on them
       const savedLocale = await store.get<SupportedLocale>("selectedLocale");
       selectedLocale.value = savedLocale ?? FALLBACK_LOCALE;
-      i18n.global.locale.value = selectedLocale.value;
+      await switchLocale(selectedLocale.value);
       document.documentElement.lang = getHtmlLangForLocale(
         selectedLocale.value,
       );

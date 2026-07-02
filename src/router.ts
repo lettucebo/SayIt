@@ -1,9 +1,12 @@
 import { createRouter, createWebHashHistory } from "vue-router";
-import DashboardView from "./views/DashboardView.vue";
-import HistoryView from "./views/HistoryView.vue";
-import DictionaryView from "./views/DictionaryView.vue";
-import SettingsView from "./views/SettingsView.vue";
-import FeatureGuideView from "./views/FeatureGuideView.vue";
+
+// Route-level code splitting: each view becomes its own chunk instead of being
+// bundled eagerly into the Dashboard entry (see perf audit F2).
+const DashboardView = () => import("./views/DashboardView.vue");
+const HistoryView = () => import("./views/HistoryView.vue");
+const DictionaryView = () => import("./views/DictionaryView.vue");
+const SettingsView = () => import("./views/SettingsView.vue");
+const FeatureGuideView = () => import("./views/FeatureGuideView.vue");
 
 const router = createRouter({
   history: createWebHashHistory(),

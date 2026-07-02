@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::sync::OnceLock;
 
 // Entra ID（client credentials）取 bearer token。
 //
@@ -8,6 +9,24 @@ use serde::{Deserialize, Serialize};
 // confidential client 的 client_credentials 請求。reqwest 不帶 Origin。
 
 const TOKEN_REQUEST_TIMEOUT_SECS: u64 = 30;
+
+// token 請求雖不頻繁，但每次呼叫都重建 reqwest::Client 會重新建立連線池/TLS 設定；
+// 改為 process 內共用單一 client（perf 稽核 F10）。reqwest::Client 內部已用 Arc
+// 包裝、可安全 clone/跨執行緒共用。
+static AZURE_AUTH_HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+
+fn get_azure_auth_http_client() -> Result<&'static reqwest::Client, String> {
+    if let Some(client) = AZURE_AUTH_HTTP_CLIENT.get() {
+        return Ok(client);
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(TOKEN_REQUEST_TIMEOUT_SECS))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    Ok(AZURE_AUTH_HTTP_CLIENT.get_or_init(|| client))
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -43,10 +62,7 @@ pub async fn get_azure_entra_token(
 
     let token_url = format!("https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token");
 
-    let http = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(TOKEN_REQUEST_TIMEOUT_SECS))
-        .build()
-        .map_err(|e| e.to_string())?;
+    let http = get_azure_auth_http_client()?;
 
     let params = [
         ("grant_type", "client_credentials"),

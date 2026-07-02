@@ -35,7 +35,9 @@ async function bootstrap() {
   const pinia = createPinia();
   const app = createApp(MainApp);
 
-  initSentryForDashboard(app, router);
+  initSentryForDashboard(app, router).catch((err) => {
+    console.error("[Dashboard] Failed to initialize Sentry:", err);
+  });
 
   window.addEventListener("unhandledrejection", (event) => {
     captureError(event.reason, { source: "dashboard-unhandled-rejection" });

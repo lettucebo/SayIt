@@ -30,6 +30,11 @@ jobs:
       - name: Test
         run: pnpm test
 
+      # 型別檢查已由上方 Type check 步驟涵蓋，這裡只跑 vite build，
+      # 以攔截 manualChunks / 動態 import / lazy JSON chunk 等只有打包才會現形的回歸。
+      - name: Vite build
+        run: npx vite build
+
   rust-check:
     strategy:
       matrix:
