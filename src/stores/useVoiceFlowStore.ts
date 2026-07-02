@@ -1078,6 +1078,9 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
     let recordingDurationMs = 0;
     let peakEnergyLevel = 0;
     let rmsEnergyLevel = 0;
+    // 同樣提升到 try 外層，讓 catch 分支在尚未走到任何 await 這個 Promise 的
+    // 正常分支時，仍能取得背景儲存的結果（perf 稽核 F4）。
+    let saveRecordingFilePromise: Promise<string | null> | null = null;
 
     try {
       const stopResult = await invoke<StopRecordingResult>("stop_recording");
@@ -1086,25 +1089,31 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
       peakEnergyLevel = stopResult.peakEnergyLevel;
       rmsEnergyLevel = stopResult.rmsEnergyLevel;
 
-      // 錄音檔儲存（不阻斷主流程）
-      try {
-        audioFilePath = await invoke<string>("save_recording_file", {
-          id: transcriptionId,
+      // 錄音檔儲存改為 fire-and-forget，與後續 whisperCfg/vocab 準備 + transcribe_audio
+      // 平行執行（perf 稽核 F4）：audioFilePath 只在真正需要寫入 record 前才 await 這個
+      // Promise（見下方各分支），把磁碟寫入疊在轉錄 API 的網路等待時間內，而非佔用熱路徑。
+      saveRecordingFilePromise = invoke<string>("save_recording_file", {
+        id: transcriptionId,
+      })
+        .then((path) => {
+          writeInfoLog(`useVoiceFlowStore: recording saved: ${path}`);
+          return path;
+        })
+        .catch((saveErr) => {
+          writeErrorLog(
+            `useVoiceFlowStore: save_recording_file failed (non-blocking): ${extractErrorMessage(saveErr)}`,
+          );
+          captureError(saveErr, {
+            source: "voice-flow",
+            step: "save-recording-file",
+          });
+          return null;
         });
-        writeInfoLog(`useVoiceFlowStore: recording saved: ${audioFilePath}`);
-      } catch (saveErr) {
-        writeErrorLog(
-          `useVoiceFlowStore: save_recording_file failed (non-blocking): ${extractErrorMessage(saveErr)}`,
-        );
-        captureError(saveErr, {
-          source: "voice-flow",
-          step: "save-recording-file",
-        });
-      }
 
       const MINIMUM_RECORDING_DURATION_MS = 300;
       if (recordingDurationMs < MINIMUM_RECORDING_DURATION_MS) {
-        // 錄音太短 → 寫入 failed 記錄，保留錄音檔
+        // 錄音太短 → 寫入 failed 記錄，保留錄音檔（此分支需要 audioFilePath，故在此 await）
+        audioFilePath = await saveRecordingFilePromise;
         const failedRecord = buildTranscriptionRecord({
           id: transcriptionId,
           rawText: "",
@@ -1144,6 +1153,8 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
       }
 
       const vocabularyStore = useVocabularyStore();
+      // top-50 依 weight 排序的詞彙表也會重用於稍後的 AI 整理階段，避免重複查詢
+      // 同一份資料（perf 稽核 F5）；轉錄與整理之間不會有詞彙異動，重用安全。
       const whisperTermList = await vocabularyStore.getTopTermListByWeight(50);
       const hasVocabulary = whisperTermList.length > 0;
 
@@ -1159,6 +1170,10 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
         authMode: whisperCfg.authMode ?? null,
       });
       if (isAborted.value) return;
+
+      // 轉錄 API 呼叫期間，錄音檔應已在背景寫入完成；在此 await 只是取得結果，
+      // 不會額外拖慢流程（perf 稽核 F4）。之後所有分支都需要 audioFilePath。
+      audioFilePath = await saveRecordingFilePromise;
 
       writeInfoLog(`轉錄原文: "${result.rawText}"`);
 
@@ -1268,8 +1283,7 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
             throw new Error(t("errors.apiKeyMissing"));
           }
 
-          const enhancementTermList =
-            await vocabularyStore.getTopTermListByWeight(50);
+          const enhancementTermList = whisperTermList;
           const enhanceOptions = {
             systemPrompt: settingsStore.getAiPrompt(),
             vocabularyTermList:
@@ -1411,6 +1425,9 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
       }
     } catch (error) {
       if (isAborted.value) return;
+      // 若尚未在正常流程中 await 過（例如例外發生在那之前），這裡補上，
+      // 確保仍能拿到已在背景完成的錄音檔路徑（perf 稽核 F4）。
+      audioFilePath = (await saveRecordingFilePromise) ?? audioFilePath;
       // AC2: API 錯誤時仍寫入 failed 記錄（如果有 audioFilePath）
       if (audioFilePath) {
         const failedRecord = buildTranscriptionRecord({
@@ -1559,6 +1576,7 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
       }
 
       const vocabularyStore = useVocabularyStore();
+      // 同上（perf 稽核 F5）：top-50 詞彙表重用於稍後的 AI 整理階段。
       const whisperTermList = await vocabularyStore.getTopTermListByWeight(50);
       const hasVocabulary = whisperTermList.length > 0;
 
@@ -1625,8 +1643,7 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
             throw new Error(t("errors.apiKeyMissing"));
           }
 
-          const enhancementTermList =
-            await vocabularyStore.getTopTermListByWeight(50);
+          const enhancementTermList = whisperTermList;
           const enhanceResult = await enhanceText(result.rawText, llmCfg.apiKey, {
             systemPrompt: settingsStore.getAiPrompt(),
             vocabularyTermList:
