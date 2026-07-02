@@ -491,7 +491,7 @@
     },
     "upgradeNotice": {
       "title": "SayIt Update Summary",
-      "item1": "HUD dark theme fix: choose Dark — or when your system is dark — and the HUD overlay now renders dark instead of always staying light.",
+      "item1": "Performance and size improvements — faster app startup and view loading, lower voice-to-paste latency, and a smaller install. This release focuses on performance and stability; the interface is unchanged.",
       "dismiss": "Got it"
     }
   },

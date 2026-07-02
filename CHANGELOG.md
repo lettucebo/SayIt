@@ -2,6 +2,21 @@
 
 SayIt 版本更新紀錄。
 
+## [0.11.11] - 2026-07-03
+
+### Improved
+
+- 啟動與載入效能、安裝體積優化（一次跨面向的 bundle 瘦身）：`logo` 圖從 1024×1024（1.44MB）重新輸出為 128px（6.4KB，僅以 28px 顯示，省下約 1.4MB 打包／安裝體積）；Dashboard 四個分頁改為按需（lazy）載入，儀表板首載 JS 由約 546KB 降至約 70KB，各分頁改為進入該頁才下載；錯誤遙測（Sentry）SDK 與非預設語系（日文／簡中／韓文）改為延遲載入，讓透明輕量的 HUD 浮窗不再預載用不到的約 440KB Sentry 與其他語系包；並以 `manualChunks` 明確切分 `vendor-vue` / `vendor-reka-ui` 以改善快取。順帶修正 `vendor` 切分在不同平台（Windows／macOS）產物不一致（module id 一律為正斜線，先前誤用 `path.sep` 比對）、以及 `@sentry/vue` 被誤併入預載 chunk 的問題，讓 HUD 真正保持精簡。
+- 語音「停止錄音 → 貼上」延遲降低：錄音檔存檔改為與轉錄平行（背景寫入），不再卡在停止錄音後、轉錄開始前的熱路徑上；並移除轉錄與 AI 整理兩階段對詞彙表的重複查詢（改為重用同一份 top-50 結果）。
+- 每日用量統計查詢優化：`api_usage` 新增 `created_at` 索引（append-only v9 migration），每日配額查詢由 `DATE(created_at, 'localtime')`（函式包裹欄位使索引失效）改為可命中索引的 `created_at >= ? AND < ?` 範圍查詢，語意（本地日界線）維持不變。
+- Azure（Microsoft Foundry）Entra ID 取 token 的 HTTP client 改為 process 內共用（`OnceLock`），不再每次請求重建連線池／TLS 設定。
+
+### Fixed
+
+- 每日用量統計在夏令時間（DST）轉換日的午夜前後可能少算／多算一小時的問題：原本以「當日起始 + 24 小時」計算當日範圍，但 DST 轉換日的本地日實為 23／25 小時。改以「隔日本地午夜」為上界，維持正確的本地日語意（僅影響有 DST 的時區，每年兩天）。
+- 極少數資料庫在先前失敗的 migration 後遺失 `api_usage` 表時，啟動可能因新索引建立而初始化失敗的問題：新 migration 加入資料表存在性護欄，並在關鍵表恢復後冪等補建 `created_at` 索引，確保恢復路徑不受影響、且恢復重建的表也保有效能索引。
+- 錯誤遙測 SDK 動態載入失敗時，可能因未處理的 Promise rejection 觸發全域錯誤處理再回呼自身而形成迴圈的風險：於錯誤上報路徑補上 `catch`，載入失敗時僅記錄於 console 而不再冒泡。
+
 ## [0.11.10] - 2026-07-02
 
 ### Fixed
