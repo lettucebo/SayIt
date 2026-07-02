@@ -2,6 +2,12 @@
 
 SayIt 版本更新紀錄。
 
+## [0.11.10] - 2026-07-02
+
+### Fixed
+
+- HUD 浮窗（notch）在「深色」與「跟隨系統（系統為深色）」下仍顯示淺色的問題：根因是 `NotchHud.vue` 的 scoped 樣式選擇器 `:global(html.dark) .notch-hud` 在 Vue 3.5 的 scoped CSS 編譯器下被錯誤編成 `html.dark`（後代 `.notch-hud` 被丟棄），使深色配色變數被套在 `<html>` 上、又被 notch 自身宣告的淺色變數遮蔽，導致 HUD 永遠淺色。改用 `html.dark .notch-hud`（編譯為 `html.dark .notch-hud[data-v]`），把深色變數直接套在 notch 上。此問題自 HUD 主題功能初版即存在；先前 0.11.7／0.11.9 修的是系統外觀「偵測」，但因這個樣式 bug，深色 HUD 一直未能真正顯示
+
 ## [0.11.9] - 2026-06-30
 
 ### Fixed
