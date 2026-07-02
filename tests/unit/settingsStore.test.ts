@@ -26,6 +26,7 @@ vi.mock("../../src/i18n", () => ({
       t: (key: string) => key,
     },
   },
+  switchLocale: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("../../src/i18n/prompts", async () => {

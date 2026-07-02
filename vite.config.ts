@@ -1,4 +1,4 @@
-import { resolve } from "node:path";
+import { resolve, sep } from "node:path";
 import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
 import tailwindcss from "@tailwindcss/vite";
@@ -38,6 +38,24 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, "index.html"),
         "main-window": resolve(__dirname, "main-window.html"),
+      },
+      output: {
+        // 明確切分重量級 vendor，讓快取更可預期、避免單一巨型 shared chunk
+        // 被兩個 entry 都 preload（perf 稽核 F3）。@sentry/vue 本身已改動態
+        // import 而自動獨立成 chunk，這裡另外切出 UI 元件庫與圖表庫。
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return undefined;
+          if (id.includes("reka-ui")) return "vendor-reka-ui";
+          if (
+            id.includes(`${sep}vue${sep}`) ||
+            id.includes("vue-router") ||
+            id.includes("vue-i18n") ||
+            id.includes(`${sep}pinia${sep}`)
+          ) {
+            return "vendor-vue";
+          }
+          return undefined;
+        },
       },
     },
   },

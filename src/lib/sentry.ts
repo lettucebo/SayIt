@@ -1,5 +1,5 @@
 /// <reference types="vite/client" />
-import * as Sentry from "@sentry/vue";
+import type * as SentryModule from "@sentry/vue";
 import type { App } from "vue";
 import type { Router } from "vue-router";
 import {
@@ -9,6 +9,18 @@ import {
 } from "./sentryScrubbing";
 
 declare const __APP_VERSION__: string;
+
+// @sentry/vue is one of the heaviest deps shared by both entries (HUD + Dashboard).
+// It is dynamically imported so it lands in its own chunk instead of the eagerly
+// preloaded shared vendor chunk (perf audit F3). Errors raised before the dynamic
+// import resolves are only logged to console — acceptable per plan (early errors
+// are rare and non-fatal to keep out of the hot startup path).
+let sentryModulePromise: Promise<typeof SentryModule> | null = null;
+
+function loadSentryModule(): Promise<typeof SentryModule> {
+  sentryModulePromise ??= import("@sentry/vue");
+  return sentryModulePromise;
+}
 
 function getSentryDsn(): string {
   return import.meta.env.VITE_SENTRY_DSN?.trim() ?? "";
@@ -34,9 +46,10 @@ function isSentryEnabled(): boolean {
   return import.meta.env.PROD && isValidSentryDsn(getSentryDsn());
 }
 
-export function initSentryForHud(app: App): void {
+export async function initSentryForHud(app: App): Promise<void> {
   if (!isSentryEnabled()) return;
 
+  const Sentry = await loadSentryModule();
   Sentry.init({
     app,
     dsn: getSentryDsn(),
@@ -55,10 +68,14 @@ export function initSentryForHud(app: App): void {
   });
 }
 
-export function initSentryForDashboard(app: App, router: Router): void {
+export async function initSentryForDashboard(
+  app: App,
+  router: Router,
+): Promise<void> {
   if (!isSentryEnabled()) return;
 
   const tracesSampleRate = getTracesSampleRate();
+  const Sentry = await loadSentryModule();
 
   Sentry.init({
     app,
@@ -90,13 +107,19 @@ export function captureError(
 ): void {
   if (!isSentryEnabled()) return;
 
-  if (context) {
-    Sentry.withScope((scope) => {
-      scope.setExtras(context);
-      Sentry.captureException(error);
-    });
-    return;
-  }
+  // Sentry 尚未（動態）載入完成前發生的錯誤只記錄於 console，不阻塞/不排入熱路徑；
+  // 一旦模組載入完成，之後的錯誤都會正常回報。
+  if (!sentryModulePromise) return;
 
-  Sentry.captureException(error);
+  void sentryModulePromise.then((Sentry) => {
+    if (context) {
+      Sentry.withScope((scope) => {
+        scope.setExtras(context);
+        Sentry.captureException(error);
+      });
+      return;
+    }
+
+    Sentry.captureException(error);
+  });
 }

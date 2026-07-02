@@ -13,7 +13,9 @@ installConsoleForwarding();
 const pinia = createPinia();
 const app = createApp(App);
 
-initSentryForHud(app);
+initSentryForHud(app).catch((err) => {
+  console.error("[HUD] Failed to initialize Sentry:", err);
+});
 
 window.addEventListener("unhandledrejection", (event) => {
   captureError(event.reason, { source: "hud-unhandled-rejection" });
