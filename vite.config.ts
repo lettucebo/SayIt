@@ -46,6 +46,9 @@ export default defineConfig({
         // 依「最後一個 node_modules/ 之後的套件名」精確分組，避免 substring 比對誤傷
         // （例如 "/vue/" 會誤中 @sentry/vue、@unovis/vue、@floating-ui/vue）。
         // 亦與平台無關：Rollup/Vite 的 module id 在所有 OS 皆為正斜線。
+        // 注意：vendor-vue 只放「兩個 entry 都會用到」的套件（vue/@vue/*/pinia/vue-i18n/
+        // @intlify/*）。vue-router 僅 Dashboard 使用，刻意不納入，否則輕量 HUD 會因
+        // preload vendor-vue 而多下載/parse 用不到的 router（見 code review Issue 1）。
         manualChunks(id) {
           if (!id.includes("node_modules/")) return undefined;
           const afterNodeModules = id.split("node_modules/").pop() ?? "";
@@ -57,9 +60,8 @@ export default defineConfig({
           if (packageName === "reka-ui") return "vendor-reka-ui";
           if (
             packageName === "vue" ||
-            packageName === "vue-router" ||
-            packageName === "vue-i18n" ||
             packageName === "pinia" ||
+            packageName === "vue-i18n" ||
             packageName.startsWith("@vue/") ||
             packageName.startsWith("@intlify/")
           ) {

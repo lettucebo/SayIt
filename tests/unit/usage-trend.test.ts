@@ -183,4 +183,28 @@ describe("getLocalDayUtcRangeForSqlite", () => {
     const [, end] = getLocalDayUtcRangeForSqlite(now);
     expect(sqliteUtcToEpoch(end)).toBe(new Date(2027, 0, 1).getTime());
   });
+
+  it("[P2] end 一律為「隔日本地午夜」而非 start+24h（DST 日仍正確）", () => {
+    // 對多個日期（含美國 DST 轉換日）驗證：end 轉回本地時皆為隔日 00:00:00。
+    // 此不變式在任何時區皆成立；若實作誤用 start+24h，在 DST 時區的轉換日會失敗。
+    const samples = [
+      new Date(2026, 2, 8, 10, 0, 0), // 2026-03-08（美國 spring-forward）
+      new Date(2026, 10, 1, 10, 0, 0), // 2026-11-01（美國 fall-back）
+      new Date(2026, 5, 15, 9, 0, 0), // 一般日
+    ];
+    for (const now of samples) {
+      const [, end] = getLocalDayUtcRangeForSqlite(now);
+      const endLocal = new Date(sqliteUtcToEpoch(end));
+      const expectedNextMidnight = new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        now.getDate() + 1,
+      );
+      expect(endLocal.getTime()).toBe(expectedNextMidnight.getTime());
+      // 轉回本地時應恰為午夜（time-of-day 全 0）
+      expect(endLocal.getHours()).toBe(0);
+      expect(endLocal.getMinutes()).toBe(0);
+      expect(endLocal.getSeconds()).toBe(0);
+    }
+  });
 });

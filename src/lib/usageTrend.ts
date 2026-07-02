@@ -6,9 +6,10 @@ import type { DailyUsageTrend } from "../types/transcription";
  *
  * 改用 `created_at >= start AND created_at < end` 取代 `DATE(created_at, 'localtime') = ...`，
  * 避免函式包裹欄位導致索引失效，同時維持「本地日」語意不變（perf 稽核 F7）。
- * `new Date(y, m, d)` 產生真正的本地午夜瞬間，`toISOString()` 再轉成 UTC；DST 當日
- * 區間可能為 23/25 小時，此為「本地日」的正確行為。字串採固定寬度零補的 UTC 格式，
- * 字典序即等於時間序，可安全用於範圍比較。
+ * start / end 皆以 `new Date(y, m, d[+1])` 取「本地午夜」瞬間再 `toISOString()` 轉 UTC；
+ * end 必須是「隔日的本地午夜」而非 start + 24h——DST 轉換日的本地日為 23/25 小時，
+ * 用固定 24h 會使區間邊界偏移一小時（見 code review Issue 2）。字串採固定寬度零補的
+ * UTC 格式，字典序即等於時間序，可安全用於範圍比較。
  */
 export function getLocalDayUtcRangeForSqlite(
   now: Date = new Date(),
@@ -22,8 +23,15 @@ export function getLocalDayUtcRangeForSqlite(
     0,
     0,
   );
+  // 隔日本地午夜（非 start + 24h）：DST 日的本地日長度為 23/25 小時。
   const localEndOfDay = new Date(
-    localStartOfDay.getTime() + 24 * 60 * 60 * 1000,
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate() + 1,
+    0,
+    0,
+    0,
+    0,
   );
   const toSqliteUtcDatetime = (date: Date) =>
     date.toISOString().slice(0, 19).replace("T", " ");
