@@ -412,6 +412,14 @@ fn is_sentry_enabled() -> bool {
     matches!(get_sentry_environment(), "production") && get_sentry_dsn().is_some()
 }
 
+/// 使用量分析（Aptabase）App Key。編譯期由 `APTABASE_KEY` 注入（fork 專屬 GitHub variable）。
+/// 未提供時回傳 None → 不註冊 plugin → 所有埋點自動 no-op（dev 與未設定環境安全）。
+fn get_aptabase_key() -> Option<&'static str> {
+    option_env!("APTABASE_KEY")
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && !value.starts_with("__"))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let _sentry_guard = if is_sentry_enabled() {
@@ -441,7 +449,15 @@ pub fn run() {
         None
     };
 
-    tauri::Builder::default()
+    ({
+        // 使用量分析（Aptabase）：僅在編譯期提供 APTABASE_KEY 時註冊。
+        // 未註冊時 EventTracker::track_event 依內部 try_state 檢查自動 no-op。
+        let mut builder = tauri::Builder::default();
+        if let Some(key) = get_aptabase_key() {
+            builder = builder.plugin(tauri_plugin_aptabase::Builder::new(key).build());
+        }
+        builder
+    })
         .plugin(
             tauri_plugin_log::Builder::new()
                 // 用 targets() 覆蓋預設 targets（Builder 預設含 Stdout + LogDir{None}），
@@ -522,7 +538,8 @@ pub fn run() {
             plugins::sound_feedback::play_start_sound,
             plugins::sound_feedback::play_stop_sound,
             plugins::sound_feedback::play_error_sound,
-            plugins::sound_feedback::play_learned_sound
+            plugins::sound_feedback::play_learned_sound,
+            plugins::analytics::set_analytics_enabled
         ])
         .setup(|app| {
             // 早期套用持久化的檔案 Log 開關，讓啟動期（含 Rust setup）logs 也能被捕捉。
@@ -533,8 +550,15 @@ pub fn run() {
                     if let Some(enabled) = store.get("debugLogEnabled").and_then(|v| v.as_bool()) {
                         plugins::logging::FILE_LOG_ENABLED.store(enabled, Ordering::Relaxed);
                     }
+                    // 使用量分析開關（opt-out，預設啟用）：載入持久化設定，讓 app_started 依此判斷。
+                    if let Some(enabled) = store.get("analyticsEnabled").and_then(|v| v.as_bool()) {
+                        plugins::analytics::ANALYTICS_ENABLED.store(enabled, Ordering::Relaxed);
+                    }
                 }
             }
+
+            // 送出使用量分析：App 啟動（DAU/MAU 基礎）。無 APTABASE_KEY 或使用者關閉時為 no-op。
+            plugins::analytics::track_simple(app.handle(), "app_started");
 
             // 初始化 keyboard monitor 狀態
             app.manage(plugins::keyboard_monitor::KeyboardMonitorState::new());
@@ -672,6 +696,10 @@ pub fn run() {
                     // 7. Flush Sentry 事件佇列（確保 shutdown 前的事件送出）
                     //    Application session：_exit(0) 會跳過 _sentry_guard 的 Drop，
                     //    故在 flush 前顯式結束 session，確保 release health 資料送出。
+                    // 送出使用量分析：App 結束 + 阻塞 flush（_exit(0) 會跳過 Drop，須顯式送出）。
+                    plugins::analytics::track_simple(app_handle, "app_exited");
+                    plugins::analytics::flush(app_handle);
+
                     sentry::end_session();
                     if let Some(client) = sentry::Hub::current().client() {
                         client.flush(Some(std::time::Duration::from_secs(2)));

@@ -1,3 +1,4 @@
+pub mod analytics;
 pub mod audio_control;
 pub mod audio_recorder;
 pub mod azure_auth;
