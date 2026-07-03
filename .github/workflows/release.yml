@@ -109,6 +109,9 @@ jobs:
           SENTRY_RELEASE: ${{ env.SENTRY_RELEASE }}
           VITE_SENTRY_RELEASE: ${{ env.VITE_SENTRY_RELEASE }}
           VITE_SENTRY_SOURCEMAPS_ENABLED: ${{ matrix.upload_sourcemaps }}
+          # 使用量分析（Aptabase）：fork 專屬 App Key（compile-time option_env!）。
+          # 未設定 vars.APTABASE_KEY 則值為空 → plugin 不註冊、所有埋點 no-op（安全）。
+          APTABASE_KEY: ${{ vars.APTABASE_KEY }}
         with:
           tagName: ${{ env.RELEASE_TAG }}
           releaseName: "SayIt v${{ env.RELEASE_VERSION }}"
