@@ -1,4 +1,5 @@
 import { createRouter, createWebHashHistory } from "vue-router";
+import { trackEvent } from "./lib/analytics";
 
 // Route-level code splitting: each view becomes its own chunk instead of being
 // bundled eagerly into the Dashboard entry (see perf audit F2).
@@ -18,6 +19,11 @@ const router = createRouter({
     { path: "/settings", component: SettingsView },
     { path: "/guide", component: FeatureGuideView },
   ],
+});
+
+router.afterEach((to) => {
+  // 匿名分頁瀏覽（僅路由名稱，不含任何內容）
+  trackEvent("screen_view", { name: to.path.replace(/^\//, "") || "dashboard" });
 });
 
 export default router;

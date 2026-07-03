@@ -59,6 +59,7 @@ import {
 import type { HudStatus, HudTargetPosition } from "../types";
 import type { VoiceFlowStateChangedPayload } from "../types/events";
 import { useSettingsStore } from "./useSettingsStore";
+import { trackEvent, type AnalyticsProps } from "../lib/analytics";
 
 const SUCCESS_DISPLAY_DURATION_MS = 1000;
 const ERROR_DISPLAY_DURATION_MS = 3000;
@@ -291,6 +292,25 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
       );
       captureError(err, { source: "voice-flow", step: "save-transcription" });
     }
+
+    // 使用量分析：一次轉錄的匿名 metadata（僅類別/數值，無任何文字內容）
+    const settingsStore = useSettingsStore();
+    const analyticsProps: AnalyticsProps = {
+      provider: settingsStore.whisperProviderId,
+      language: settingsStore.selectedTranscriptionLocale,
+      trigger_mode: record.triggerMode,
+      char_count: record.charCount,
+      was_enhanced: record.wasEnhanced ? 1 : 0,
+      recording_ms: record.recordingDurationMs,
+      transcription_ms: record.transcriptionDurationMs,
+      edit_mode: record.isEditMode ? 1 : 0,
+    };
+    trackEvent(
+      record.status === "failed"
+        ? "transcription_failed"
+        : "transcription_completed",
+      analyticsProps,
+    );
   }
 
   function buildTranscriptionRecord(params: {
@@ -708,6 +728,9 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
                       await emitEvent(VOCABULARY_LEARNED, {
                         termList: newTermList,
                       } satisfies VocabularyLearnedPayload);
+                      trackEvent("vocabulary_learned", {
+                        term_count: newTermList.length,
+                      });
                       writeInfoLog(
                         "useVoiceFlowStore: VOCABULARY_LEARNED emitted successfully",
                       );

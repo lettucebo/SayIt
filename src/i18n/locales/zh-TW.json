@@ -201,6 +201,15 @@
       "enabledMessage": "已啟用除錯記錄",
       "disabledMessage": "已停用除錯記錄"
     },
+    "analytics": {
+      "title": "使用量分析（Aptabase）",
+      "description": "以完全匿名的方式回報使用量統計（如啟動次數、使用的功能），協助我們了解 App 的使用狀況並持續改善。",
+      "enable": "啟用使用量分析",
+      "enableDescription": "傳送匿名使用量統計",
+      "privacyNote": "只會傳送匿名的操作統計（如次數、時長、選用的服務），絕不會傳送您的轉錄內容、字典詞、API 金鑰或任何個人資料。",
+      "enabledMessage": "已啟用使用量分析",
+      "disabledMessage": "已停用使用量分析"
+    },
     "backup": {
       "title": "備份與還原",
       "description": "將設定與字典匯出成單一檔案，方便換機或重灌時還原。可選擇加密保護。",

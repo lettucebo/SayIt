@@ -39,6 +39,7 @@ export type SettingsKey =
   | "azureWhisperDeployment"
   | "whisperProvider"
   | "theme"
+  | "analyticsEnabled"
   | "imported";
 
 export interface SettingsUpdatedPayload {

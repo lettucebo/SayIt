@@ -99,6 +99,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import {
   AtSign,
+  BarChart3,
   Bug,
   CircleAlert,
   Download,
@@ -1000,6 +1001,26 @@ async function handleOpenLogFolder() {
   }
 }
 
+// ── 隱私：使用量分析（Aptabase）────────────────────────────────
+const analyticsFeedback = useFeedbackMessage();
+const analyticsEnabled = ref(false);
+
+async function handleToggleAnalytics() {
+  analyticsEnabled.value = !analyticsEnabled.value;
+  try {
+    await settingsStore.saveAnalyticsEnabled(analyticsEnabled.value);
+    analyticsFeedback.show(
+      "success",
+      analyticsEnabled.value
+        ? t("settings.analytics.enabledMessage")
+        : t("settings.analytics.disabledMessage"),
+    );
+  } catch (err) {
+    analyticsEnabled.value = !analyticsEnabled.value;
+    analyticsFeedback.show("error", extractErrorMessage(err));
+  }
+}
+
 // ── 應用程式 ────────────────────────────────────────────────
 const autoStartFeedback = useFeedbackMessage();
 const isTogglingAutoStart = ref(false);
@@ -1147,6 +1168,7 @@ function resyncLocalInputsFromStore() {
   recordingAutoCleanupDays.value = settingsStore.recordingAutoCleanupDays;
   debugLogEnabled.value = settingsStore.isDebugLogEnabled;
   debugLogRetentionDays.value = settingsStore.debugLogRetentionDays;
+  analyticsEnabled.value = settingsStore.isAnalyticsEnabled;
   const currentKey = settingsStore.hotkeyConfig?.triggerKey;
   isCustomMode.value = !!(
     currentKey &&
@@ -1392,6 +1414,7 @@ onMounted(async () => {
   recordingAutoCleanupDays.value = settingsStore.recordingAutoCleanupDays;
   debugLogEnabled.value = settingsStore.isDebugLogEnabled;
   debugLogRetentionDays.value = settingsStore.debugLogRetentionDays;
+  analyticsEnabled.value = settingsStore.isAnalyticsEnabled;
   await settingsStore.loadAutoStartStatus();
 
   // Detect if current key is custom or combo
@@ -3055,6 +3078,51 @@ onBeforeUnmount(() => {
             "
           >
             {{ debugLogFeedback.message.value }}
+          </p>
+        </transition>
+      </CardContent>
+    </Card>
+
+    <!-- 隱私：使用量分析（Aptabase）-->
+    <Card>
+      <CardHeader class="border-b border-border">
+        <CardTitle class="text-base flex items-center gap-2">
+          <BarChart3 class="h-4 w-4" />
+          {{ $t("settings.analytics.title") }}
+        </CardTitle>
+      </CardHeader>
+      <CardContent class="space-y-4">
+        <p class="text-sm text-muted-foreground leading-relaxed">
+          {{ $t("settings.analytics.description") }}
+        </p>
+
+        <div class="flex items-center justify-between">
+          <div>
+            <Label for="analytics-enabled">{{ $t("settings.analytics.enable") }}</Label>
+            <p class="text-sm text-muted-foreground">{{ $t("settings.analytics.enableDescription") }}</p>
+          </div>
+          <Switch
+            id="analytics-enabled"
+            :model-value="analyticsEnabled"
+            @update:model-value="handleToggleAnalytics"
+          />
+        </div>
+
+        <p class="text-sm text-muted-foreground leading-relaxed">
+          {{ $t("settings.analytics.privacyNote") }}
+        </p>
+
+        <transition name="feedback-fade">
+          <p
+            v-if="analyticsFeedback.message.value !== ''"
+            class="text-sm"
+            :class="
+              analyticsFeedback.type.value === 'success'
+                ? 'text-green-400'
+                : 'text-red-400'
+            "
+          >
+            {{ analyticsFeedback.message.value }}
           </p>
         </transition>
       </CardContent>

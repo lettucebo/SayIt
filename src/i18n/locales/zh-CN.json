@@ -201,6 +201,15 @@
       "enabledMessage": "已启用调试日志",
       "disabledMessage": "已停用调试日志"
     },
+    "analytics": {
+      "title": "使用量分析（Aptabase）",
+      "description": "以完全匿名的方式上报使用量统计（如启动次数、使用的功能），帮助我们了解 App 的使用情况并持续改进。",
+      "enable": "启用使用量分析",
+      "enableDescription": "发送匿名使用量统计",
+      "privacyNote": "只会发送匿名的操作统计（如次数、时长、选用的服务），绝不会发送您的转录内容、词条、API 密钥或任何个人数据。",
+      "enabledMessage": "已启用使用量分析",
+      "disabledMessage": "已停用使用量分析"
+    },
     "backup": {
       "title": "备份与还原",
       "description": "将设置与字典导出成单一文件，方便换机或重装时还原。可选择加密保护。",

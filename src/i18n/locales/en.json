@@ -201,6 +201,15 @@
       "enabledMessage": "Debug logging enabled",
       "disabledMessage": "Debug logging disabled"
     },
+    "analytics": {
+      "title": "Usage Analytics (Aptabase)",
+      "description": "Reports fully anonymous usage statistics (such as launch counts and which features are used) to help us understand how the app is used and keep improving it.",
+      "enable": "Enable usage analytics",
+      "enableDescription": "Send anonymous usage statistics",
+      "privacyNote": "Only anonymous usage metrics (counts, durations, chosen services) are sent. Your transcriptions, dictionary terms, API keys, and any personal data are never sent.",
+      "enabledMessage": "Usage analytics enabled",
+      "disabledMessage": "Usage analytics disabled"
+    },
     "backup": {
       "title": "Backup & Restore",
       "description": "Export your settings and dictionary to a single file for easy migration or reinstall. Optional password encryption.",

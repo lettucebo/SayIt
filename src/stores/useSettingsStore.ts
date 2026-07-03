@@ -48,6 +48,7 @@ import {
 } from "../i18n/languageConfig";
 import { emitEvent, SETTINGS_UPDATED } from "../composables/useTauriEvents";
 import type { SettingsUpdatedPayload } from "../types/events";
+import { trackEvent } from "../lib/analytics";
 import { applyTheme, DEFAULT_THEME_MODE, isThemeMode } from "../lib/theme";
 import {
   DEFAULT_LLM_MODEL_ID,
@@ -91,6 +92,7 @@ const DEFAULT_RECORDING_AUTO_CLEANUP_ENABLED = false;
 const DEFAULT_RECORDING_AUTO_CLEANUP_DAYS = 7;
 const DEFAULT_DEBUG_LOG_ENABLED = false;
 const DEFAULT_DEBUG_LOG_RETENTION_DAYS = 7;
+const DEFAULT_ANALYTICS_ENABLED = true;
 const DEFAULT_COPY_TRANSCRIPTION_TO_CLIPBOARD = true;
 
 function getDefaultTriggerKey(): TriggerKey {
@@ -179,6 +181,8 @@ export const useSettingsStore = defineStore("settings", () => {
   // 除錯記錄（Debug Log）— 與錄音清理完全獨立的設定
   const isDebugLogEnabled = ref<boolean>(DEFAULT_DEBUG_LOG_ENABLED);
   const debugLogRetentionDays = ref<number>(DEFAULT_DEBUG_LOG_RETENTION_DAYS);
+  // 使用量分析（Aptabase）開關（opt-out，預設啟用）
+  const isAnalyticsEnabled = ref<boolean>(DEFAULT_ANALYTICS_ENABLED);
   const selectedAudioInputDeviceName = ref<string>("");
   const isCopyTranscriptionToClipboardEnabled = ref<boolean>(
     DEFAULT_COPY_TRANSCRIPTION_TO_CLIPBOARD,
@@ -578,6 +582,11 @@ export const useSettingsStore = defineStore("settings", () => {
 
       const savedDebugLogEnabled = await store.get<boolean>("debugLogEnabled");
       isDebugLogEnabled.value = savedDebugLogEnabled ?? DEFAULT_DEBUG_LOG_ENABLED;
+
+      const savedAnalyticsEnabled =
+        await store.get<boolean>("analyticsEnabled");
+      isAnalyticsEnabled.value =
+        savedAnalyticsEnabled ?? DEFAULT_ANALYTICS_ENABLED;
 
       const savedDebugLogRetentionDays = await store.get<number>(
         "debugLogRetentionDays",
@@ -1002,6 +1011,7 @@ export const useSettingsStore = defineStore("settings", () => {
         value: providerId,
       };
       await emitEvent(SETTINGS_UPDATED, payload);
+      trackEvent("provider_changed", { kind: "llm", provider: providerId });
       console.log(`[useSettingsStore] LLM provider saved: ${providerId}`);
     } catch (err) {
       console.error(
@@ -1301,6 +1311,7 @@ export const useSettingsStore = defineStore("settings", () => {
         value: id,
       };
       await emitEvent(SETTINGS_UPDATED, payload);
+      trackEvent("provider_changed", { kind: "whisper", provider: id });
     } catch (err) {
       console.error(
         "[useSettingsStore] saveWhisperProvider failed:",
@@ -1637,6 +1648,37 @@ export const useSettingsStore = defineStore("settings", () => {
     }
   }
 
+  async function saveAnalyticsEnabled(enabled: boolean) {
+    try {
+      const store = await load(STORE_NAME);
+      await store.set("analyticsEnabled", enabled);
+      await store.save();
+
+      isAnalyticsEnabled.value = enabled;
+
+      // 即時通知 Rust 切換使用量分析開關（Rust app 生命週期事件依此判斷）
+      await invoke("set_analytics_enabled", { enabled });
+
+      const payload: SettingsUpdatedPayload = {
+        key: "analyticsEnabled",
+        value: enabled,
+      };
+      await emitEvent(SETTINGS_UPDATED, payload);
+
+      console.log(`[useSettingsStore] analyticsEnabled saved: ${enabled}`);
+    } catch (err) {
+      console.error(
+        "[useSettingsStore] saveAnalyticsEnabled failed:",
+        extractErrorMessage(err),
+      );
+      captureError(err, {
+        source: "settings",
+        step: "save-analytics-enabled",
+      });
+      throw err;
+    }
+  }
+
   async function saveAudioInputDevice(deviceName: string) {
     try {
       const store = await load(STORE_NAME);
@@ -1814,6 +1856,10 @@ export const useSettingsStore = defineStore("settings", () => {
       const savedDebugLogEnabledX = await store.get<boolean>("debugLogEnabled");
       isDebugLogEnabled.value =
         savedDebugLogEnabledX ?? DEFAULT_DEBUG_LOG_ENABLED;
+      const savedAnalyticsEnabledX =
+        await store.get<boolean>("analyticsEnabled");
+      isAnalyticsEnabled.value =
+        savedAnalyticsEnabledX ?? DEFAULT_ANALYTICS_ENABLED;
       const savedDebugLogDaysX = await store.get<number>(
         "debugLogRetentionDays",
       );
@@ -2070,6 +2116,8 @@ export const useSettingsStore = defineStore("settings", () => {
     isDebugLogEnabled,
     debugLogRetentionDays,
     saveDebugLog,
+    isAnalyticsEnabled,
+    saveAnalyticsEnabled,
     selectedAudioInputDeviceName,
     saveAudioInputDevice,
     isCopyTranscriptionToClipboardEnabled,
