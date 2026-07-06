@@ -10,8 +10,6 @@ export const EXPORT_VERSION = 1 as const;
 
 /** 單一詞條長度上限，避免匯入超大字串塞爆 DB */
 export const MAX_TERM_LENGTH = 100;
-/** 匯入檔案大小上限（位元組），避免一次塞入過大檔案 */
-export const MAX_IMPORT_FILE_BYTES = 2 * 1024 * 1024;
 
 const VALID_SOURCES: VocabularySource[] = ["manual", "ai"];
 
@@ -65,14 +63,6 @@ export function buildExportFile(
       source: normalizeSource(e.source),
     })),
   };
-}
-
-/** 序列化為帶縮排的 JSON 字串 */
-export function serializeExport(
-  entries: VocabularyExportEntry[],
-  exportedAt: string,
-): string {
-  return JSON.stringify(buildExportFile(entries, exportedAt), null, 2);
 }
 
 /** 解析 SayIt JSON 匯出檔，回傳正規化詞條（容錯：忽略無效詞條） */
@@ -134,7 +124,11 @@ export function parseImportContent(
   filename: string,
   content: string,
 ): ImportedTerm[] {
-  const isJson = /\.json$/i.test(filename) || looksLikeJson(content);
-  const entries = isJson ? parseSayItJson(content) : parsePlainText(content);
+  // 去除 UTF-8 BOM（Windows / Notepad 儲存的檔案常見），否則 JSON.parse 會失敗
+  const normalized = content.replace(/^\uFEFF/, "");
+  const isJson = /\.json$/i.test(filename) || looksLikeJson(normalized);
+  const entries = isJson
+    ? parseSayItJson(normalized)
+    : parsePlainText(normalized);
   return dedupe(entries);
 }

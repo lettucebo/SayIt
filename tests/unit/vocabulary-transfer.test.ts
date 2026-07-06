@@ -5,7 +5,6 @@ import {
   MAX_TERM_LENGTH,
   buildExportFile,
   parseImportContent,
-  serializeExport,
 } from "../../src/lib/vocabularyTransfer";
 import type { VocabularyExportEntry } from "../../src/types/vocabulary";
 
@@ -14,7 +13,7 @@ const sampleEntries: VocabularyExportEntry[] = [
   { term: "Tauri", weight: 12, source: "ai" },
 ];
 
-describe("buildExportFile / serializeExport", () => {
+describe("buildExportFile", () => {
   it("應產生帶 format/version/exportedAt 的物件", () => {
     const file = buildExportFile(sampleEntries, "2026-06-09T00:00:00.000Z");
     expect(file.format).toBe(EXPORT_FORMAT);
@@ -30,12 +29,6 @@ describe("buildExportFile / serializeExport", () => {
     );
     expect(file.terms[0].weight).toBe(1);
     expect(file.terms[0].source).toBe("manual");
-  });
-
-  it("serializeExport 產生可被 parseImportContent 解析的 JSON", () => {
-    const json = serializeExport(sampleEntries, "2026-06-09T00:00:00.000Z");
-    const parsed = parseImportContent("backup.json", json);
-    expect(parsed).toEqual(sampleEntries);
   });
 });
 
@@ -78,6 +71,12 @@ describe("parseImportContent — SayIt JSON", () => {
     expect(() => parseImportContent("a.json", '{"foo":1}')).toThrow(
       "INVALID_FORMAT",
     );
+  });
+
+  it("去除 UTF-8 BOM 後仍能解析 JSON（Windows/Notepad 檔案）", () => {
+    const json = "\uFEFF" + JSON.stringify({ terms: [{ term: "Rust" }] });
+    const result = parseImportContent("bom.json", json);
+    expect(result).toEqual([{ term: "Rust", weight: 1, source: "manual" }]);
   });
 });
 
