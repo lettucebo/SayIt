@@ -476,11 +476,12 @@ mod windows_impl {
         None
     }
 
-    /// 聚焦元素是否為密碼 / 受保護欄位（讀不到屬性時保守視為「否」以免誤關功能）。
+    /// 聚焦元素是否為密碼 / 受保護欄位（讀不到屬性時保守視為「是」→ fail-closed，
+    /// 對未正確暴露 IsPassword 的第三方欄位較安全，避免把可能的密碼 / token 送 LLM）。
     fn is_password_element(element: &IUIAutomationElement) -> bool {
         unsafe { element.CurrentIsPassword() }
             .map(|b| b.as_bool())
-            .unwrap_or(false)
+            .unwrap_or(true)
     }
 
     fn read_via_text_pattern(element: &IUIAutomationElement) -> Option<String> {
