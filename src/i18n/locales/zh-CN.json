@@ -212,7 +212,12 @@
     "quotaLlmRequests": "LLM {used}/{limit} 次",
     "quotaLlmTokens": "LLM {used}/{limit} tokens",
     "vocabularyAnalysis": "字典分析",
-    "vocabularyAnalysisUsage": "字典分析：{requests} 次 / {tokens} tokens"
+    "vocabularyAnalysisUsage": "字典分析：{requests} 次 / {tokens} tokens",
+    "dailyUsage": "今日用量",
+    "billedPlan": "计费",
+    "billedNoFreeQuota": "付费方案 — 无免费额度限制",
+    "usageWhisper": "Whisper：{requests} 次 · {audio}",
+    "usageLlm": "LLM：{requests} 次 · {tokens} tokens"
   },
   "history": {
     "searchPlaceholder": "搜索转录记录...",

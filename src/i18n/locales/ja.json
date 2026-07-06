@@ -212,7 +212,12 @@
     "quotaLlmRequests": "LLM {used}/{limit} 回",
     "quotaLlmTokens": "LLM {used}/{limit} tokens",
     "vocabularyAnalysis": "辞書分析",
-    "vocabularyAnalysisUsage": "辞書分析：{requests} 回 / {tokens} tokens"
+    "vocabularyAnalysisUsage": "辞書分析：{requests} 回 / {tokens} tokens",
+    "dailyUsage": "本日の使用量",
+    "billedPlan": "従量課金",
+    "billedNoFreeQuota": "従量課金 — 無料枠なし",
+    "usageWhisper": "Whisper：{requests} 回 · {audio}",
+    "usageLlm": "LLM：{requests} 回 · {tokens} tokens"
   },
   "history": {
     "searchPlaceholder": "文字起こし履歴を検索...",
