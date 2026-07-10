@@ -260,6 +260,7 @@
     "description": "字典词汇会在语音识别时提供给 AI，提升专有名词与术语的识别准确度。",
     "weightDescription": "每次语音识别时，系统会将权重最高的前 {limit} 个词汇加入 AI 识别提示。当 AI 检测到你重复修正同一个词时，该词的权重会自动提升。",
     "noAiSuggestions": "暂无 AI 推荐词汇，启用智能字典学习后系统会自动学习",
+    "noAiSuggestionsEnabled": "智能字典学习已启用，当你修正转录文字时系统会自动学习新词",
     "aiTermCount": "{count} 个词"
   },
   "accessibility": {
