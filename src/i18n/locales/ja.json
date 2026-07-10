@@ -200,7 +200,7 @@
     "dailyQuota": "本日の無料残額",
     "dailyQuotaDetail": "本日の無料残額詳細",
     "usageTrend": "日別使用トレンド",
-    "last30Days": "直近 30 日間",
+    "lastNDays": "直近 {days} 日間",
     "recentTranscriptions": "最近の文字起こし",
     "viewAll": "すべて表示",
     "emptyState": "音声入力を始めると、ここに統計データが表示されます",
