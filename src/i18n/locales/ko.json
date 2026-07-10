@@ -98,7 +98,7 @@
     },
     "modelBadge": {
       "balanced": "균형 · 기본",
-      "stableCostly": "안정 · 고비용",
+      "stableCostly": "안정 · 정식 버전",
       "fastCheap": "가장 빠름 · 가장 저렴",
       "smartestSlow": "가장 똑똑 · 느림",
       "premium": "프리미엄"
@@ -213,12 +213,12 @@
     "quotaLlmTokens": "LLM {used}/{limit} tokens",
     "vocabularyAnalysis": "사전 분석",
     "vocabularyAnalysisUsage": "사전 분석: {requests} 회 / {tokens} tokens",
+    "geminiQuotaHint": "Gemini 무료 할당량은 계정마다 다릅니다. Google AI Studio에서 실제 한도를 확인하세요",
     "dailyUsage": "오늘 사용량",
     "billedPlan": "유료",
     "billedNoFreeQuota": "유료 요금제 — 무료 할당량 없음",
     "usageWhisper": "Whisper: {requests}회 · {audio}",
-    "usageLlm": "LLM: {requests}회 · {tokens} tokens"
-  },
+    "usageLlm": "LLM: {requests}회 · {tokens} tokens"  },
   "history": {
     "searchPlaceholder": "전사 기록 검색...",
     "loading": "로딩 중...",

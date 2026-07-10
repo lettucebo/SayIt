@@ -98,7 +98,7 @@
     },
     "modelBadge": {
       "balanced": "バランス · デフォルト",
-      "stableCostly": "安定 · 高コスト",
+      "stableCostly": "安定 · 正式版",
       "fastCheap": "最速 · 最安",
       "smartestSlow": "最賢 · 低速",
       "premium": "高品質"
@@ -213,12 +213,12 @@
     "quotaLlmTokens": "LLM {used}/{limit} tokens",
     "vocabularyAnalysis": "辞書分析",
     "vocabularyAnalysisUsage": "辞書分析：{requests} 回 / {tokens} tokens",
+    "geminiQuotaHint": "Gemini の無料枠はアカウントにより異なります。Google AI Studio で実際の上限をご確認ください",
     "dailyUsage": "本日の使用量",
     "billedPlan": "従量課金",
     "billedNoFreeQuota": "従量課金 — 無料枠なし",
     "usageWhisper": "Whisper：{requests} 回 · {audio}",
-    "usageLlm": "LLM：{requests} 回 · {tokens} tokens"
-  },
+    "usageLlm": "LLM：{requests} 回 · {tokens} tokens"  },
   "history": {
     "searchPlaceholder": "文字起こし履歴を検索...",
     "loading": "読み込み中...",
