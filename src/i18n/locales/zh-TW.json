@@ -147,6 +147,10 @@
       "soundFeedbackDescription": "錄音開始、結束及錯誤時播放提示音效",
       "soundFeedbackEnabled": "已啟用音效回饋",
       "soundFeedbackDisabled": "已停用音效回饋",
+      "hideDockIcon": "隱藏 Dock 圖示",
+      "hideDockIconDescription": "從 Dock 移除 SayIt 圖示，僅透過選單列圖示操作",
+      "hideDockIconEnabled": "已隱藏 Dock 圖示",
+      "hideDockIconDisabled": "已顯示 Dock 圖示",
       "autoStart": "開機自動啟動",
       "autoStartDescription": "登入系統後自動啟動 SayIt",
       "autoStartEnabled": "已啟用開機自啟動",
@@ -218,7 +222,8 @@
     "billedPlan": "計費",
     "billedNoFreeQuota": "付費方案 — 無免費額度限制",
     "usageWhisper": "Whisper：{requests} 次 · {audio}",
-    "usageLlm": "LLM：{requests} 次 · {tokens} tokens"  },
+    "usageLlm": "LLM：{requests} 次 · {tokens} tokens"
+  },
   "history": {
     "searchPlaceholder": "搜尋轉錄記錄...",
     "loading": "載入中...",

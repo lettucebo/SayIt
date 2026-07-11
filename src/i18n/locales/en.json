@@ -147,6 +147,10 @@
       "soundFeedbackDescription": "Play sound effects when recording starts, stops, or encounters an error",
       "soundFeedbackEnabled": "Sound feedback enabled",
       "soundFeedbackDisabled": "Sound feedback disabled",
+      "hideDockIcon": "Hide Dock Icon",
+      "hideDockIconDescription": "Remove SayIt from the Dock and use the menu bar icon only",
+      "hideDockIconEnabled": "Dock icon hidden",
+      "hideDockIconDisabled": "Dock icon shown",
       "autoStart": "Launch at Login",
       "autoStartDescription": "Automatically start SayIt when you log in",
       "autoStartEnabled": "Launch at login enabled",
@@ -218,7 +222,8 @@
     "billedPlan": "Billed",
     "billedNoFreeQuota": "Pay-as-you-go — no free quota limit",
     "usageWhisper": "Whisper: {requests} req · {audio}",
-    "usageLlm": "LLM: {requests} req · {tokens} tokens"  },
+    "usageLlm": "LLM: {requests} req · {tokens} tokens"
+  },
   "history": {
     "searchPlaceholder": "Search transcriptions...",
     "loading": "Loading...",
