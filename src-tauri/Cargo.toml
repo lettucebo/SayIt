@@ -29,6 +29,7 @@ cpal = "0.15"
 hound = "3.5"
 rustfft = "6"
 reqwest = { version = "0.12", features = ["multipart", "json", "rustls-tls", "rustls-tls-native-roots"] }
+tokio = { version = "1", features = ["time"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-graphics = "0.24"
