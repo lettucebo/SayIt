@@ -144,6 +144,14 @@ vi.mock("../../src/lib/enhancer", () => {
   }
   return {
     enhanceText: mockEnhanceText,
+    enhanceWithAnomalyGuard: async (
+      rawText: string,
+      apiKey: string,
+      options?: unknown,
+    ) => {
+      const r = await mockEnhanceText(rawText, apiKey, options);
+      return { text: r.text, usage: r.usage ?? null, wasAnomalous: false };
+    },
     buildSystemPrompt: (basePrompt: string) => basePrompt,
     EnhancerApiError,
   };
@@ -2306,6 +2314,43 @@ describe("useVoiceFlowStore", () => {
         mockUpdateTranscriptionOnRetrySuccess.mock.calls[0][0];
       expect(updateParams.rawText).toBe("重送成功的文字");
       expect(updateParams.processedText).toBeNull();
+    });
+
+    it("[P1] 重送時原文達整理門檻應走 enhanceWithAnomalyGuard、貼整理後文字、wasEnhanced=true（a5 piece B）", async () => {
+      const store = useVoiceFlowStore();
+      await store.initialize();
+
+      await setupFailedTranscription(store);
+      expect(store.canRetry).toBe(true);
+
+      // 原文 >= enhancementThresholdCharCount(10) → 重送走 AI 整理（含長度守衛）
+      mockInvoke.mockImplementation(
+        createMockInvokeHandler({
+          retranscribeResult: {
+            rawText: "這是一段夠長需要整理的重送逐字稿內容",
+            transcriptionDurationMs: 350,
+            noSpeechProbability: 0.02,
+          },
+        }),
+      );
+
+      await store.handleRetryTranscription();
+
+      // 非異常 → enhanceWithAnomalyGuard 回整理後文字，貼上該文字
+      await vi.waitFor(() => {
+        expect(mockInvoke).toHaveBeenCalledWith("paste_text", {
+          text: "AI 整理後的書面語文字",
+          restoreClipboard: false,
+        });
+      });
+
+      await vi.waitFor(() => {
+        expect(mockUpdateTranscriptionOnRetrySuccess).toHaveBeenCalledTimes(1);
+      });
+      const updateParams =
+        mockUpdateTranscriptionOnRetrySuccess.mock.calls[0][0];
+      expect(updateParams.processedText).toBe("AI 整理後的書面語文字");
+      expect(updateParams.wasEnhanced).toBe(true);
     });
 
     it("[P0] 重送失敗（空轉錄）不再提供重送按鈕", async () => {

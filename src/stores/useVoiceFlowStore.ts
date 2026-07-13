@@ -13,7 +13,8 @@ import {
 } from "../lib/errorUtils";
 import { captureError } from "../lib/sentry";
 import { logInfoLine, logErrorLine } from "../lib/logger";
-import { enhanceText, buildSystemPrompt } from "../lib/enhancer";
+import { enhanceText, enhanceWithAnomalyGuard, buildSystemPrompt } from "../lib/enhancer";
+import { observeSemanticDrift } from "../lib/semanticDriftObserver";
 import { getEditModePromptForLocale } from "../i18n/prompts";
 import type { SupportedLocale } from "../i18n/languageConfig";
 import { analyzeCorrections } from "../lib/vocabularyAnalyzer";
@@ -1470,6 +1471,13 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
             enhanceResult = { ...enhanceResult, text: result.rawText };
           }
 
+          // a5-B shadow：觀測語意漂移（不改任何行為；長度 fallback 後 text===raw 天然不觸發）
+          observeSemanticDrift(result.rawText, enhanceResult.text, "main", {
+            locale: settingsStore.selectedLocale,
+            provider: llmCfg.provider,
+            model: llmCfg.modelId,
+          });
+
           const enhancementDurationMs =
             performance.now() - enhancementStartTime;
 
@@ -1789,16 +1797,27 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
           }
 
           const enhancementTermList = whisperTermList;
-          const enhanceResult = await enhanceText(result.rawText, llmCfg.apiKey, {
-            systemPrompt: settingsStore.getAiPrompt(),
-            vocabularyTermList:
-              enhancementTermList.length > 0 ? enhancementTermList : undefined,
-            modelId: llmCfg.modelId,
-            provider: llmCfg.provider,
-            azure: llmCfg.azure,
-            signal: abortController?.signal,
-          });
+          const enhanceResult = await enhanceWithAnomalyGuard(
+            result.rawText,
+            llmCfg.apiKey,
+            {
+              systemPrompt: settingsStore.getAiPrompt(),
+              vocabularyTermList:
+                enhancementTermList.length > 0 ? enhancementTermList : undefined,
+              modelId: llmCfg.modelId,
+              provider: llmCfg.provider,
+              azure: llmCfg.azure,
+              signal: abortController?.signal,
+            },
+          );
           if (isAborted.value) return;
+
+          // a5-B shadow：觀測語意漂移（不改行為）
+          observeSemanticDrift(result.rawText, enhanceResult.text, "resend", {
+            locale: settingsStore.selectedLocale,
+            provider: llmCfg.provider,
+            model: llmCfg.modelId,
+          });
 
           const enhancementDurationMs =
             performance.now() - enhancementStartTime;
@@ -1810,7 +1829,7 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
             recordingDurationMs,
             transcriptionDurationMs: result.transcriptionDurationMs,
             enhancementDurationMs,
-            wasEnhanced: true,
+            wasEnhanced: !enhanceResult.wasAnomalous,
             audioFilePath: filePath,
             status: "success",
           });
@@ -1836,7 +1855,7 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
                 result.transcriptionDurationMs,
               ),
               enhancementDurationMs: Math.round(enhancementDurationMs),
-              wasEnhanced: true,
+              wasEnhanced: !enhanceResult.wasAnomalous,
               charCount: result.rawText.length,
             })
             .then(() => {
