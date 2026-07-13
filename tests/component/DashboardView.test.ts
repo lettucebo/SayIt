@@ -56,7 +56,7 @@ function makeSettings(overrides: Record<string, unknown> = {}) {
     whisperProviderId: "groq",
     selectedLlmProviderId: "groq",
     selectedWhisperModelId: "whisper-large-v3",
-    selectedLlmModelId: "llama-3.3-70b-versatile",
+    selectedLlmModelId: "qwen/qwen3.6-27b",
     ...overrides,
   };
 }

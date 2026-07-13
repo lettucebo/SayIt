@@ -17,7 +17,7 @@ const h = vi.hoisted(() => {
     refreshLlmApiKey: vi.fn(),
     getLlmRequestConfig: vi.fn(),
     getAiPrompt: () => "prompt",
-    getEffectiveChatModel: () => "llama-3.3-70b-versatile",
+    getEffectiveChatModel: () => "qwen/qwen3.6-27b",
   };
   return {
     mockDbExecute,
@@ -98,7 +98,7 @@ describe("useHistoryStore retry", () => {
     h.settingsStub.getLlmRequestConfig.mockReset().mockResolvedValue({
       apiKey: "llm-key",
       provider: "groq",
-      modelId: "llama-3.3-70b-versatile",
+      modelId: "qwen/qwen3.6-27b",
     });
   });
 

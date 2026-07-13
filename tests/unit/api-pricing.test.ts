@@ -56,22 +56,22 @@ describe("apiPricing.ts", () => {
     });
 
     it("[P0] 1000 tokens 應按 output 價格上限計算", () => {
-      // 預設模型 Llama 3.3 70B: max(input=0.59, output=0.79) = 0.79/M
-      // 1000 * 0.00000079 = 0.00079
+      // 預設模型 Qwen3.6 27B: max(input=0.6, output=3.0) = 3.0/M
+      // 1000 * 0.000003 = 0.003
       const cost = calculateChatCostCeiling(1000);
-      expect(cost).toBeCloseTo(0.00079, 6);
+      expect(cost).toBeCloseTo(0.003, 6);
     });
 
-    it("[P0] 1M tokens 應回傳 $0.79", () => {
-      // 預設模型 Llama 3.3 70B: 1M * 0.79/M = 0.79
+    it("[P0] 1M tokens 應回傳 $3.00", () => {
+      // 預設模型 Qwen3.6 27B: 1M * 3.0/M = 3.0
       const cost = calculateChatCostCeiling(1_000_000);
-      expect(cost).toBeCloseTo(0.79, 4);
+      expect(cost).toBeCloseTo(3.0, 4);
     });
 
     it("[P1] 150 tokens 應正確計算", () => {
-      // 預設模型 Llama 3.3 70B: 150 * 0.00000079 = 0.0001185
+      // 預設模型 Qwen3.6 27B: 150 * 0.000003 = 0.00045
       const cost = calculateChatCostCeiling(150);
-      expect(cost).toBeCloseTo(0.0001185, 6);
+      expect(cost).toBeCloseTo(0.00045, 6);
     });
   });
 });

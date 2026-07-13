@@ -972,7 +972,7 @@ describe("useHistoryStore", () => {
         id: "usage-002",
         transcriptionId: "tx-001",
         apiType: "chat",
-        model: "llama-3.3-70b-versatile",
+        model: "qwen/qwen3.6-27b",
         promptTokens: 100,
         completionTokens: 50,
         totalTokens: 150,
