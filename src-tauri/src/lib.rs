@@ -526,6 +526,21 @@ pub fn run() {
             plugins::sound_feedback::play_learned_sound
         ])
         .setup(|app| {
+            // gh-56：啟動時套用「隱藏 Dock 圖示」設定（讀取失敗一律視為未啟用，不影響啟動）
+            #[cfg(target_os = "macos")]
+            {
+                use tauri_plugin_store::StoreExt;
+                let hide_dock_icon = app
+                    .store("settings.json")
+                    .ok()
+                    .and_then(|store| store.get("hideDockIcon"))
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or(false);
+                if hide_dock_icon {
+                    let _ = app.handle().set_dock_visibility(false);
+                }
+            }
+
             // 早期套用持久化的檔案 Log 開關，讓啟動期（含 Rust setup）logs 也能被捕捉。
             // 失敗（首次啟動無 settings.json）時保持預設關閉。
             {

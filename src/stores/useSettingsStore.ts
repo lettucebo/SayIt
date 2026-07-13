@@ -1,6 +1,7 @@
 import { defineStore } from "pinia";
 import { ref, computed } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { setDockVisibility } from "@tauri-apps/api/app";
 import { load } from "@tauri-apps/plugin-store";
 import type { TriggerMode } from "../types";
 import {
@@ -86,6 +87,8 @@ export const DEFAULT_ENHANCEMENT_THRESHOLD_CHAR_COUNT = 10;
 export const DEFAULT_MUTE_ON_RECORDING = true;
 const DEFAULT_SMART_DICTIONARY_ENABLED = navigator.userAgent.includes("Mac"); // macOS only — Windows 尚未支援 text field 讀取
 const DEFAULT_SOUND_EFFECTS_ENABLED = true;
+const DEFAULT_HIDE_DOCK_ICON = false;
+const IS_MACOS = navigator.userAgent.includes("Mac");
 const DEFAULT_PROMPT_MODE: PromptMode = "minimal";
 const DEFAULT_RECORDING_AUTO_CLEANUP_ENABLED = false;
 const DEFAULT_RECORDING_AUTO_CLEANUP_DAYS = 7;
@@ -170,6 +173,7 @@ export const useSettingsStore = defineStore("settings", () => {
   const selectedTranscriptionLocale = ref<TranscriptionLocale>(FALLBACK_LOCALE);
   const themeMode = ref<ThemeMode>(DEFAULT_THEME_MODE);
   const isSoundEffectsEnabled = ref<boolean>(DEFAULT_SOUND_EFFECTS_ENABLED);
+  const isHideDockIconEnabled = ref<boolean>(DEFAULT_HIDE_DOCK_ICON);
   const isRecordingAutoCleanupEnabled = ref<boolean>(
     DEFAULT_RECORDING_AUTO_CLEANUP_ENABLED,
   );
@@ -558,6 +562,9 @@ export const useSettingsStore = defineStore("settings", () => {
       isSoundEffectsEnabled.value =
         savedSoundEffects ?? DEFAULT_SOUND_EFFECTS_ENABLED;
 
+      const savedHideDockIcon = await store.get<boolean>("hideDockIcon");
+      isHideDockIconEnabled.value = savedHideDockIcon ?? DEFAULT_HIDE_DOCK_ICON;
+
       const savedSmartDictionary = await store.get<boolean>(
         "smartDictionaryEnabled",
       );
@@ -619,6 +626,7 @@ export const useSettingsStore = defineStore("settings", () => {
         DEFAULT_ENHANCEMENT_THRESHOLD_CHAR_COUNT;
       isMuteOnRecordingEnabled.value = DEFAULT_MUTE_ON_RECORDING;
       isSoundEffectsEnabled.value = DEFAULT_SOUND_EFFECTS_ENABLED;
+      isHideDockIconEnabled.value = DEFAULT_HIDE_DOCK_ICON;
       isCopyTranscriptionToClipboardEnabled.value =
         DEFAULT_COPY_TRANSCRIPTION_TO_CLIPBOARD;
     }
@@ -1544,6 +1552,44 @@ export const useSettingsStore = defineStore("settings", () => {
     }
   }
 
+  // 僅 macOS 生效；失敗不影響已持久化設定，重啟後由 Rust 端（lib.rs setup）套用。
+  async function applyDockVisibility(hidden: boolean) {
+    if (!IS_MACOS) return;
+    try {
+      await setDockVisibility(!hidden);
+    } catch (applyErr) {
+      console.error(
+        "[useSettingsStore] setDockVisibility failed:",
+        extractErrorMessage(applyErr),
+      );
+    }
+  }
+
+  async function saveHideDockIcon(enabled: boolean) {
+    try {
+      const store = await load(STORE_NAME);
+      await store.set("hideDockIcon", enabled);
+      await store.save();
+      isHideDockIconEnabled.value = enabled;
+
+      await applyDockVisibility(enabled);
+
+      const payload: SettingsUpdatedPayload = {
+        key: "hideDockIcon",
+        value: enabled,
+      };
+      await emitEvent(SETTINGS_UPDATED, payload);
+      console.log(`[useSettingsStore] hideDockIcon saved: ${enabled}`);
+    } catch (err) {
+      console.error(
+        "[useSettingsStore] saveHideDockIcon failed:",
+        extractErrorMessage(err),
+      );
+      captureError(err, { source: "settings", step: "save-hide-dock-icon" });
+      throw err;
+    }
+  }
+
   async function saveSmartDictionaryEnabled(enabled: boolean) {
     try {
       const store = await load(STORE_NAME);
@@ -1723,6 +1769,7 @@ export const useSettingsStore = defineStore("settings", () => {
       const savedGeminiKey = await store.get<string>("geminiApiKey");
       const savedMuteOnRecording = await store.get<boolean>("muteOnRecording");
       const savedSoundEffects = await store.get<boolean>("soundEffectsEnabled");
+      const savedHideDockIcon = await store.get<boolean>("hideDockIcon");
       const savedSmartDictionary = await store.get<boolean>(
         "smartDictionaryEnabled",
       );
@@ -1797,6 +1844,11 @@ export const useSettingsStore = defineStore("settings", () => {
         savedMuteOnRecording ?? DEFAULT_MUTE_ON_RECORDING;
       isSoundEffectsEnabled.value =
         savedSoundEffects ?? DEFAULT_SOUND_EFFECTS_ENABLED;
+      const nextHideDockIcon = savedHideDockIcon ?? DEFAULT_HIDE_DOCK_ICON;
+      if (nextHideDockIcon !== isHideDockIconEnabled.value) {
+        void applyDockVisibility(nextHideDockIcon);
+      }
+      isHideDockIconEnabled.value = nextHideDockIcon;
       isSmartDictionaryEnabled.value =
         savedSmartDictionary ?? DEFAULT_SMART_DICTIONARY_ENABLED;
 
@@ -2062,6 +2114,8 @@ export const useSettingsStore = defineStore("settings", () => {
     saveMuteOnRecording,
     isSoundEffectsEnabled,
     saveSoundEffectsEnabled,
+    isHideDockIconEnabled,
+    saveHideDockIcon,
     isSmartDictionaryEnabled,
     saveSmartDictionaryEnabled,
     isRecordingAutoCleanupEnabled,
