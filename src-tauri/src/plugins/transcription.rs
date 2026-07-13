@@ -210,6 +210,16 @@ fn retry_wait_secs(kind: &FailureKind, attempt: u32) -> Option<u64> {
     }
 }
 
+/// 依 HTTP 狀態碼分類是否可重試。429 帶 Retry-After；408/5xx 為暫時性；其餘（含其他 4xx）不重試。
+fn classify_response_status(status: u16, retry_after_secs: Option<u64>) -> FailureKind {
+    match status {
+        429 => FailureKind::RateLimited { retry_after_secs },
+        // 408 Request Timeout 與 5xx 皆屬暫時性 → 固定短 backoff（不採用 Retry-After）
+        408 | 500..=599 => FailureKind::ServerError,
+        _ => FailureKind::NoRetry,
+    }
+}
+
 // ========== Shared Transcription Logic ==========
 
 /// 依 provider 決定 URL、是否帶 model 欄位、與認證 header 型式。跨重試不變、解析一次即可。
@@ -286,8 +296,11 @@ async fn attempt_transcription_request(
     let response = match request_builder.multipart(form).send().await {
         Ok(response) => response,
         Err(e) => {
-            // timeout 不重試：120 秒才超時的請求再試兩次是災難；只有連線建立失敗才重試
-            let kind = if e.is_connect() {
+            // timeout 不重試：120 秒才超時的請求再試兩次是災難。先判 timeout（is_timeout 與
+            // is_connect 未保證互斥），再判連線建立失敗才重試。
+            let kind = if e.is_timeout() {
+                FailureKind::NoRetry
+            } else if e.is_connect() {
                 FailureKind::Connect
             } else {
                 FailureKind::NoRetry
@@ -311,12 +324,7 @@ async fn attempt_transcription_request(
             .text()
             .await
             .unwrap_or_else(|_| "Failed to read error body".to_string());
-        let kind = match status {
-            429 => FailureKind::RateLimited { retry_after_secs },
-            // 5xx 刻意不採用 Retry-After，固定短 backoff 即可
-            500..=599 => FailureKind::ServerError,
-            _ => FailureKind::NoRetry,
-        };
+        let kind = classify_response_status(status, retry_after_secs);
         return Err(AttemptFailure {
             error: TranscriptionError::ApiError(status, body),
             kind,
@@ -713,6 +721,38 @@ mod tests {
         assert_eq!(failure_kind_label(&FailureKind::ServerError), "server-error");
         assert_eq!(failure_kind_label(&FailureKind::Connect), "connect-failed");
         assert_eq!(failure_kind_label(&FailureKind::NoRetry), "no-retry");
+    }
+
+    #[test]
+    fn test_classify_response_status() {
+        assert!(matches!(
+            classify_response_status(429, Some(3)),
+            FailureKind::RateLimited {
+                retry_after_secs: Some(3)
+            }
+        ));
+        // 408 與 5xx 皆可重試
+        assert!(matches!(
+            classify_response_status(408, None),
+            FailureKind::ServerError
+        ));
+        assert!(matches!(
+            classify_response_status(500, None),
+            FailureKind::ServerError
+        ));
+        assert!(matches!(
+            classify_response_status(503, None),
+            FailureKind::ServerError
+        ));
+        // 其他 4xx 不重試
+        assert!(matches!(
+            classify_response_status(400, None),
+            FailureKind::NoRetry
+        ));
+        assert!(matches!(
+            classify_response_status(404, None),
+            FailureKind::NoRetry
+        ));
     }
 
     #[test]
