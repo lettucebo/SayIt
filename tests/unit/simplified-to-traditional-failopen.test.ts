@@ -35,25 +35,23 @@ describe("convertSimplifiedToTraditional — fail-open", () => {
     expect(loggedArgs).not.toContain(input);
   });
 
-  it("[P1] 失敗後快取重置：下次呼叫會重試（成功 mock 下可正常轉換）", async () => {
-    // 先一次失敗
+  it("[P1] 失敗後快取重置：同一模組實例下次呼叫會重試（真正覆蓋 reset 邏輯）", async () => {
     vi.resetModules();
+    let calls = 0;
     vi.doMock("opencc-js", () => ({
       Converter: () => {
-        throw new Error("first failure");
+        // 第一次建立 converter 失敗、第二次成功——驗證 converterPromise 被重置後會重試
+        if (++calls === 1) throw new Error("first failure");
+        return (t: string) => t.replace("请", "請");
       },
     }));
     vi.spyOn(console, "warn").mockImplementation(() => {});
-    const mod1 = await import("../../src/lib/simplifiedToTraditional");
-    expect(await mod1.convertSimplifiedToTraditional("请")).toBe("请");
 
-    // 換成成功的 mock（模擬字典就緒後重試成功）——需重置模組讓快取清空
-    vi.doUnmock("opencc-js");
-    vi.resetModules();
-    vi.doMock("opencc-js", () => ({
-      Converter: () => (t: string) => t.replace("请", "請"),
-    }));
-    const mod2 = await import("../../src/lib/simplifiedToTraditional");
-    expect(await mod2.convertSimplifiedToTraditional("请")).toBe("請");
+    const mod = await import("../../src/lib/simplifiedToTraditional");
+    // 第一次：converter 建立失敗 → fail-open 回原文，且 converterPromise 被重置為 null
+    expect(await mod.convertSimplifiedToTraditional("请")).toBe("请");
+    // 第二次：若少了 reset，會拿到快取的 rejected promise 續 fail-open 回 "请"；
+    // 有 reset 才會重建、命中成功 mock → "請"（此斷言即 reset 邏輯的守衛）
+    expect(await mod.convertSimplifiedToTraditional("请")).toBe("請");
   });
 });
