@@ -694,6 +694,9 @@ html.dark .notch-hud {
 }
 
 .learned-icon-svg {
+  /* 用主題變數而非硬編碼淺藍：淺色主題下 --notch-learned 為深藍(#1d4ed8)才看得見。
+     inline stroke 屬性作為 fallback（CSS stroke 屬性優先度高於 presentation attribute）。 */
+  stroke: var(--notch-learned);
   animation: learnedIconFadeIn 0.3s ease-out;
 }
 
