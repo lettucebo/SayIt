@@ -40,6 +40,12 @@ describe("modelRegistry — 模型遷移", () => {
     it("[P0] 預設模型本身存在於 registry", () => {
       expect(findLlmModelConfig(DEFAULT_LLM_MODEL_ID)).toBeDefined();
     });
+
+    it("[P1] gemini-3.1-pro-preview（新增 Pro 級）存在且 providerId=gemini", () => {
+      const config = findLlmModelConfig("gemini-3.1-pro-preview");
+      expect(config).toBeDefined();
+      expect(config?.providerId).toBe("gemini");
+    });
   });
 
   describe("getEffectiveLlmModelId", () => {

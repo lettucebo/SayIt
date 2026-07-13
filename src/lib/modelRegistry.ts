@@ -14,7 +14,8 @@ export type LlmModelId =
   | "gpt-5.4-nano"
   | "claude-haiku-4-5-20251001"
   | "gemini-3.5-flash"
-  | "gemini-3.1-flash-lite";
+  | "gemini-3.1-flash-lite"
+  | "gemini-3.1-pro-preview";
 
 // ── Whisper 模型（語音轉錄用）─────────────────────────────
 
@@ -138,6 +139,21 @@ export const LLM_MODEL_LIST: LlmModelConfig[] = [
     speedTps: 0,
     inputCostPerMillion: 0.25,
     outputCostPerMillion: 1.5,
+    freeQuotaRpd: 0,
+    freeQuotaTpd: 0,
+    isDefault: false,
+  },
+  {
+    // Preview 模型：Google 標為 preview，顯示名稱標明讓使用者知情。
+    // Pro 級最高品質；分層計價（<200k: $2/$12、>200k: $4/$18），此處採 <200k
+    // tier——本 App 請求（短逐字稿＋prompt）遠低於 200k tokens。
+    id: "gemini-3.1-pro-preview",
+    providerId: "gemini",
+    displayName: "Gemini 3.1 Pro (Preview)",
+    badgeKey: "settings.modelBadge.smartestSlow",
+    speedTps: 0,
+    inputCostPerMillion: 2.0,
+    outputCostPerMillion: 12.0,
     freeQuotaRpd: 0,
     freeQuotaTpd: 0,
     isDefault: false,

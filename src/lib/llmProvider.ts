@@ -328,14 +328,27 @@ function buildGeminiFetchParams(
   }
 
   const generationConfig: Record<string, unknown> = {};
-  if (request.temperature !== undefined)
+  // Gemini 3 官方強烈建議維持預設 temperature（1.0）；送非預設值在 Gemini 3 上
+  // 可能導致品質退化/迴圈。新加的 gemini-3.1-pro-preview 依此不送 temperature；
+  // 既有 flash 模型維持現行行為避免回歸（可另案評估是否一併對齊）。
+  if (
+    request.temperature !== undefined &&
+    request.model !== "gemini-3.1-pro-preview"
+  )
     generationConfig.temperature = request.temperature;
   if (request.maxTokens !== undefined)
     generationConfig.maxOutputTokens = request.maxTokens;
-  // Gemini 3.x 預設就會思考（medium）：文字整理不需要，壓到最低省延遲與 token。
-  // 欄位路徑與 enum 值出自 generateContent API 參考（ThinkingConfig.thinkingLevel）
-  if (request.model.startsWith("gemini-3")) {
-    generationConfig.thinkingConfig = { thinkingLevel: "MINIMAL" };
+  // Gemini 3.x thinkingConfig（generateContent，enum 大寫，值出自 API 參考）：
+  // 文字整理不需深度思考，壓低省延遲與 token。gemini-3.1-pro-preview 不支援
+  // MINIMAL（送了會 400），改用 LOW（預設 HIGH 太慢）；其餘 gemini-3* 用 MINIMAL。
+  const geminiThinkingLevel =
+    request.model === "gemini-3.1-pro-preview"
+      ? "LOW"
+      : request.model.startsWith("gemini-3")
+        ? "MINIMAL"
+        : undefined;
+  if (geminiThinkingLevel) {
+    generationConfig.thinkingConfig = { thinkingLevel: geminiThinkingLevel };
   }
   if (Object.keys(generationConfig).length > 0)
     body.generationConfig = generationConfig;
