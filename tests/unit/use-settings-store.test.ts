@@ -485,6 +485,35 @@ describe("useSettingsStore", () => {
     });
   });
 
+  describe("saveAzureOmitTemperature (azure-reasoning-fix)", () => {
+    it("[P1] 應持久化 azureOmitTemperature、設定 ref 並 emit settings:updated", async () => {
+      const { useSettingsStore } = await import(
+        "../../src/stores/useSettingsStore"
+      );
+      const store = useSettingsStore();
+
+      await store.saveAzureOmitTemperature(true);
+
+      expect(mockStoreSet).toHaveBeenCalledWith("azureOmitTemperature", true);
+      expect(mockStoreSave).toHaveBeenCalled();
+      expect(store.azureOmitTemperature).toBe(true);
+      expect(mockEmit).toHaveBeenCalledWith("settings:updated", {
+        key: "azureOmitTemperature",
+        value: true,
+      });
+    });
+
+    it("[P2] loadSettings 應載入已儲存的 azureOmitTemperature（未存過預設 false）", async () => {
+      mockStoreData.set("azureOmitTemperature", true);
+      const { useSettingsStore } = await import(
+        "../../src/stores/useSettingsStore"
+      );
+      const store = useSettingsStore();
+      await store.loadSettings();
+      expect(store.azureOmitTemperature).toBe(true);
+    });
+  });
+
   // ==========================================================================
   // refreshCrossWindowSettings
   // ==========================================================================

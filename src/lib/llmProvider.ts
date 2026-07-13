@@ -125,6 +125,8 @@ export interface AzureRequestOptions {
   authMode: "key" | "entra";
   // key 模式：api-key 值；entra 模式：已取得的 bearer token
   authValue: string;
+  // 開啟時省略 temperature（Azure GPT-5 系列推理部署送 temperature 會回 400）
+  omitTemperature?: boolean;
 }
 
 export function buildFetchParams(
@@ -179,7 +181,12 @@ function buildAzureFetchParams(
     model: request.model, // Azure 的 model = 部署名稱
     messages: request.messages,
   };
-  if (request.temperature !== undefined) body.temperature = request.temperature;
+  // Azure/Foundry 的推理模型（GPT-5 系列）送 temperature 會回 400；由設定開關決定是否省略。
+  // 刻意不自動補 reasoning_effort：原始 GPT-5 部署未必支援 "none"（會換成另一個 400），
+  // gpt-5-pro 只接受 "high"。effort 若要支援，須另做「帶明確值」的獨立能力。
+  if (!opts.omitTemperature && request.temperature !== undefined) {
+    body.temperature = request.temperature;
+  }
   if (request.maxTokens !== undefined) {
     // v1 / GPT-5 系列要求 max_completion_tokens
     body.max_completion_tokens = request.maxTokens;

@@ -38,6 +38,7 @@ export type SettingsKey =
   | "azureConnection"
   | "azureChatDeployment"
   | "azureWhisperDeployment"
+  | "azureOmitTemperature"
   | "whisperProvider"
   | "theme"
   | "imported";
