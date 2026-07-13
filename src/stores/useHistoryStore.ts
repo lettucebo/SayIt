@@ -25,6 +25,7 @@ import {
   type EnhanceWithGuardResult,
 } from "../lib/enhancer";
 import { detectHallucination } from "../lib/hallucinationDetector";
+import { observeSemanticDrift } from "../lib/semanticDriftObserver";
 import {
   applyTranscriptTextTransforms,
   resolveEffectiveTranscriptionLocale,
@@ -831,6 +832,13 @@ export const useHistoryStore = defineStore("history", () => {
     if (enhanceResult.wasAnomalous) {
       return { ok: false, errorKey: "history.reEnhanceFailed" };
     }
+
+    // a5-B shadow：觀測語意漂移（不改行為）
+    observeSemanticDrift(record.rawText, enhanceResult.text, "history", {
+      locale: settingsStore.selectedLocale,
+      provider: llmCfg.provider,
+      model: llmCfg.modelId,
+    });
 
     const db = getDatabase();
     const res = await db.execute(UPDATE_ON_REENHANCE_SQL, [

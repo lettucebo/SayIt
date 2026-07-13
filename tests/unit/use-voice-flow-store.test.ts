@@ -144,6 +144,14 @@ vi.mock("../../src/lib/enhancer", () => {
   }
   return {
     enhanceText: mockEnhanceText,
+    enhanceWithAnomalyGuard: async (
+      rawText: string,
+      apiKey: string,
+      options?: unknown,
+    ) => {
+      const r = await mockEnhanceText(rawText, apiKey, options);
+      return { text: r.text, usage: r.usage ?? null, wasAnomalous: false };
+    },
     buildSystemPrompt: (basePrompt: string) => basePrompt,
     EnhancerApiError,
   };
