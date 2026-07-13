@@ -60,6 +60,60 @@ describe("llmProvider.ts", () => {
       expect(body.max_tokens).toBeUndefined();
     });
 
+    it("[P0] OpenAI：推理模型不送 temperature、改送 reasoning_effort:none（修 400）", () => {
+      const { init } = buildFetchParams("openai", BASE_REQUEST, TEST_API_KEY);
+      const body = JSON.parse(init.body as string);
+      expect(body.reasoning_effort).toBe("none");
+      expect(body.temperature).toBeUndefined();
+    });
+
+    it("[P0] Groq gpt-oss：抑制推理（include_reasoning:false + reasoning_effort:low）", () => {
+      const { init } = buildFetchParams(
+        "groq",
+        { ...BASE_REQUEST, model: "openai/gpt-oss-120b" },
+        TEST_API_KEY,
+      );
+      const body = JSON.parse(init.body as string);
+      expect(body.include_reasoning).toBe(false);
+      expect(body.reasoning_effort).toBe("low");
+      expect(body.temperature).toBe(0.1);
+    });
+
+    it("[P0] Groq qwen：關閉思考（reasoning_effort:none）但仍送 temperature", () => {
+      const { init } = buildFetchParams(
+        "groq",
+        { ...BASE_REQUEST, model: "qwen/qwen3.6-27b" },
+        TEST_API_KEY,
+      );
+      const body = JSON.parse(init.body as string);
+      expect(body.reasoning_effort).toBe("none");
+      expect(body.temperature).toBe(0.1);
+    });
+
+    it("[P1] Groq 非推理模型：不加 reasoning 欄位、照常送 temperature", () => {
+      const { init } = buildFetchParams("groq", BASE_REQUEST, TEST_API_KEY);
+      const body = JSON.parse(init.body as string);
+      expect(body.reasoning_effort).toBeUndefined();
+      expect(body.include_reasoning).toBeUndefined();
+      expect(body.temperature).toBe(0.1);
+    });
+
+    it("[P0] Gemini 3.x：thinkingConfig.thinkingLevel=MINIMAL", () => {
+      const { init } = buildFetchParams(
+        "gemini",
+        { ...BASE_REQUEST, model: "gemini-3.5-flash" },
+        TEST_API_KEY,
+      );
+      const body = JSON.parse(init.body as string);
+      expect(body.generationConfig.thinkingConfig.thinkingLevel).toBe("MINIMAL");
+    });
+
+    it("[P1] Gemini 非-3 模型：不加 thinkingConfig", () => {
+      const { init } = buildFetchParams("gemini", BASE_REQUEST, TEST_API_KEY);
+      const body = JSON.parse(init.body as string);
+      expect(body.generationConfig.thinkingConfig).toBeUndefined();
+    });
+
     it("[P0] Anthropic：正確 URL、x-api-key header、anthropic-version header", () => {
       const { url, init } = buildFetchParams("anthropic", BASE_REQUEST, TEST_API_KEY);
 
