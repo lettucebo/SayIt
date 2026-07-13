@@ -1218,6 +1218,7 @@ export const useSettingsStore = defineStore("settings", () => {
         "azureClientId",
         "azureClientSecret",
         "azureApiVersion",
+        "azureOmitTemperature",
       ];
       for (const k of keys) {
         await store.delete(k);

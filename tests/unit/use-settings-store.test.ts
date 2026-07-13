@@ -512,6 +512,17 @@ describe("useSettingsStore", () => {
       await store.loadSettings();
       expect(store.azureOmitTemperature).toBe(true);
     });
+
+    it("[P2] deleteAzureConnection 應同時清除持久化的 azureOmitTemperature（避免 store/ref 分歧）", async () => {
+      mockStoreData.set("azureOmitTemperature", true);
+      const { useSettingsStore } = await import(
+        "../../src/stores/useSettingsStore"
+      );
+      const store = useSettingsStore();
+      await store.deleteAzureConnection();
+      expect(mockStoreDelete).toHaveBeenCalledWith("azureOmitTemperature");
+      expect(store.azureOmitTemperature).toBe(false);
+    });
   });
 
   // ==========================================================================
