@@ -19,14 +19,15 @@ export function resolveEffectiveTranscriptionLocale(
 /**
  * 轉錄原文落地前的文字轉換。
  * 目前只做：有效轉譯語言為繁中（zh-TW）時，把 Whisper 的簡體輸出轉成繁體。
- * 其餘語言（或空字串）原樣返回。
+ * 其餘語言（或空字串）原樣返回——此路徑**不會**觸發 opencc 的惰性載入。
+ * 因 opencc 改為動態載入，本函式為 async；非 zh-TW / 空字串仍同步解析。
  */
-export function applyTranscriptTextTransforms(
+export async function applyTranscriptTextTransforms(
   rawText: string,
   effectiveLocale: string,
-): string {
+): Promise<string> {
   if (!rawText) return rawText;
   return effectiveLocale === "zh-TW"
-    ? convertSimplifiedToTraditional(rawText)
+    ? await convertSimplifiedToTraditional(rawText)
     : rawText;
 }

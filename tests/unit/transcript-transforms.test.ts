@@ -6,18 +6,18 @@ import {
 } from "../../src/lib/transcriptTransforms";
 
 describe("simplifiedToTraditional", () => {
-  it("[P0] 簡體轉台灣正體", () => {
-    expect(convertSimplifiedToTraditional("请把会议改到星期五并通知所有人")).toBe(
-      "請把會議改到星期五並通知所有人",
-    );
+  it("[P0] 簡體轉台灣正體", async () => {
+    expect(
+      await convertSimplifiedToTraditional("请把会议改到星期五并通知所有人"),
+    ).toBe("請把會議改到星期五並通知所有人");
   });
 
-  it("[P0] 已是繁體 → 原樣返回", () => {
-    expect(convertSimplifiedToTraditional("已經是繁體")).toBe("已經是繁體");
+  it("[P0] 已是繁體 → 原樣返回", async () => {
+    expect(await convertSimplifiedToTraditional("已經是繁體")).toBe("已經是繁體");
   });
 
-  it("[P1] 空字串原樣返回", () => {
-    expect(convertSimplifiedToTraditional("")).toBe("");
+  it("[P1] 空字串原樣返回", async () => {
+    expect(await convertSimplifiedToTraditional("")).toBe("");
   });
 });
 
@@ -34,18 +34,25 @@ describe("resolveEffectiveTranscriptionLocale", () => {
 });
 
 describe("applyTranscriptTextTransforms", () => {
-  it("[P0] zh-TW → 簡體轉繁體", () => {
+  it("[P0] zh-TW → 簡體轉繁體", async () => {
     expect(
-      applyTranscriptTextTransforms("请把会议改到星期五并通知所有人", "zh-TW"),
+      await applyTranscriptTextTransforms(
+        "请把会议改到星期五并通知所有人",
+        "zh-TW",
+      ),
     ).toBe("請把會議改到星期五並通知所有人");
   });
 
-  it("[P0] 非 zh-TW → 不轉換（zh-CN 原樣）", () => {
-    expect(applyTranscriptTextTransforms("请把会议", "zh-CN")).toBe("请把会议");
-    expect(applyTranscriptTextTransforms("请把会议", "en")).toBe("请把会议");
+  it("[P0] 非 zh-TW → 不轉換（zh-CN 原樣，不觸發 opencc 載入）", async () => {
+    expect(await applyTranscriptTextTransforms("请把会议", "zh-CN")).toBe(
+      "请把会议",
+    );
+    expect(await applyTranscriptTextTransforms("请把会议", "en")).toBe(
+      "请把会议",
+    );
   });
 
-  it("[P1] 空字串原樣返回", () => {
-    expect(applyTranscriptTextTransforms("", "zh-TW")).toBe("");
+  it("[P1] 空字串原樣返回", async () => {
+    expect(await applyTranscriptTextTransforms("", "zh-TW")).toBe("");
   });
 });

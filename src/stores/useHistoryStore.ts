@@ -723,7 +723,7 @@ export const useHistoryStore = defineStore("history", () => {
     }
 
     // #39：同主路徑，重新辨識後也套用簡→繁（寫回 raw_text 前）
-    result.rawText = applyTranscriptTextTransforms(
+    result.rawText = await applyTranscriptTextTransforms(
       result.rawText,
       resolveEffectiveTranscriptionLocale(
         settingsStore.selectedTranscriptionLocale,

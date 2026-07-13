@@ -1285,7 +1285,7 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
       audioFilePath = await saveRecordingFilePromise;
 
       // #39：轉譯語言為繁中時，把 Whisper 簡體輸出轉繁體（落地前一次到位）
-      result.rawText = applyTranscriptTextTransforms(
+      result.rawText = await applyTranscriptTextTransforms(
         result.rawText,
         resolveEffectiveTranscriptionLocale(
           settingsStore.selectedTranscriptionLocale,
@@ -1734,7 +1734,7 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
       if (isAborted.value) return;
 
       // #39：同主路徑，重送轉錄後也套用簡→繁
-      result.rawText = applyTranscriptTextTransforms(
+      result.rawText = await applyTranscriptTextTransforms(
         result.rawText,
         resolveEffectiveTranscriptionLocale(
           settingsStore.selectedTranscriptionLocale,
