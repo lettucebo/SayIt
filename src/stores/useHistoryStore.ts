@@ -25,6 +25,10 @@ import {
   type EnhanceWithGuardResult,
 } from "../lib/enhancer";
 import { detectHallucination } from "../lib/hallucinationDetector";
+import {
+  applyTranscriptTextTransforms,
+  resolveEffectiveTranscriptionLocale,
+} from "../lib/transcriptTransforms";
 import { useSettingsStore } from "./useSettingsStore";
 import { useVocabularyStore } from "./useVocabularyStore";
 import {
@@ -717,6 +721,15 @@ export const useHistoryStore = defineStore("history", () => {
       captureError(err, { source: "history", step: "retranscribe-invoke" });
       return { ok: false, errorKey: "history.retranscribeFailed" };
     }
+
+    // #39：同主路徑，重新辨識後也套用簡→繁（寫回 raw_text 前）
+    result.rawText = applyTranscriptTextTransforms(
+      result.rawText,
+      resolveEffectiveTranscriptionLocale(
+        settingsStore.selectedTranscriptionLocale,
+        settingsStore.selectedLocale,
+      ),
+    );
 
     // HTTP 成功即計費（不論轉錄內容）→ 記錄 whisper 用量
     recordWhisperUsage(record.id, record.recordingDurationMs, model);
