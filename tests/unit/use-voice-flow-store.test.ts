@@ -93,6 +93,8 @@ const {
       isSmartDictionaryEnabled: false,
       isCopyTranscriptionToClipboardEnabled: true,
       whisperLanguageCode: "zh" as string | null,
+      selectedTranscriptionLocale: "auto" as string,
+      selectedLocale: "en" as string,
     },
     mockVocabularyState: {
       termList: [] as Array<{
@@ -205,6 +207,12 @@ vi.mock("../../src/stores/useSettingsStore", () => ({
     },
     get selectedWhisperModelId() {
       return mockSettingsState.selectedWhisperModelId;
+    },
+    get selectedTranscriptionLocale() {
+      return mockSettingsState.selectedTranscriptionLocale;
+    },
+    get selectedLocale() {
+      return mockSettingsState.selectedLocale;
     },
     get isMuteOnRecordingEnabled() {
       return mockSettingsState.isMuteOnRecordingEnabled;
@@ -342,6 +350,8 @@ describe("useVoiceFlowStore", () => {
     mockSettingsState.isSoundEffectsEnabled = true;
     mockSettingsState.isSmartDictionaryEnabled = false;
     mockSettingsState.whisperLanguageCode = "zh";
+    mockSettingsState.selectedTranscriptionLocale = "auto";
+    mockSettingsState.selectedLocale = "en";
     mockVocabularyState.termList = [];
     mockVocabularyState.getTopTermListByWeight
       .mockClear()
@@ -599,6 +609,76 @@ describe("useVoiceFlowStore", () => {
         { timeout: 3000 },
       );
       expect(mockInvoke).toHaveBeenCalledWith("read_selected_text");
+    });
+  });
+
+  describe("簡→繁轉換整合（#39 · a2 端到端）", () => {
+    const SIMPLIFIED = "请把会议改到星期五并通知所有人";
+    const TRADITIONAL = "請把會議改到星期五並通知所有人";
+
+    it("[P1] 轉譯語言為 zh-TW：Whisper 簡體輸出應在流程中轉繁體後再送 AI 整理", async () => {
+      mockSettingsState.selectedTranscriptionLocale = "zh-TW";
+      mockInvoke.mockImplementation(
+        createMockInvokeHandler({
+          transcribeResult: {
+            rawText: SIMPLIFIED,
+            transcriptionDurationMs: 320,
+            noSpeechProbability: 0.01,
+          },
+        }),
+      );
+
+      const store = useVoiceFlowStore();
+      await store.initialize();
+
+      triggerHotkeyEvent("hotkey:pressed");
+      await vi.waitFor(() => {
+        expect(mockInvoke).toHaveBeenCalledWith("start_recording", {
+          deviceName: "",
+        });
+      });
+      triggerHotkeyEvent("hotkey:released");
+
+      // 轉換發生在 enhance 之前：enhancer 應收到繁體版本（>10 字走 AI 整理）
+      await vi.waitFor(() => {
+        expect(mockEnhanceText).toHaveBeenCalledWith(
+          TRADITIONAL,
+          expect.anything(),
+          expect.anything(),
+        );
+      });
+    });
+
+    it("[P1] 轉譯語言非 zh-TW（zh-CN）：不轉換，簡體原樣送 AI 整理", async () => {
+      mockSettingsState.selectedTranscriptionLocale = "zh-CN";
+      mockInvoke.mockImplementation(
+        createMockInvokeHandler({
+          transcribeResult: {
+            rawText: SIMPLIFIED,
+            transcriptionDurationMs: 320,
+            noSpeechProbability: 0.01,
+          },
+        }),
+      );
+
+      const store = useVoiceFlowStore();
+      await store.initialize();
+
+      triggerHotkeyEvent("hotkey:pressed");
+      await vi.waitFor(() => {
+        expect(mockInvoke).toHaveBeenCalledWith("start_recording", {
+          deviceName: "",
+        });
+      });
+      triggerHotkeyEvent("hotkey:released");
+
+      await vi.waitFor(() => {
+        expect(mockEnhanceText).toHaveBeenCalledWith(
+          SIMPLIFIED,
+          expect.anything(),
+          expect.anything(),
+        );
+      });
     });
   });
 
