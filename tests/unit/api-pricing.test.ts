@@ -3,6 +3,7 @@ import {
   calculateWhisperCostCeiling,
   calculateChatCostCeiling,
 } from "../../src/lib/apiPricing";
+import { LLM_MODEL_LIST } from "../../src/lib/modelRegistry";
 
 describe("apiPricing.ts", () => {
   // ==========================================================================
@@ -72,6 +73,19 @@ describe("apiPricing.ts", () => {
       // 預設模型 Qwen3.6 27B: 150 * 0.000003 = 0.00045
       const cost = calculateChatCostCeiling(150);
       expect(cost).toBeCloseTo(0.00045, 6);
+    });
+
+    it("[P1] 未知 model id 的 fallback 上限 ≥ registry 內任何模型（保證不低估）", () => {
+      // 不變量守衛：加入更貴的模型（如 Gemini 3.1 Pro $12/M）後，
+      // apiPricing.ts 的 fallback 天花板須同步 ≥ 最貴模型，否則遺留死 id 會被低估。
+      const unknownCeiling = calculateChatCostCeiling(
+        1_000_000,
+        "totally-dead-model-id",
+      );
+      for (const model of LLM_MODEL_LIST) {
+        const modelCost = calculateChatCostCeiling(1_000_000, model.id);
+        expect(unknownCeiling).toBeGreaterThanOrEqual(modelCost);
+      }
     });
   });
 });

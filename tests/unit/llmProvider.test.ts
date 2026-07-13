@@ -108,6 +108,18 @@ describe("llmProvider.ts", () => {
       expect(body.generationConfig.thinkingConfig.thinkingLevel).toBe("MINIMAL");
     });
 
+    it("[P0] Gemini 3.1 Pro Preview：thinkingLevel=LOW（不支援 MINIMAL→避免 400）且不送 temperature", () => {
+      const { init } = buildFetchParams(
+        "gemini",
+        { ...BASE_REQUEST, model: "gemini-3.1-pro-preview" },
+        TEST_API_KEY,
+      );
+      const body = JSON.parse(init.body as string);
+      expect(body.generationConfig.thinkingConfig.thinkingLevel).toBe("LOW");
+      // Gemini 3 官方建議維持預設 temperature；Pro 不送（BASE_REQUEST 帶 0.1）
+      expect(body.generationConfig.temperature).toBeUndefined();
+    });
+
     it("[P1] Gemini 非-3 模型：不加 thinkingConfig", () => {
       const { init } = buildFetchParams("gemini", BASE_REQUEST, TEST_API_KEY);
       const body = JSON.parse(init.body as string);
