@@ -125,9 +125,16 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
   // 本世代的 AX 判定是否已有結論：停止錄音時若 AX 還沒回覆，
   // 保守走剪貼簿後備（等同舊行為），避免慢速 AX 讓編輯模式靜默消失
   let selectionProbeSettledEpoch = -1;
+  // 本世代 AX 判定的結論類型（settled 時記錄）：慢速 AX 在後備排程後才落地
+  // noSelection 時，後備必須以 AX 為準、不再用「整行複製」覆寫（#24 復發防護）
+  let selectionProbeSettledKind: "selection" | "noSelection" | "unavailable" | null =
+    null;
   // 等按鍵完全放開的緩衝：toggle 模式的「停止」由第二次按下觸發，
   // 該瞬間按鍵仍壓著，立刻模擬 Cmd+C 會重演 #25 的字元污染
   const CLIPBOARD_FALLBACK_KEY_RELEASE_DELAY_MS = 250;
+  // 等待剪貼簿後備 Promise 的安全上限：防 read_selected_text 永不 settle（Rust
+  // 端卡死）時 await 卡住整條轉錄流程。後備正常在 250ms + Cmd+C 內完成。
+  const PENDING_SELECTION_CAPTURE_TIMEOUT_MS = 2000;
   const isRetryAttempt = ref<boolean>(false);
   const canRetry = computed<boolean>(
     () =>
@@ -1037,6 +1044,7 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
     editSourceText.value = null;
     pendingClipboardSelectionCheck = false;
     pendingSelectionCapture = null;
+    selectionProbeSettledKind = null;
     recordingEpoch += 1;
     const probeEpoch = recordingEpoch;
     invoke<{ kind: string; text: string | null }>("read_selection_state")
@@ -1049,14 +1057,17 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
           state.text &&
           state.text.trim().length > 0
         ) {
+          selectionProbeSettledKind = "selection";
           editSourceText.value = state.text;
           writeInfoLog(
             `useVoiceFlowStore: edit mode activated (ax), selectedText length=${state.text.length}`,
           );
         } else if (state.kind === "noSelection") {
+          selectionProbeSettledKind = "noSelection";
           // AX 的明確否定是權威答案：若慢速後備已誤寫（整行複製），以此為準清掉
           editSourceText.value = null;
         } else if (state.kind === "unavailable") {
+          selectionProbeSettledKind = "unavailable";
           pendingClipboardSelectionCheck = true;
         }
       })
@@ -1130,9 +1141,28 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
             resolve();
             return;
           }
+          // 慢速 AX 在後備排程後才落地權威答案（selection / noSelection）：以 AX
+          // 為準，不再用剪貼簿後備覆寫，避免「無選取複製整行」誤判（#24）復發。
+          // 僅在 AX 未落地、或落地為 unavailable 時才真的走後備。
+          if (
+            selectionProbeSettledEpoch === recordingEpoch &&
+            selectionProbeSettledKind !== null &&
+            selectionProbeSettledKind !== "unavailable"
+          ) {
+            resolve();
+            return;
+          }
           invoke<string | null>("read_selected_text")
             .then((selectedText) => {
               if (fallbackEpoch !== recordingEpoch) return;
+              // AX 可能在 Cmd+C 往返期間才落地權威答案：提交前再驗一次
+              if (
+                selectionProbeSettledEpoch === recordingEpoch &&
+                selectionProbeSettledKind !== null &&
+                selectionProbeSettledKind !== "unavailable"
+              ) {
+                return;
+              }
               if (
                 selectedText &&
                 selectedText.trim().length > 0 &&
@@ -1344,10 +1374,22 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
         return;
       }
 
-      // 剪貼簿後備可能還在等按鍵放開（轉錄比後備快時）：判定模式前先等它完成
+      // 剪貼簿後備可能還在等按鍵放開（轉錄比後備快時）：判定模式前先等它。
+      // 加 timeout 防 read_selected_text 永不 settle（Rust 端卡死）拖住整條流程；
+      // await 後以 identity 清空、並重驗 epoch/abort，避免污染下一輪錄音或 ESC 後仍貼上。
       if (pendingSelectionCapture) {
-        await pendingSelectionCapture;
-        pendingSelectionCapture = null;
+        const capturePromise = pendingSelectionCapture;
+        const captureEpoch = recordingEpoch;
+        await Promise.race([
+          capturePromise,
+          new Promise<void>((resolve) => {
+            setTimeout(resolve, PENDING_SELECTION_CAPTURE_TIMEOUT_MS);
+          }),
+        ]);
+        if (pendingSelectionCapture === capturePromise) {
+          pendingSelectionCapture = null;
+        }
+        if (recordingEpoch !== captureEpoch || isAborted.value) return;
       }
 
       // 編輯模式：語音是指令，選取文字是待處理內容
