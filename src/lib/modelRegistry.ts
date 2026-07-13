@@ -247,6 +247,8 @@ export function getEffectiveLlmModelId(savedId: string | null): LlmModelId {
     if (!next) break;
     candidate = next;
   }
+  // 迴圈上限用盡後，最後一跳的結果仍可能是存活模型 → 補驗一次（避免 off-by-one 誤退預設）
+  if (candidate && findLlmModelConfig(candidate)) return candidate as LlmModelId;
   return DEFAULT_LLM_MODEL_ID;
 }
 
