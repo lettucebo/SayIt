@@ -17,6 +17,10 @@ import { enhanceText, buildSystemPrompt } from "../lib/enhancer";
 import { getEditModePromptForLocale } from "../i18n/prompts";
 import type { SupportedLocale } from "../i18n/languageConfig";
 import { analyzeCorrections } from "../lib/vocabularyAnalyzer";
+import {
+  applyTranscriptTextTransforms,
+  resolveEffectiveTranscriptionLocale,
+} from "../lib/transcriptTransforms";
 import i18n from "../i18n";
 import { useVocabularyStore } from "./useVocabularyStore";
 import { useHistoryStore } from "./useHistoryStore";
@@ -1175,6 +1179,15 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
       // 不會額外拖慢流程（perf 稽核 F4）。之後所有分支都需要 audioFilePath。
       audioFilePath = await saveRecordingFilePromise;
 
+      // #39：轉譯語言為繁中時，把 Whisper 簡體輸出轉繁體（落地前一次到位）
+      result.rawText = applyTranscriptTextTransforms(
+        result.rawText,
+        resolveEffectiveTranscriptionLocale(
+          settingsStore.selectedTranscriptionLocale,
+          settingsStore.selectedLocale,
+        ),
+      );
+
       writeInfoLog(`轉錄原文: "${result.rawText}"`);
 
       if (isEmptyTranscription(result.rawText)) {
@@ -1596,6 +1609,15 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
         },
       );
       if (isAborted.value) return;
+
+      // #39：同主路徑，重送轉錄後也套用簡→繁
+      result.rawText = applyTranscriptTextTransforms(
+        result.rawText,
+        resolveEffectiveTranscriptionLocale(
+          settingsStore.selectedTranscriptionLocale,
+          settingsStore.selectedLocale,
+        ),
+      );
 
       writeInfoLog(`重送轉錄原文: "${result.rawText}"`);
 
