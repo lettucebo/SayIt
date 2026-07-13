@@ -525,6 +525,53 @@ describe("useVoiceFlowStore", () => {
       expect(mockInvoke).not.toHaveBeenCalledWith("read_selected_text");
     });
 
+    it("[P1] 慢速 AX 在後備排程後才回 noSelection：不得被剪貼簿整行複製誤判成編輯模式（#24 race）", async () => {
+      const axDeferred = createDeferredPromise<{
+        kind: string;
+        text: string | null;
+      }>();
+      const base = createMockInvokeHandler();
+      mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
+        if (cmd === "read_selection_state") return axDeferred.promise;
+        // 編輯器「無選取時 Cmd+C 複製整行」→ 後備會撈回整行文字（bug 觸發源）
+        if (cmd === "read_selected_text") return "整行被複製的內容";
+        return base(cmd, args);
+      });
+
+      const store = useVoiceFlowStore();
+      await store.initialize();
+
+      triggerHotkeyEvent("hotkey:pressed");
+      await vi.waitFor(() => {
+        expect(mockInvoke).toHaveBeenCalledWith("start_recording", {
+          deviceName: "",
+        });
+      });
+
+      // 停止：AX 尚未落地 → stop 流程保守排程剪貼簿後備
+      triggerHotkeyEvent("hotkey:released");
+      // stop_recording 在後備排程之後才被呼叫：等它出現即代表後備已排程好，
+      // 此時才讓 AX 落地權威 noSelection —— 精準命中「後備已排程 → AX 才回」的競態
+      await vi.waitFor(() => {
+        expect(mockInvoke).toHaveBeenCalledWith("stop_recording");
+      });
+      axDeferred.resolvePromise({ kind: "noSelection", text: null });
+
+      // 一般聽寫結果應貼上，且全程不呼叫剪貼簿後備、不進編輯模式
+      // （AX 權威否定壓過「整行複製」）
+      await vi.waitFor(
+        () => {
+          expect(mockInvoke).toHaveBeenCalledWith("paste_text", {
+            text: "測試轉錄",
+            restoreClipboard: false,
+          });
+        },
+        { timeout: 3000 },
+      );
+      expect(store.isEditMode).toBe(false);
+      expect(mockInvoke).not.toHaveBeenCalledWith("read_selected_text");
+    });
+
     it("[P0] AX 回報 unavailable 應在停止錄音後走剪貼簿後備並進編輯模式", async () => {
       withSelectionState({ kind: "unavailable", text: null }, "後備選取的文字");
       const store = useVoiceFlowStore();

@@ -72,10 +72,16 @@ impl SelectionState {
 ///                  按鍵放開後改走剪貼簿後備（read_selected_text）
 /// Windows / 其他平台：一律 unavailable（沿用剪貼簿後備；選取讀取待 UIA 版補上）。
 #[tauri::command]
-pub fn read_selection_state() -> SelectionState {
+pub async fn read_selection_state() -> SelectionState {
     #[cfg(target_os = "macos")]
     {
-        macos::read_selection_state_impl()
+        // AX 讀取最壞會等 SELECTION_READ_TIMEOUT_MS（目標 App 的 AX server 卡死時）。
+        // 同步 command 跑在 Tauri 主執行緒——若在此阻塞，會拖慢緊接其後派發的
+        // play_start_sound / start_recording invoke（錄音起點延遲 = 開頭語音被吃掉）。
+        // 放到 blocking 執行緒等待，主執行緒不被 AX 卡住。
+        tauri::async_runtime::spawn_blocking(macos::read_selection_state_impl)
+            .await
+            .unwrap_or_else(|_| SelectionState::unavailable())
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -344,11 +350,24 @@ mod macos {
     static SELECTION_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
     static SELECTION_WORKER: OnceLock<Option<Mutex<SyncSender<SelectionRespTx>>>> = OnceLock::new();
 
+    /// 判斷 AX 回報的 CFRange 是否可信：location / length 皆須非負。
+    /// 橋接失真時 AX 可能回哨兵值（如 location=-1、length=0；get_cursor_position
+    /// 已因此守 location>=0），此類範圍不可當作權威 noSelection。
+    fn is_valid_selection_range(location: i64, length: i64) -> bool {
+        location >= 0 && length >= 0
+    }
+
     /// 讀取聚焦元素的選取長度（AXSelectedTextRange.length）。
     /// length > 0 = 真的有選取；length == 0 = 只有游標、沒選取
     /// （編輯器「無選取時 Cmd+C 複製整行」不影響 AX 層的選取範圍，故能分辨）。
+    /// 無效/哨兵範圍回 None → 分類為 unavailable、交剪貼簿後備，
+    /// 不誤判為權威 noSelection 而跳過後備。
     fn get_selection_length(element: AXUIElementRef) -> Option<i64> {
-        read_selected_text_range(element).map(|range| range.length)
+        let range = read_selected_text_range(element)?;
+        if !is_valid_selection_range(range.location, range.length) {
+            return None;
+        }
+        Some(range.length)
     }
 
     /// Electron/Chromium 的無障礙樹是惰性啟用的：對焦點 App 設
@@ -445,6 +464,12 @@ mod macos {
     }
 
     fn spawn_selection_worker() -> Option<Mutex<SyncSender<SelectionRespTx>>> {
+        // 容量 1（不用 rendezvous 容量 0）：worker 採 lazy spawn，第一次呼叫時剛
+        // spawn 的執行緒還沒 park 在 recv()。若用容量 0，冷啟第一次 try_send 幾乎
+        // 必然失敗 → 首次編輯模式偵測退回 Cmd+C，正是 #24/#25 要消除的路徑。
+        // 容量 1 讓冷啟請求先進 buffer、worker 起來後再取。代價僅是 worker 卡死時
+        // 可能多緩一個過期請求、事後白跑一輪（結果因 receiver 已 drop 而丟棄）——
+        // 非阻斷、且受 SELECTION_IN_FLIGHT single-flight 上限保護。
         let (req_tx, req_rx) = sync_channel::<SelectionRespTx>(1);
         std::thread::Builder::new()
             .name("ax-selection-reader".into())
@@ -468,6 +493,17 @@ mod macos {
         #[test]
         fn test_extract_excerpt_empty() {
             assert_eq!(extract_excerpt("", None, 50), "");
+        }
+
+        #[test]
+        fn test_is_valid_selection_range() {
+            // 正常範圍：游標（0,0）與真實選取（5,3）皆可信
+            assert!(is_valid_selection_range(0, 0));
+            assert!(is_valid_selection_range(5, 3));
+            // 哨兵 / 失真範圍：任一為負皆不可信 → 交剪貼簿後備
+            assert!(!is_valid_selection_range(-1, 0));
+            assert!(!is_valid_selection_range(0, -1));
+            assert!(!is_valid_selection_range(-1, -1));
         }
 
         #[test]
