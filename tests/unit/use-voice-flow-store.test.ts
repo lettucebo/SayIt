@@ -86,7 +86,7 @@ const {
       triggerMode: "hold" as string,
       isEnhancementThresholdEnabled: true,
       enhancementThresholdCharCount: 10,
-      selectedLlmModelId: "llama-3.3-70b-versatile",
+      selectedLlmModelId: "qwen/qwen3.6-27b",
       selectedWhisperModelId: "whisper-large-v3",
       isMuteOnRecordingEnabled: false,
       isSoundEffectsEnabled: true,
@@ -335,7 +335,7 @@ describe("useVoiceFlowStore", () => {
     mockSettingsState.triggerMode = "hold";
     mockSettingsState.isEnhancementThresholdEnabled = true;
     mockSettingsState.enhancementThresholdCharCount = 10;
-    mockSettingsState.selectedLlmModelId = "llama-3.3-70b-versatile";
+    mockSettingsState.selectedLlmModelId = "qwen/qwen3.6-27b";
     mockSettingsState.selectedWhisperModelId = "whisper-large-v3";
     mockSettingsState.isMuteOnRecordingEnabled = false;
     mockSettingsState.isSoundEffectsEnabled = true;
@@ -1439,7 +1439,7 @@ describe("useVoiceFlowStore", () => {
         "test-api-key-123",
         expect.objectContaining({
           vocabularyTermList: ["Pinia", "Vitest"],
-          modelId: "llama-3.3-70b-versatile",
+          modelId: "qwen/qwen3.6-27b",
         }),
       );
     });
@@ -1964,7 +1964,7 @@ describe("useVoiceFlowStore", () => {
 
       const chatRecord = mockAddApiUsage.mock.calls[1][0];
       expect(chatRecord.apiType).toBe("chat");
-      expect(chatRecord.model).toBe("llama-3.3-70b-versatile");
+      expect(chatRecord.model).toBe("qwen/qwen3.6-27b");
       expect(chatRecord.promptTokens).toBe(100);
       expect(chatRecord.completionTokens).toBe(50);
       expect(chatRecord.totalTokens).toBe(150);

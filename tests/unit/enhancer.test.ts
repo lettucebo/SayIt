@@ -116,7 +116,7 @@ describe("enhancer.ts", () => {
       expect(callArgs[1].headers.Authorization).toBe(`Bearer ${TEST_API_KEY}`);
 
       const body = JSON.parse(callArgs[1].body);
-      expect(body.model).toBe("llama-3.3-70b-versatile");
+      expect(body.model).toBe("qwen/qwen3.6-27b");
       expect(body.temperature).toBe(0.1);
       expect(body.max_tokens).toBe(8192);
       expect(body.messages).toHaveLength(2);
