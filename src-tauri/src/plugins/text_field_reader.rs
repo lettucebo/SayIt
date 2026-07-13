@@ -464,10 +464,13 @@ mod macos {
     }
 
     fn spawn_selection_worker() -> Option<Mutex<SyncSender<SelectionRespTx>>> {
-        // rendezvous（容量 0）：worker 還卡在上一個 AX 讀取（未回到 recv）時，
-        // 呼叫端的 try_send 直接失敗 → 立刻回 unavailable，而非把過期請求塞進
-        // 容量 1 的佇列、讓 worker 逾時後又白跑一輪 600ms。
-        let (req_tx, req_rx) = sync_channel::<SelectionRespTx>(0);
+        // 容量 1（不用 rendezvous 容量 0）：worker 採 lazy spawn，第一次呼叫時剛
+        // spawn 的執行緒還沒 park 在 recv()。若用容量 0，冷啟第一次 try_send 幾乎
+        // 必然失敗 → 首次編輯模式偵測退回 Cmd+C，正是 #24/#25 要消除的路徑。
+        // 容量 1 讓冷啟請求先進 buffer、worker 起來後再取。代價僅是 worker 卡死時
+        // 可能多緩一個過期請求、事後白跑一輪（結果因 receiver 已 drop 而丟棄）——
+        // 非阻斷、且受 SELECTION_IN_FLIGHT single-flight 上限保護。
+        let (req_tx, req_rx) = sync_channel::<SelectionRespTx>(1);
         std::thread::Builder::new()
             .name("ax-selection-reader".into())
             .spawn(move || selection_worker_loop(req_rx))
