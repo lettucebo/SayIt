@@ -313,7 +313,8 @@
     "billedPlan": "计费",
     "billedNoFreeQuota": "付费方案 — 无免费额度限制",
     "usageWhisper": "Whisper：{requests} 次 · {audio}",
-    "usageLlm": "LLM：{requests} 次 · {tokens} tokens"
+    "usageLlm": "LLM：{requests} 次 · {tokens} tokens",
+    "geminiQuotaHint": "Gemini 免费额度依账号浮动，仅能于 Google AI Studio 查询"
   },
   "history": {
     "searchPlaceholder": "搜索转录记录...",

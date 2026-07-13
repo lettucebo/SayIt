@@ -313,7 +313,8 @@
     "billedPlan": "計費",
     "billedNoFreeQuota": "付費方案 — 無免費額度限制",
     "usageWhisper": "Whisper：{requests} 次 · {audio}",
-    "usageLlm": "LLM：{requests} 次 · {tokens} tokens"
+    "usageLlm": "LLM：{requests} 次 · {tokens} tokens",
+    "geminiQuotaHint": "Gemini 免費額度依帳號浮動，僅能於 Google AI Studio 查詢"
   },
   "history": {
     "searchPlaceholder": "搜尋轉錄記錄...",

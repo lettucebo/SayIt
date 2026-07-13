@@ -59,6 +59,15 @@ const hasAnyPaidProvider = computed(
   () => isPaidWhisperProvider.value || isPaidLlmProvider.value,
 );
 
+// Gemini 免費額度已不公開（依帳號浮動、僅能在 Google AI Studio 查詢）：
+// registry 將其 freeQuotaRpd 設 0 → 額度條自動略過，改以「今日用量」呈現。
+// Azure 等計費 provider 由 isPaidLlmProvider 短路排除。
+const isQuotaHiddenLlmProvider = computed(() => {
+  if (isPaidLlmProvider.value) return false;
+  const lConfig = findLlmModelConfig(settingsStore.selectedLlmModelId);
+  return (lConfig?.freeQuotaRpd ?? 0) === 0;
+});
+
 const quotaDimensionList = computed(() => {
   const usage = historyStore.dashboardStats.dailyQuotaUsage;
   const dimensionList: { remaining: number; label: string }[] = [];
@@ -119,7 +128,7 @@ const paidUsageList = computed(() => {
       }),
     });
   }
-  if (isPaidLlmProvider.value) {
+  if (isPaidLlmProvider.value || isQuotaHiddenLlmProvider.value) {
     list.push({
       label: t("dashboard.usageLlm", {
         requests: formatNumber(usage.llmRequestCount),
@@ -262,6 +271,14 @@ onBeforeUnmount(() => {
                   </p>
                 </template>
 
+                <!-- Gemini 免費額度不公開：說明無額度條、僅顯示今日用量 -->
+                <p
+                  v-if="isQuotaHiddenLlmProvider"
+                  class="text-xs text-muted-foreground mt-1.5"
+                >
+                  {{ $t("dashboard.geminiQuotaHint") }}
+                </p>
+
                 <!-- 付費服務今日用量（混用與全付費共用同一段；混用為次要樣式 + 分隔線）-->
                 <div
                   v-if="paidUsageList.length > 0"
@@ -305,6 +322,14 @@ onBeforeUnmount(() => {
               </div>
             </div>
             <div
+              v-if="isQuotaHiddenLlmProvider"
+              class="mt-2 pt-2 border-t border-border"
+            >
+              <span class="text-xs text-muted-foreground">
+                {{ $t("dashboard.geminiQuotaHint") }}
+              </span>
+            </div>
+            <div
               v-if="paidUsageList.length > 0"
               class="space-y-1"
               :class="{ 'mt-2 pt-2 border-t border-border': hasFreeQuota }"
@@ -316,7 +341,7 @@ onBeforeUnmount(() => {
               >
                 {{ item.label }}
               </div>
-              <p class="text-xs text-muted-foreground">{{ $t("dashboard.billedNoFreeQuota") }}</p>
+              <p v-if="hasAnyPaidProvider" class="text-xs text-muted-foreground">{{ $t("dashboard.billedNoFreeQuota") }}</p>
             </div>
             <div
               v-if="historyStore.dashboardStats.dailyQuotaUsage.vocabularyAnalysisRequestCount > 0"

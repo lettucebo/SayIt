@@ -96,6 +96,27 @@ describe("DashboardView 額度卡片", () => {
     expect(text).not.toContain("今日用量");
   });
 
+  it("[P0] Gemini（免費額度不公開）：主體顯示 LLM 今日用量與提示，不誤標付費方案", () => {
+    settingsState = makeSettings({
+      selectedLlmProviderId: "gemini",
+      selectedLlmModelId: "gemini-3.5-flash",
+    });
+    historyState = makeHistory({
+      whisperRequestCount: 10,
+      llmRequestCount: 6,
+      llmTotalTokens: 3200,
+    });
+    const text = mountDashboard().text();
+
+    // Gemini LLM 用量以「今日用量」呈現（回歸前 quota=0 會讓它完全消失）
+    expect(text).toContain("LLM：6 次 · 3,200 tokens");
+    expect(text).toContain("Gemini 免費額度依帳號浮動");
+    // Gemini 非付費方案 → 不得出現「付費方案 — 無免費額度限制」
+    expect(text).not.toContain("付費方案 — 無免費額度限制");
+    expect(text).not.toContain("Infinity");
+    expect(text).not.toContain("NaN");
+  });
+
   it("[P0] 全計費 provider（Azure）：主體顯示今日用量與計費提示，不顯示百分比", () => {
     settingsState = makeSettings({
       whisperProviderId: "azure",

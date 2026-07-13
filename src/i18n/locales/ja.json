@@ -313,7 +313,8 @@
     "billedPlan": "従量課金",
     "billedNoFreeQuota": "従量課金 — 無料枠なし",
     "usageWhisper": "Whisper：{requests} 回 · {audio}",
-    "usageLlm": "LLM：{requests} 回 · {tokens} tokens"
+    "usageLlm": "LLM：{requests} 回 · {tokens} tokens",
+    "geminiQuotaHint": "Gemini の無料枠はアカウントにより変動し、Google AI Studio で確認できます"
   },
   "history": {
     "searchPlaceholder": "文字起こし履歴を検索...",
