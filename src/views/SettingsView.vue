@@ -667,6 +667,20 @@ async function handleSaveAzureChatDeployment() {
   }
 }
 
+async function handleToggleAzureOmitTemperature(newValue: boolean) {
+  try {
+    await settingsStore.saveAzureOmitTemperature(newValue);
+    providerFeedback.show(
+      "success",
+      newValue
+        ? t("settings.azure.omitTemperatureEnabled")
+        : t("settings.azure.omitTemperatureDisabled"),
+    );
+  } catch (err) {
+    providerFeedback.show("error", extractErrorMessage(err));
+  }
+}
+
 async function handleSaveAzureWhisperDeployment() {
   try {
     await settingsStore.saveAzureWhisperDeployment(
@@ -2133,6 +2147,18 @@ onBeforeUnmount(() => {
             {{ $t("settings.azure.notConfiguredHint") }}
           </p>
           <p v-else class="text-xs text-muted-foreground">{{ $t("settings.azure.chatHint") }}</p>
+
+          <div class="flex items-center justify-between pt-2">
+            <div>
+              <Label for="azure-omit-temperature">{{ $t("settings.azure.omitTemperatureLabel") }}</Label>
+              <p class="text-sm text-muted-foreground">{{ $t("settings.azure.omitTemperatureDescription") }}</p>
+            </div>
+            <Switch
+              id="azure-omit-temperature"
+              :model-value="settingsStore.azureOmitTemperature"
+              @update:model-value="handleToggleAzureOmitTemperature"
+            />
+          </div>
         </div>
 
         <ConnectionTestButton

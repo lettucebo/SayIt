@@ -130,5 +130,32 @@ describe("Azure provider", () => {
       expect(result.usage?.totalTokens).toBe(5);
       expect(result.usage?.promptTimeMs).toBeUndefined();
     });
+
+    it("[P0] 預設（omitTemperature 未設）：照送 temperature", () => {
+      const azure: AzureRequestOptions = {
+        endpoint: "https://r.openai.azure.com",
+        authMode: "key",
+        authValue: "k",
+      };
+      const { init } = buildFetchParams("azure", REQUEST, "", azure);
+      const body = JSON.parse(init.body as string);
+      expect(body.temperature).toBe(0.1);
+    });
+
+    it("[P0] omitTemperature=true：省略 temperature 且不自動補 reasoning_effort（GPT-5 部署相容）", () => {
+      const azure: AzureRequestOptions = {
+        endpoint: "https://r.openai.azure.com",
+        authMode: "key",
+        authValue: "k",
+        omitTemperature: true,
+      };
+      const { init } = buildFetchParams("azure", REQUEST, "", azure);
+      const body = JSON.parse(init.body as string);
+      expect(body.temperature).toBeUndefined();
+      // 刻意不補 reasoning_effort（原始 GPT-5 部署未必支援 "none"）
+      expect(body.reasoning_effort).toBeUndefined();
+      // 其餘照送
+      expect(body.max_completion_tokens).toBe(1024);
+    });
   });
 });

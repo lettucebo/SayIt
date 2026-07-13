@@ -104,6 +104,8 @@ describe("stripSensitiveKeys", () => {
     expect(keys).not.toContain("llmMigratedFromKimiK2");
     // gh-56：macOS 隱藏 Dock 開關可備份
     expect(keys).toContain("hideDockIcon");
+    // azure-reasoning-fix：Azure 省略 temperature 開關可備份
+    expect(keys).toContain("azureOmitTemperature");
   });
 });
 

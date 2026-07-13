@@ -61,6 +61,7 @@ export const EXPORTABLE_SETTING_KEYS = [
   "azureApiVersion",
   "azureChatDeployment",
   "azureWhisperDeployment",
+  "azureOmitTemperature",
 ] as const;
 
 export type ExportableSettingKey = (typeof EXPORTABLE_SETTING_KEYS)[number];
@@ -253,6 +254,7 @@ const SETTING_VALUE_TYPES: Record<string, ExpectedType> = {
   azureApiVersion: "string",
   azureChatDeployment: "string",
   azureWhisperDeployment: "string",
+  azureOmitTemperature: "boolean",
   autoStartEnabled: "boolean",
 };
 

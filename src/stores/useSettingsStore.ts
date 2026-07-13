@@ -196,6 +196,7 @@ export const useSettingsStore = defineStore("settings", () => {
   const azureClientId = ref<string>("");
   const azureClientSecret = ref<string>("");
   const azureApiVersion = ref<string>("");
+  const azureOmitTemperature = ref<boolean>(false);
   const azureChatDeployment = ref<string>("");
   const azureWhisperDeployment = ref<string>("");
   const whisperProviderId = ref<"groq" | "azure">("groq");
@@ -246,6 +247,7 @@ export const useSettingsStore = defineStore("settings", () => {
       apiVersion: azureApiVersion.value || undefined,
       authMode: azureAuthMode.value,
       authValue,
+      omitTemperature: azureOmitTemperature.value,
     };
   }
 
@@ -506,6 +508,8 @@ export const useSettingsStore = defineStore("settings", () => {
         (await store.get<string>("azureClientSecret")) ?? "";
       azureApiVersion.value =
         (await store.get<string>("azureApiVersion"))?.trim() ?? "";
+      azureOmitTemperature.value =
+        (await store.get<boolean>("azureOmitTemperature")) ?? false;
       azureChatDeployment.value =
         (await store.get<string>("azureChatDeployment"))?.trim() ?? "";
       azureWhisperDeployment.value =
@@ -1214,6 +1218,7 @@ export const useSettingsStore = defineStore("settings", () => {
         "azureClientId",
         "azureClientSecret",
         "azureApiVersion",
+        "azureOmitTemperature",
       ];
       for (const k of keys) {
         await store.delete(k);
@@ -1241,6 +1246,7 @@ export const useSettingsStore = defineStore("settings", () => {
       azureClientId.value = "";
       azureClientSecret.value = "";
       azureApiVersion.value = "";
+      azureOmitTemperature.value = false;
       clearAzureTokenCache();
 
       const payload: SettingsUpdatedPayload = {
@@ -1292,6 +1298,29 @@ export const useSettingsStore = defineStore("settings", () => {
     } catch (err) {
       console.error(
         "[useSettingsStore] saveAzureWhisperDeployment failed:",
+        extractErrorMessage(err),
+      );
+      throw err;
+    }
+  }
+
+  // gh-45/#25：Azure/Foundry 的 model 是不透明部署名，無法從名稱判斷是否推理模型。
+  // 開啟此開關時，Azure chat 請求一律省略 temperature（GPT-5 系列部署送 temperature
+  // 會回 400）。刻意不自動補 reasoning_effort（原始 GPT-5 部署未必支援 "none"）。
+  async function saveAzureOmitTemperature(enabled: boolean) {
+    try {
+      const store = await load(STORE_NAME);
+      await store.set("azureOmitTemperature", enabled);
+      await store.save();
+      azureOmitTemperature.value = enabled;
+      const payload: SettingsUpdatedPayload = {
+        key: "azureOmitTemperature",
+        value: enabled,
+      };
+      await emitEvent(SETTINGS_UPDATED, payload);
+    } catch (err) {
+      console.error(
+        "[useSettingsStore] saveAzureOmitTemperature failed:",
         extractErrorMessage(err),
       );
       throw err;
@@ -1357,6 +1386,8 @@ export const useSettingsStore = defineStore("settings", () => {
             (await store.get<string>("azureClientSecret")) ?? "";
           azureApiVersion.value =
             (await store.get<string>("azureApiVersion"))?.trim() ?? "";
+          azureOmitTemperature.value =
+            (await store.get<boolean>("azureOmitTemperature")) ?? false;
           azureChatDeployment.value =
             (await store.get<string>("azureChatDeployment"))?.trim() ?? "";
           break;
@@ -1897,6 +1928,8 @@ export const useSettingsStore = defineStore("settings", () => {
         (await store.get<string>("azureClientSecret")) ?? "";
       azureApiVersion.value =
         (await store.get<string>("azureApiVersion"))?.trim() ?? "";
+      azureOmitTemperature.value =
+        (await store.get<boolean>("azureOmitTemperature")) ?? false;
       azureChatDeployment.value =
         (await store.get<string>("azureChatDeployment"))?.trim() ?? "";
       azureWhisperDeployment.value =
@@ -2100,6 +2133,7 @@ export const useSettingsStore = defineStore("settings", () => {
     azureClientId,
     azureClientSecret: computed(() => azureClientSecret.value),
     azureApiVersion,
+    azureOmitTemperature,
     azureChatDeployment,
     azureWhisperDeployment,
     whisperProviderId,
@@ -2107,6 +2141,7 @@ export const useSettingsStore = defineStore("settings", () => {
     deleteAzureConnection,
     saveAzureChatDeployment,
     saveAzureWhisperDeployment,
+    saveAzureOmitTemperature,
     saveWhisperProvider,
     refreshLlmApiKey,
     saveWhisperModel,
