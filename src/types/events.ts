@@ -34,6 +34,7 @@ export type SettingsKey =
   | "promptMode"
   | "audioInputDevice"
   | "copyTranscriptionToClipboard"
+  | "hideDockIcon"
   | "azureConnection"
   | "azureChatDeployment"
   | "azureWhisperDeployment"
