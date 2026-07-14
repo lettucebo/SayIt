@@ -250,7 +250,8 @@
     "retranscribing": "再認識中…",
     "reEnhancing": "再整形中…",
     "retranscribeFailed": "再認識に失敗しました。後でもう一度お試しください",
-    "reEnhanceFailed": "再整形に失敗しました。後でもう一度お試しください"
+    "reEnhanceFailed": "再整形に失敗しました。後でもう一度お試しください",
+    "reEnhanceDrift": "整形結果が元のテキストから乖離したため、既存の結果を保持しました"
   },
   "dictionary": {
     "termCount": "{count} 語",

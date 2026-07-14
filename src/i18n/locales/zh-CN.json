@@ -250,7 +250,8 @@
     "retranscribing": "重新识别中…",
     "reEnhancing": "重新整理中…",
     "retranscribeFailed": "重新识别失败，请稍后再试",
-    "reEnhanceFailed": "重新整理失败，请稍后再试"
+    "reEnhanceFailed": "重新整理失败，请稍后再试",
+    "reEnhanceDrift": "整理结果与原文差异过大，已保留原结果"
   },
   "dictionary": {
     "termCount": "{count} 词汇",

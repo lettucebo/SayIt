@@ -573,4 +573,30 @@ describe("enhanceWithAnomalyGuard", () => {
     expect(result.text).toBe("正常整理後的文字");
     expect(mockFetch).toHaveBeenCalledTimes(2);
   });
+
+  it("[P1] 語意飄移（整理結果與原文幾乎不相干）→ wasDrift=true、不 fallback、保留整理文字供拒絕", async () => {
+    mockFetch.mockResolvedValue(
+      createSuccessResponse("股票市場今日收盤下跌"),
+    );
+    const { enhanceWithAnomalyGuard } = await import("../../src/lib/enhancer");
+    const result = await enhanceWithAnomalyGuard(
+      "今天天氣很好適合出門散步",
+      TEST_API_KEY,
+    );
+    expect(result.wasAnomalous).toBe(false);
+    expect(result.wasDrift).toBe(true);
+    expect(result.driftOverlapRatio).toBeLessThan(0.2);
+  });
+
+  it("[P1] 正常整理（高 bigram 重疊）→ wasDrift=false", async () => {
+    mockFetch.mockResolvedValue(
+      createSuccessResponse("這是一段整理後的書面語文字。"),
+    );
+    const { enhanceWithAnomalyGuard } = await import("../../src/lib/enhancer");
+    const result = await enhanceWithAnomalyGuard(
+      "這是一段整理後的書面語文字",
+      TEST_API_KEY,
+    );
+    expect(result.wasDrift).toBe(false);
+  });
 });

@@ -349,7 +349,7 @@ onBeforeUnmount(() => {
                     size="icon"
                     class="h-7 w-7"
                     data-testid="reenhance-button"
-                    :disabled="!record.rawText.trim() || retryingId !== null"
+                    :disabled="!record.rawText.trim() || record.isEditMode || retryingId !== null"
                     :title="retryingId === record.id && retryingAction === 'enhance' ? $t('history.reEnhancing') : $t('history.reEnhance')"
                     @click.stop="handleReEnhance(record)"
                   >

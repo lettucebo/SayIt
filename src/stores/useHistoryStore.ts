@@ -24,6 +24,7 @@ import {
   enhanceWithAnomalyGuard,
   type EnhanceWithGuardResult,
 } from "../lib/enhancer";
+import { applyTranscriptTextTransforms } from "../lib/transcriptTextTransforms";
 import { detectHallucination } from "../lib/hallucinationDetector";
 import { useSettingsStore } from "./useSettingsStore";
 import { useVocabularyStore } from "./useVocabularyStore";
@@ -178,6 +179,7 @@ const UPDATE_ON_RETRANSCRIBE_SQL = `
       transcription_duration_ms = $2,
       enhancement_duration_ms = NULL,
       was_enhanced = 0,
+      was_modified = NULL,
       char_count = $3
   WHERE id = $4 AND raw_text = $5
 `;
@@ -705,6 +707,18 @@ export const useHistoryStore = defineStore("history", () => {
       return { ok: false, errorKey: "history.retranscribeFailed" };
     }
 
+    // #39：轉譯語言為繁中時，把 Whisper 的簡體輸出轉成繁體（與即時流程一致，落地前一次到位）。
+    // 與主路徑同樣在 raw_text 寫入 DB 前套用，涵蓋空轉錄/幻覺偵測、charCount 與本地更新。
+    const transcriptionLocale = settingsStore.selectedTranscriptionLocale;
+    const effectiveLocale =
+      transcriptionLocale === "auto"
+        ? settingsStore.selectedLocale
+        : transcriptionLocale;
+    result.rawText = applyTranscriptTextTransforms(
+      result.rawText,
+      effectiveLocale,
+    );
+
     // HTTP 成功即計費（不論轉錄內容）→ 記錄 whisper 用量
     recordWhisperUsage(record.id, record.recordingDurationMs, model);
 
@@ -747,6 +761,7 @@ export const useHistoryStore = defineStore("history", () => {
       rawText: result.rawText,
       processedText: null,
       wasEnhanced: false,
+      wasModified: null,
       transcriptionDurationMs,
       enhancementDurationMs: null,
       charCount,
@@ -762,6 +777,13 @@ export const useHistoryStore = defineStore("history", () => {
     record: TranscriptionRecord,
   ): Promise<HistoryRetryResult> {
     if (!record.rawText.trim()) {
+      return { ok: false, errorKey: "history.reEnhanceFailed" };
+    }
+
+    // 編輯模式記錄：rawText 是語音指令、processedText 是編輯結果；
+    // 「重新整理」會把編輯結果覆寫成清理過的指令文字。UI 已停用該按鈕，
+    // 此處為防繞過 UI 直呼 store 的守衛——在任何 API/DB 動作前就擋下。
+    if (record.isEditMode) {
       return { ok: false, errorKey: "history.reEnhanceFailed" };
     }
 
@@ -804,6 +826,12 @@ export const useHistoryStore = defineStore("history", () => {
 
     if (enhanceResult.wasAnomalous) {
       return { ok: false, errorKey: "history.reEnhanceFailed" };
+    }
+
+    // #43 語意飄移守衛：整理結果與原文 bigram 重疊過低（疑似答非所問）→
+    // 拒絕並保留既有結果、不覆寫 DB，並以 reEnhanceDrift 訊息提示使用者。
+    if (enhanceResult.wasDrift) {
+      return { ok: false, errorKey: "history.reEnhanceDrift" };
     }
 
     const db = getDatabase();

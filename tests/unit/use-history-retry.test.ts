@@ -7,11 +7,14 @@ const h = vi.hoisted(() => {
   const mockInvoke = vi.fn();
   const mockEnhanceGuard = vi.fn();
   const mockGetTopTerms = vi.fn();
+  const mockTransform = vi.fn();
   const settingsStub = {
     getApiKey: () => "whisper-key",
     refreshApiKey: vi.fn(),
     selectedWhisperModelId: "whisper-large-v3-turbo",
     getWhisperLanguageCode: () => "zh",
+    selectedTranscriptionLocale: "en",
+    selectedLocale: "en",
     refreshLlmApiKey: vi.fn(),
     getLlmApiKey: () => "llm-key",
     selectedLlmModelId: "llama-3.3-70b-versatile",
@@ -22,6 +25,7 @@ const h = vi.hoisted(() => {
     mockInvoke,
     mockEnhanceGuard,
     mockGetTopTerms,
+    mockTransform,
     settingsStub,
   };
 });
@@ -37,6 +41,9 @@ vi.mock("../../src/composables/useTauriEvents", () => ({
 vi.mock("../../src/lib/sentry", () => ({ captureError: vi.fn() }));
 vi.mock("../../src/lib/enhancer", () => ({
   enhanceWithAnomalyGuard: h.mockEnhanceGuard,
+}));
+vi.mock("../../src/lib/transcriptTextTransforms", () => ({
+  applyTranscriptTextTransforms: h.mockTransform,
 }));
 vi.mock("../../src/stores/useSettingsStore", () => ({
   useSettingsStore: () => h.settingsStub,
@@ -88,6 +95,9 @@ describe("useHistoryStore retry", () => {
     h.mockInvoke.mockReset();
     h.mockEnhanceGuard.mockReset();
     h.mockGetTopTerms.mockReset().mockResolvedValue([]);
+    h.mockTransform.mockReset().mockImplementation((text: string) => text);
+    h.settingsStub.selectedTranscriptionLocale = "en";
+    h.settingsStub.selectedLocale = "en";
     h.settingsStub.refreshApiKey.mockReset().mockResolvedValue(undefined);
     h.settingsStub.refreshLlmApiKey.mockReset().mockResolvedValue(undefined);
   });
@@ -196,6 +206,63 @@ describe("useHistoryStore retry", () => {
       );
       expect(updateCall?.[1]).toContain("舊原文");
     });
+
+    it("[P1] zh-TW → 落地前套用簡繁轉換（共用 transform），存入轉換後文字", async () => {
+      h.mockInvoke.mockResolvedValue({
+        ...GOOD_TRANSCRIBE_RESULT,
+        rawText: "简体转录结果",
+      });
+      h.settingsStub.selectedTranscriptionLocale = "zh-TW";
+      h.mockTransform.mockImplementation((text: string) =>
+        text === "简体转录结果" ? "簡體轉錄結果" : text,
+      );
+      const store = useHistoryStore();
+      const record = createRecord();
+      store.transcriptionList.push(record);
+
+      const res = await store.retranscribeRecord(record);
+
+      expect(res.ok).toBe(true);
+      expect(h.mockTransform).toHaveBeenCalledWith("简体转录结果", "zh-TW");
+      expect(store.transcriptionList[0].rawText).toBe("簡體轉錄結果");
+      // 證明寫入 DB 的 raw_text（SQL $1）也是轉換後文字，而非本地才轉
+      const updateCall = h.mockDbExecute.mock.calls.find((c) =>
+        String(c[0]).includes("UPDATE transcriptions"),
+      );
+      expect(updateCall?.[1]?.[0]).toBe("簡體轉錄結果");
+    });
+
+    it("[P1] auto 模式 → transform 以介面語言解析的 effectiveLocale 呼叫", async () => {
+      h.mockInvoke.mockResolvedValue(GOOD_TRANSCRIBE_RESULT);
+      h.settingsStub.selectedTranscriptionLocale = "auto";
+      h.settingsStub.selectedLocale = "zh-TW";
+      const store = useHistoryStore();
+      const record = createRecord();
+      store.transcriptionList.push(record);
+
+      await store.retranscribeRecord(record);
+
+      expect(h.mockTransform).toHaveBeenCalledWith(
+        GOOD_TRANSCRIBE_RESULT.rawText,
+        "zh-TW",
+      );
+    });
+
+    it("[P2] 重新辨識 → 重置 was_modified（SQL + 本地皆歸零）", async () => {
+      h.mockInvoke.mockResolvedValue(GOOD_TRANSCRIBE_RESULT);
+      const store = useHistoryStore();
+      const record = createRecord({ wasModified: true });
+      store.transcriptionList.push(record);
+
+      const res = await store.retranscribeRecord(record);
+
+      expect(res.ok).toBe(true);
+      expect(store.transcriptionList[0].wasModified).toBeNull();
+      const updateCall = h.mockDbExecute.mock.calls.find((c) =>
+        String(c[0]).includes("UPDATE transcriptions"),
+      );
+      expect(String(updateCall?.[0])).toContain("was_modified = NULL");
+    });
   });
 
   describe("reEnhanceRecord", () => {
@@ -293,6 +360,55 @@ describe("useHistoryStore retry", () => {
         String(c[0]).includes("UPDATE transcriptions"),
       );
       expect(updateCall?.[1]).toContain(record.rawText);
+    });
+
+    it("[P1] 編輯模式紀錄 → 直接拒絕、不呼叫 LLM、不動 DB（防繞過守衛）", async () => {
+      const store = useHistoryStore();
+      const record = createRecord({
+        status: "success",
+        rawText: "把這句改成正式語氣",
+        processedText: "使用者的編輯結果",
+        isEditMode: true,
+      });
+      store.transcriptionList.push(record);
+
+      const res = await store.reEnhanceRecord(record);
+
+      expect(res.ok).toBe(false);
+      expect(h.mockEnhanceGuard).not.toHaveBeenCalled();
+      expect(h.mockDbExecute).not.toHaveBeenCalled();
+      expect(h.settingsStub.refreshLlmApiKey).not.toHaveBeenCalled();
+      expect(h.mockGetTopTerms).not.toHaveBeenCalled();
+      expect(store.transcriptionList[0].processedText).toBe("使用者的編輯結果");
+    });
+
+    it("[P1] 語意飄移（wasDrift）→ 拒絕並保留既有結果、不寫 DB、回 reEnhanceDrift", async () => {
+      h.mockEnhanceGuard.mockResolvedValue({
+        text: "與原文完全不相干的回答內容。",
+        usage: null,
+        wasAnomalous: false,
+        wasDrift: true,
+        driftOverlapRatio: 0.05,
+      });
+      const store = useHistoryStore();
+      const record = createRecord({
+        status: "success",
+        rawText: "原始口語內容",
+        wasEnhanced: true,
+        processedText: "既有的整理結果",
+      });
+      store.transcriptionList.push(record);
+
+      const res = await store.reEnhanceRecord(record);
+
+      expect(res.ok).toBe(false);
+      expect(res.errorKey).toBe("history.reEnhanceDrift");
+      // 拒絕並保留：不執行 UPDATE，既有 processedText 原封不動
+      const updateCall = h.mockDbExecute.mock.calls.find((c) =>
+        String(c[0]).includes("UPDATE transcriptions"),
+      );
+      expect(updateCall).toBeUndefined();
+      expect(store.transcriptionList[0].processedText).toBe("既有的整理結果");
     });
   });
 });

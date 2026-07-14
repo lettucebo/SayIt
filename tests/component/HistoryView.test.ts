@@ -142,6 +142,24 @@ describe("HistoryView 重試按鈕", () => {
     ).toBeUndefined();
   });
 
+  it("[P1] 編輯模式紀錄 → 重新整理 disabled（避免覆寫編輯結果）、重新辨識仍可用", async () => {
+    const wrapper = await mountExpanded(
+      createRecord({
+        status: "success",
+        audioFilePath: "C:/rec/rec-1.wav",
+        rawText: "把這句改成正式語氣",
+        processedText: "使用者的編輯結果",
+        isEditMode: true,
+      }),
+    );
+    expect(
+      wrapper.find('[data-testid="reenhance-button"]').attributes("disabled"),
+    ).toBeDefined();
+    expect(
+      wrapper.find('[data-testid="retranscribe-button"]').attributes("disabled"),
+    ).toBeUndefined();
+  });
+
   it("[P1] 點擊重新辨識會呼叫 store.retranscribeRecord", async () => {
     const record = createRecord({ audioFilePath: "C:/rec/rec-1.wav" });
     const wrapper = await mountExpanded(record);
