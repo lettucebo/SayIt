@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { LogicalPosition } from "@tauri-apps/api/dpi";
+import { LogicalPosition, PhysicalPosition } from "@tauri-apps/api/dpi";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { Window, getCurrentWindow } from "@tauri-apps/api/window";
 import { defineStore } from "pinia";
@@ -89,6 +89,8 @@ function t(key: string, params?: Record<string, unknown>): string {
 }
 
 const MONITOR_POLL_INTERVAL_MS = 250;
+// reposition 不得阻擋 show：逾時仍先 show，避免偶發卡住讓 HUD 永不出現
+const REPOSITION_SHOW_TIMEOUT_MS = 500;
 
 export const useVoiceFlowStore = defineStore("voice-flow", () => {
   const status = ref<HudStatus>("idle");
@@ -102,7 +104,12 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
   let collapseHideTimer: ReturnType<typeof setTimeout> | null = null;
   const COLLAPSE_HIDE_DELAY_MS = 400;
   const lastWasModified = ref<boolean | null>(null);
-  let monitorPollTimer: ReturnType<typeof setInterval> | null = null;
+  let monitorPollTimer: ReturnType<typeof setTimeout> | null = null;
+  // 輪詢世代：每次 start/stop 遞增；in-flight 的 scheduleNext 以捕獲的世代比對，
+  // 避免舊 loop 在 restart 後「復活」與新 loop 並存（各自 setTimeout、互相覆寫 handle）。
+  let monitorPollGeneration = 0;
+  // reposition single-flight：同一時間只有一個進行中的操作，避免掛死時累積 native invoke。
+  let inFlightReposition: Promise<void> | null = null;
   let delayedMuteTimer: ReturnType<typeof setTimeout> | null = null;
   let learnedHideTimer: ReturnType<typeof setTimeout> | null = null;
   const LEARNED_NOTIFICATION_TOTAL_DURATION_MS = 2800; // 2000 display + 400 collapse + 400 buffer
@@ -153,7 +160,9 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
   const MODE_SWITCH_LABEL_DURATION_MS = 3000;
 
   let lastMonitorKey = "";
-  let isRepositioning = false;
+  // reposition 世代編號：以遞增序號取代單一 boolean，過期回呼直接失效，避免
+  // 「永不 settle 的 async 操作」把重定位鎖死（並防止舊回呼寫入過期位置）。
+  let repositionSeq = 0;
 
   function getAppWindow() {
     if (!cachedAppWindow) cachedAppWindow = getCurrentWindow();
@@ -208,49 +217,88 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
     void emitEvent(VOICE_FLOW_STATE_CHANGED, payload);
   }
 
-  async function repositionHudToCurrentMonitor() {
-    if (isRepositioning) return;
-    isRepositioning = true;
-    try {
-      const position = await invoke<HudTargetPosition>(
-        "get_hud_target_position",
-      );
-      if (position.monitorKey !== lastMonitorKey) {
-        lastMonitorKey = position.monitorKey;
-        await getAppWindow().setPosition(
-          new LogicalPosition(position.x, position.y),
+  function repositionHudToCurrentMonitor(): Promise<void> {
+    // single-flight：進行中就回傳同一個 promise，不重複發 invoke（掛死時不累積 native request，
+    // 且 showHudOnce 與輪詢共用同一操作）。逾時保護由 showHudOnce 的 Promise.race 負責。
+    if (inFlightReposition) return inFlightReposition;
+    const seq = ++repositionSeq;
+    inFlightReposition = (async () => {
+      try {
+        const position = await invoke<HudTargetPosition>(
+          "get_hud_target_position",
         );
+        // 過期回呼（已有更新的 reposition 發起 / polling 已停止）直接失效
+        if (seq !== repositionSeq) return;
+        // 去重 key 納入 space/x/y：同一螢幕的 DPI/解析度變更（座標改變）也會觸發重定位
+        const key = `${position.monitorKey}|${position.space}|${position.x}|${position.y}`;
+        if (key !== lastMonitorKey) {
+          // Windows 回傳 physical 座標（DPI-safe）；macOS 回傳 logical。依 space 選對應型別，
+          // 避免 tao 在混合 DPI 下用「視窗當前螢幕 SF」轉換 LogicalPosition 造成錯位。
+          const target =
+            position.space === "physical"
+              ? new PhysicalPosition(position.x, position.y)
+              : new LogicalPosition(position.x, position.y);
+          await getAppWindow().setPosition(target);
+          // 僅在成功定位且仍為最新世代後才更新 last-known-good，避免失敗仍跳過後續重試
+          if (seq === repositionSeq) lastMonitorKey = key;
+        }
+      } catch {
+        // 螢幕監控重定位失敗為低優先級，不 log 避免洗版（保留上次成功的 key 為 last-known-good）
+      } finally {
+        inFlightReposition = null;
       }
-    } catch {
-      // 螢幕監控重定位失敗為低優先級，不 log 避免洗版
-    } finally {
-      isRepositioning = false;
-    }
+    })();
+    return inFlightReposition;
   }
 
   function startMonitorPolling() {
     stopMonitorPolling();
-    monitorPollTimer = setInterval(() => {
-      void repositionHudToCurrentMonitor();
-    }, MONITOR_POLL_INTERVAL_MS);
+    // 自排程迴圈 + 世代 token：下一輪只在「本輪 reposition 真正 settle 後」才排（single-flight，
+    // 杜絕重疊/累積）；並以捕獲的世代比對，避免舊 loop 的 finally 回呼在 restart 後復活。
+    const generation = ++monitorPollGeneration;
+    const scheduleNext = () => {
+      if (generation !== monitorPollGeneration) return;
+      monitorPollTimer = setTimeout(() => {
+        if (generation !== monitorPollGeneration) return;
+        void repositionHudToCurrentMonitor().finally(scheduleNext);
+      }, MONITOR_POLL_INTERVAL_MS);
+    };
+    scheduleNext();
   }
 
   function stopMonitorPolling() {
+    // 遞增世代 → 使所有進行中 loop 的 scheduleNext 失效（含尚未 settle 的 reposition.finally）
+    monitorPollGeneration++;
     if (monitorPollTimer) {
-      clearInterval(monitorPollTimer);
+      clearTimeout(monitorPollTimer);
       monitorPollTimer = null;
     }
     lastMonitorKey = "";
-    isRepositioning = false;
+    // 使進行中的 reposition 回呼失效（避免停止後仍寫入過期位置）
+    repositionSeq++;
+  }
+
+  // 顯示 HUD 一次（定位 → show → 忽略游標 → ensure），不啟動輪詢。
+  // 供主流程與 learned-notification 共用，確保兩者都套用 RC1 定位與 RC2 ensure。
+  async function showHudOnce() {
+    const window = getAppWindow();
+    lastMonitorKey = "";
+    // reposition 不得阻擋 show：逾時則先 show（RC1 修法後座標已正確；避免偶發卡住讓 HUD 永不出現）
+    await Promise.race([
+      repositionHudToCurrentMonitor(),
+      new Promise<void>((resolve) =>
+        setTimeout(resolve, REPOSITION_SHOW_TIMEOUT_MS),
+      ),
+    ]);
+    await window.show();
+    await window.setIgnoreCursorEvents(true);
+    // RC2：診斷原生可見性 + 安全恢復（visible=false/最小化→SW_SHOWNOACTIVATE、重宣告 topmost）；不做 blanket hide/show
+    void invoke("ensure_hud_visible").catch(() => {});
   }
 
   async function showHud() {
     clearLearnedHideTimer();
-    const window = getAppWindow();
-    lastMonitorKey = "";
-    await repositionHudToCurrentMonitor();
-    await window.show();
-    await window.setIgnoreCursorEvents(true);
+    await showHudOnce();
     startMonitorPolling();
   }
 
@@ -738,11 +786,10 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
                         "useVoiceFlowStore: VOCABULARY_LEARNED emitted successfully",
                       );
 
-                      // HUD 視窗在 idle 後已被 hideHud() 隱藏，需重新顯示才看得到通知
+                      // HUD 視窗在 idle 後已被 hideHud() 隱藏，需重新顯示才看得到通知。
+                      // 與主流程一致：定位（RC1）+ show + ensure（RC2）；不啟動 polling（learned timer 負責隱藏）
                       clearLearnedHideTimer();
-                      const appWindow = getAppWindow();
-                      await appWindow.show();
-                      await appWindow.setIgnoreCursorEvents(true);
+                      await showHudOnce();
                       learnedHideTimer = setTimeout(() => {
                         learnedHideTimer = null;
                         if (status.value === "idle") {
