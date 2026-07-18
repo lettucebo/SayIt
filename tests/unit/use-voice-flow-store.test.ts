@@ -493,6 +493,61 @@ describe("useVoiceFlowStore", () => {
     });
   });
 
+  describe("ESC 攔截啟用旗標同步（set_hotkey_capture_active）", () => {
+    it("[P1] 進入進行中狀態應通知 hook 啟用 ESC 攔截", async () => {
+      vi.useFakeTimers();
+      const store = useVoiceFlowStore();
+      mockInvoke.mockClear();
+
+      const activeStates = [
+        "recording",
+        "transcribing",
+        "enhancing",
+        "editing",
+      ] as const;
+      for (const s of activeStates) {
+        store.transitionTo(s);
+      }
+      await Promise.resolve();
+
+      const captureCalls = mockInvoke.mock.calls.filter(
+        (call) => call[0] === "set_hotkey_capture_active",
+      );
+      expect(captureCalls.length).toBe(activeStates.length);
+      expect(
+        captureCalls.every(
+          (call) => (call[1] as { active: boolean }).active === true,
+        ),
+      ).toBe(true);
+
+      vi.useRealTimers();
+    });
+
+    it("[P1] 進入終態應通知 hook 停用 ESC 攔截", async () => {
+      vi.useFakeTimers();
+      const store = useVoiceFlowStore();
+      mockInvoke.mockClear();
+
+      const terminalStates = ["idle", "success", "error", "cancelled"] as const;
+      for (const s of terminalStates) {
+        store.transitionTo(s);
+      }
+      await Promise.resolve();
+
+      const captureCalls = mockInvoke.mock.calls.filter(
+        (call) => call[0] === "set_hotkey_capture_active",
+      );
+      expect(captureCalls.length).toBe(terminalStates.length);
+      expect(
+        captureCalls.every(
+          (call) => (call[1] as { active: boolean }).active === false,
+        ),
+      ).toBe(true);
+
+      vi.useRealTimers();
+    });
+  });
+
   describe("選取偵測三態（#24/#25 編輯模式判定）", () => {
     function withSelectionState(
       state: { kind: string; text: string | null },

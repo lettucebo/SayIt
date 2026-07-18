@@ -363,6 +363,18 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
     message.value = nextMessage;
     emitVoiceFlowStateChanged(nextStatus, nextMessage);
 
+    // Tell the Windows hook whether ESC should be captured (suppressed from the
+    // foreground app). Active only while a voice flow is in progress; when inactive,
+    // ESC passes through to other apps normally.
+    const captureActive =
+      nextStatus === "recording" ||
+      nextStatus === "transcribing" ||
+      nextStatus === "enhancing" ||
+      nextStatus === "editing";
+    void invoke("set_hotkey_capture_active", { active: captureActive }).catch(
+      () => {},
+    );
+
     if (nextStatus === "idle") {
       stopMonitorPolling();
       collapseHideTimer = setTimeout(() => {
@@ -2049,6 +2061,10 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
       }),
     ]);
     unlistenFunctions.push(...listeners);
+
+    // Defensive: once listeners are registered (so a trigger during startup has a consumer),
+    // ensure the hook starts with ESC capture disabled, clearing any stale flag.
+    void invoke("set_hotkey_capture_active", { active: false }).catch(() => {});
   }
 
   function cleanup() {
@@ -2062,6 +2078,9 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
     stopElapsedTimer();
     stopCorrectionSnapshotPolling();
     cleanupCorrectionMonitorListener();
+
+    // Defensive: never leave the Windows hook capturing ESC after teardown.
+    void invoke("set_hotkey_capture_active", { active: false }).catch(() => {});
 
     for (const unlisten of unlistenFunctions) {
       unlisten();

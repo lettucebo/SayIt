@@ -137,6 +137,9 @@ pub struct HotkeyListenerState {
     shared: Arc<Mutex<HotkeySharedState>>,
     is_pressed: Arc<AtomicBool>,
     is_toggled_on: Arc<AtomicBool>,
+    /// True while a voice flow is active (recording/transcribing/enhancing/editing).
+    /// Gates whether ESC is suppressed from the foreground app on Windows.
+    voice_active: Arc<AtomicBool>,
     #[cfg(target_os = "macos")]
     run_loop_ref: Arc<Mutex<Option<core_foundation::runloop::CFRunLoop>>>,
 }
@@ -147,6 +150,7 @@ impl Clone for HotkeyListenerState {
             shared: self.shared.clone(),
             is_pressed: self.is_pressed.clone(),
             is_toggled_on: self.is_toggled_on.clone(),
+            voice_active: self.voice_active.clone(),
             #[cfg(target_os = "macos")]
             run_loop_ref: self.run_loop_ref.clone(),
         }
@@ -157,6 +161,7 @@ impl HotkeyListenerState {
     pub fn reset_key_states(&self) {
         self.is_pressed.store(false, Ordering::SeqCst);
         self.is_toggled_on.store(false, Ordering::SeqCst);
+        self.voice_active.store(false, Ordering::SeqCst);
         if let Ok(mut shared) = self.shared.lock() {
             shared.double_tap.clear();
             shared.active_modifiers.clear();
@@ -272,6 +277,9 @@ fn handle_key_event<R: Runtime>(
                 }
 
                 if !state.is_pressed.swap(true, Ordering::SeqCst) {
+                    // Mark voice flow active natively at press time so ESC suppression
+                    // engages immediately, without waiting for the frontend round-trip.
+                    state.voice_active.store(true, Ordering::SeqCst);
                     let _ = app_handle.emit(
                         "hotkey:pressed",
                         HotkeyEventPayload {
@@ -336,6 +344,10 @@ fn handle_key_event<R: Runtime>(
                     } else {
                         HotkeyAction::Start
                     };
+                    if matches!(action, HotkeyAction::Start) {
+                        // Engage ESC suppression immediately on toggle-start.
+                        state.voice_active.store(true, Ordering::SeqCst);
+                    }
                     let _ = app_handle.emit(
                         "hotkey:toggled",
                         HotkeyEventPayload {
@@ -867,6 +879,14 @@ pub fn reset_hotkey_state(state: tauri::State<'_, HotkeyListenerState>) {
     log::info!("[hotkey-listener] Key states reset via command");
 }
 
+/// Frontend pushes whether a voice flow is currently active (recording/transcribing/
+/// enhancing/editing). On Windows this gates whether ESC is suppressed from the
+/// foreground app; when inactive, ESC passes through normally.
+#[tauri::command]
+pub fn set_hotkey_capture_active(active: bool, state: tauri::State<'_, HotkeyListenerState>) {
+    state.voice_active.store(active, Ordering::SeqCst);
+}
+
 #[tauri::command]
 pub fn start_hotkey_recording(state: tauri::State<'_, HotkeyListenerState>) {
     if let Ok(mut shared) = state.shared.lock() {
@@ -910,7 +930,11 @@ pub fn reinitialize_hotkey_listener<R: Runtime>(app: AppHandle<R>) -> Result<(),
 
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = &app;
+        // The Windows hook persists across reinit; just clear any stale key/voice-flow state
+        // so voice_active can never be stuck true after a reinitialize.
+        let state = app.state::<HotkeyListenerState>();
+        state.reset_key_states();
+        log::info!("[hotkey-listener] Reinitialized (Windows no-op restart; key states reset)");
         Ok(())
     }
 }
@@ -920,6 +944,7 @@ pub fn reinitialize_hotkey_listener<R: Runtime>(app: AppHandle<R>) -> Result<(),
 #[cfg(target_os = "windows")]
 mod windows_hook {
     use super::*;
+    use std::sync::atomic::AtomicU32;
     use std::sync::OnceLock;
 
     // Windows VK codes
@@ -930,6 +955,10 @@ mod windows_hook {
     const VK_RMENU: u32 = 0xA5;
     const VK_ESCAPE: u32 = 0x1B;
     const VK_F23: u32 = 0x86;
+
+    // Low-level keyboard hook flag bit: event was injected (e.g. our own SendInput paste).
+    // Named to avoid shadowing by the windows crate's `LLKHF_INJECTED` glob import in hook_proc.
+    const INJECTED_FLAG: u32 = 0x10;
 
     // Windows modifier VK codes for combo detection
     const VK_LWIN: u32 = 0x5B;
@@ -944,9 +973,227 @@ mod windows_hook {
         escape_handler: Box<dyn Fn() + Send + Sync>,
         recording_captured_handler: Box<dyn Fn(RecordingCapturedPayload) + Send + Sync>,
         recording_rejected_handler: Box<dyn Fn(RecordingRejectedPayload) + Send + Sync>,
+        /// Whether a voice flow is active (frontend-pushed + natively set on trigger start).
+        voice_active: Arc<AtomicBool>,
+        /// Per-physical-press latches so a key's disposition (suppress/pass) is decided
+        /// once on key-down and applied to auto-repeat and key-up. The hook runs on a
+        /// single thread; atomics are used only for interior mutability in the static.
+        esc_press_active: AtomicBool,
+        esc_press_suppress: AtomicBool,
+        /// VK of the trigger/combo-primary key whose down was suppressed (0 = none).
+        suppressed_trigger_vk: AtomicU32,
+        /// Whether the combo primary key is physically down (disposition already decided).
+        combo_primary_down: AtomicU32,
+        /// Last observed trigger mode (Toggle when true) so the rare config-lock-busy
+        /// fallback can still fire a logical release and avoid a stuck recording state.
+        cached_mode_is_toggle: AtomicBool,
     }
 
     static CONTEXT: OnceLock<HookContext> = OnceLock::new();
+
+    /// A single keyboard event fed to the pure decision function.
+    #[derive(Clone, Copy, Debug)]
+    struct KeyEvent {
+        vk: u32,
+        is_down: bool,
+    }
+
+    /// Mutable per-press latch state (loaded from / stored back to the HookContext atomics).
+    #[derive(Clone, Copy, Debug, Default, PartialEq)]
+    struct HookLatch {
+        esc_press_active: bool,
+        esc_press_suppress: bool,
+        suppressed_trigger_vk: u32,
+        /// VK of the combo primary key currently physically down (0 = none). Its disposition
+        /// (pass/suppress) is decided on the first down and reused for auto-repeat + up.
+        combo_primary_down: u32,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    enum HookDecision {
+        Pass,
+        Suppress,
+    }
+
+    /// Side effects the caller must run after `decide_hook_action` returns.
+    #[derive(Clone, Copy, Debug, Default, PartialEq)]
+    struct HookEffects {
+        emit_escape: bool,
+        clear_double_tap: bool,
+        call_key_handler: Option<bool>,
+    }
+
+    fn matches_single_trigger(vk: u32, trigger: &TriggerKey) -> bool {
+        match trigger {
+            TriggerKey::RightAlt => vk == VK_RMENU,
+            TriggerKey::LeftAlt => vk == VK_LMENU,
+            TriggerKey::Control => vk == VK_LCONTROL,
+            TriggerKey::RightControl => vk == VK_RCONTROL,
+            TriggerKey::Shift => vk == VK_LSHIFT,
+            TriggerKey::Custom { keycode } => vk == *keycode as u32,
+            _ => false,
+        }
+    }
+
+    /// ESC decision. Depends only on the ESC latch and `voice_active`, so it needs no
+    /// config lock and stays correct even when the shared mutex is momentarily busy.
+    /// The whole physical press shares one disposition, decided on the first key-down.
+    fn decide_escape(
+        latch: &mut HookLatch,
+        is_down: bool,
+        voice_active: bool,
+    ) -> (HookDecision, HookEffects) {
+        if is_down {
+            if !latch.esc_press_active {
+                latch.esc_press_active = true;
+                latch.esc_press_suppress = voice_active;
+                let eff = HookEffects {
+                    emit_escape: true,
+                    clear_double_tap: true,
+                    call_key_handler: None,
+                };
+                let decision = if latch.esc_press_suppress {
+                    HookDecision::Suppress
+                } else {
+                    HookDecision::Pass
+                };
+                return (decision, eff);
+            }
+            // Auto-repeat: reuse the latched disposition, do not re-emit.
+            let decision = if latch.esc_press_suppress {
+                HookDecision::Suppress
+            } else {
+                HookDecision::Pass
+            };
+            return (decision, HookEffects::default());
+        }
+        // key-up: apply and clear the latched disposition.
+        let suppress = latch.esc_press_suppress;
+        latch.esc_press_active = false;
+        latch.esc_press_suppress = false;
+        let decision = if suppress {
+            HookDecision::Suppress
+        } else {
+            HookDecision::Pass
+        };
+        (decision, HookEffects::default())
+    }
+
+    /// Trigger / combo decision. Needs the resolved trigger config and active modifiers.
+    /// Disposition is decided on the physical key-down and reused for auto-repeat and
+    /// key-up (via the latch), so a key's down and up are always suppressed together.
+    fn decide_trigger(
+        latch: &mut HookLatch,
+        event: KeyEvent,
+        trigger: &TriggerKey,
+        active_mods: &HashSet<ModifierFlag>,
+        is_pressed: bool,
+    ) -> (HookDecision, HookEffects) {
+        // ── Combo trigger ──
+        if let TriggerKey::Combo {
+            ref modifiers,
+            keycode: combo_kc,
+        } = trigger
+        {
+            let combo_kc = *combo_kc as u32;
+            if event.vk == combo_kc {
+                if event.is_down {
+                    // Reuse the disposition decided on the first physical down; a bare
+                    // primary that later gains a modifier via auto-repeat must NOT flip to
+                    // suppressed mid-press (would leak a lone down to the foreground).
+                    if latch.combo_primary_down == combo_kc {
+                        let decision = if latch.suppressed_trigger_vk == combo_kc {
+                            HookDecision::Suppress
+                        } else {
+                            HookDecision::Pass
+                        };
+                        return (decision, HookEffects::default());
+                    }
+                    latch.combo_primary_down = combo_kc;
+                    if matches_combo_trigger(
+                        combo_kc as u16,
+                        modifiers,
+                        combo_kc as u16,
+                        active_mods,
+                    ) {
+                        latch.suppressed_trigger_vk = combo_kc;
+                        return (
+                            HookDecision::Suppress,
+                            HookEffects {
+                                call_key_handler: Some(true),
+                                ..Default::default()
+                            },
+                        );
+                    }
+                    // Bare primary (modifiers not held): pass for the whole press.
+                    return (HookDecision::Pass, HookEffects::default());
+                }
+                // Primary key-up: always clear the physical-down latch (regardless of
+                // whether it was suppressed), so a subsequent press is re-evaluated fresh.
+                let was_suppressed = latch.suppressed_trigger_vk == combo_kc;
+                latch.combo_primary_down = 0;
+                if was_suppressed {
+                    latch.suppressed_trigger_vk = 0;
+                    // Only fire the logical release if the combo is still logically pressed
+                    // (a modifier-up may have already stopped it). Suppress either way so we
+                    // never leak a lone key-up whose down was suppressed.
+                    let handler = if is_pressed { Some(false) } else { None };
+                    return (
+                        HookDecision::Suppress,
+                        HookEffects {
+                            call_key_handler: handler,
+                            ..Default::default()
+                        },
+                    );
+                }
+                return (HookDecision::Pass, HookEffects::default());
+            }
+            // A modifier (or other) key event while a combo is configured.
+            if !event.is_down && is_pressed {
+                let still_all_held = modifiers.iter().all(|m| active_mods.contains(m));
+                if !still_all_held {
+                    // A required modifier was released → stop, but never suppress modifiers.
+                    return (
+                        HookDecision::Pass,
+                        HookEffects {
+                            call_key_handler: Some(false),
+                            ..Default::default()
+                        },
+                    );
+                }
+            }
+            return (HookDecision::Pass, HookEffects::default());
+        }
+
+        // ── Single-key / custom trigger ──
+        if event.is_down {
+            if matches_single_trigger(event.vk, trigger) {
+                latch.suppressed_trigger_vk = event.vk;
+                return (
+                    HookDecision::Suppress,
+                    HookEffects {
+                        call_key_handler: Some(true),
+                        ..Default::default()
+                    },
+                );
+            }
+            return (HookDecision::Pass, HookEffects::default());
+        }
+        // key-up: suppress iff this key's own down was suppressed (paired via the latch
+        // only — never re-derive from the current config, so a down that leaked, e.g. due
+        // to a config change or lock contention, does not get a suppressed lone up).
+        if latch.suppressed_trigger_vk == event.vk && event.vk != 0 {
+            latch.suppressed_trigger_vk = 0;
+            return (
+                HookDecision::Suppress,
+                HookEffects {
+                    call_key_handler: Some(false),
+                    ..Default::default()
+                },
+            );
+        }
+        (HookDecision::Pass, HookEffects::default())
+    }
 
     fn is_modifier_vk(vk: u32) -> bool {
         matches!(
@@ -1042,6 +1289,7 @@ mod windows_hook {
     pub fn install<R: Runtime>(app_handle: AppHandle<R>, state: HotkeyListenerState) {
         let shared_for_hook = state.shared.clone();
         let is_pressed_for_hook = state.is_pressed.clone();
+        let voice_active_for_hook = state.voice_active.clone();
         let app_handle_error = app_handle.clone();
         let app_handle_escape = app_handle.clone();
         let app_handle_rec_captured = app_handle.clone();
@@ -1062,6 +1310,12 @@ mod windows_hook {
                 recording_rejected_handler: Box::new(move |payload| {
                     let _ = app_handle_rec_rejected.emit("hotkey:recording-rejected", payload);
                 }),
+                voice_active: voice_active_for_hook,
+                esc_press_active: AtomicBool::new(false),
+                esc_press_suppress: AtomicBool::new(false),
+                suppressed_trigger_vk: AtomicU32::new(0),
+                combo_primary_down: AtomicU32::new(0),
+                cached_mode_is_toggle: AtomicBool::new(false),
             })
             .ok();
 
@@ -1100,6 +1354,7 @@ mod windows_hook {
         w_param: windows::Win32::Foundation::WPARAM,
         l_param: windows::Win32::Foundation::LPARAM,
     ) -> windows::Win32::Foundation::LRESULT {
+        use windows::Win32::Foundation::LRESULT;
         use windows::Win32::UI::WindowsAndMessaging::*;
 
         if n_code >= 0 {
@@ -1109,13 +1364,18 @@ mod windows_hook {
                 if kbd.vkCode == VK_F23 {
                     return CallNextHookEx(None, n_code, w_param, l_param);
                 }
+                // Never process or suppress synthetic input (e.g. SayIt's own SendInput
+                // paste/copy). Suppressing our own keys would break clipboard paste.
+                if (kbd.flags.0 & INJECTED_FLAG) != 0 {
+                    return CallNextHookEx(None, n_code, w_param, l_param);
+                }
                 let w = w_param.0 as u32;
 
                 let is_key_down = w == WM_KEYDOWN || w == WM_SYSKEYDOWN;
                 let is_key_up = w == WM_KEYUP || w == WM_SYSKEYUP;
 
                 if is_key_down || is_key_up {
-                    // Recording mode: delegate to recording handler, skip all trigger logic
+                    // Recording mode (hotkey rebinding): delegate; keys pass through.
                     let is_recording = ctx
                         .shared
                         .try_lock()
@@ -1126,83 +1386,337 @@ mod windows_hook {
                         return CallNextHookEx(None, n_code, w_param, l_param);
                     }
 
-                    // ESC key: clear double-tap state, emit escape
-                    if kbd.vkCode == VK_ESCAPE && is_key_down {
-                        if let Ok(mut shared) = ctx.shared.try_lock() {
-                            shared.double_tap.clear();
+                    let voice_active = ctx.voice_active.load(Ordering::SeqCst);
+                    let is_pressed = ctx.is_pressed.load(Ordering::SeqCst);
+
+                    // Load hook-local latch (single-threaded hook; atomics for interior mutability).
+                    let mut latch = HookLatch {
+                        esc_press_active: ctx.esc_press_active.load(Ordering::SeqCst),
+                        esc_press_suppress: ctx.esc_press_suppress.load(Ordering::SeqCst),
+                        suppressed_trigger_vk: ctx.suppressed_trigger_vk.load(Ordering::SeqCst),
+                        combo_primary_down: ctx.combo_primary_down.load(Ordering::SeqCst),
+                    };
+
+                    // ── ESC is handled first, from atomics only (no config lock needed), so it
+                    //    stays correct even when the shared mutex is momentarily busy. ──
+                    if kbd.vkCode == VK_ESCAPE {
+                        let (decision, eff) = decide_escape(&mut latch, is_key_down, voice_active);
+                        if eff.clear_double_tap {
+                            if let Ok(mut shared) = ctx.shared.try_lock() {
+                                shared.double_tap.clear();
+                            }
                         }
-                        (ctx.escape_handler)();
+                        if eff.emit_escape {
+                            (ctx.escape_handler)();
+                        }
+                        ctx.esc_press_active
+                            .store(latch.esc_press_active, Ordering::SeqCst);
+                        ctx.esc_press_suppress
+                            .store(latch.esc_press_suppress, Ordering::SeqCst);
+                        if decision == HookDecision::Suppress {
+                            return LRESULT(1);
+                        }
                         return CallNextHookEx(None, n_code, w_param, l_param);
                     }
 
-                    let (trigger, mode, active_mods) = match ctx.shared.try_lock() {
+                    let event = KeyEvent {
+                        vk: kbd.vkCode,
+                        is_down: is_key_down,
+                    };
+
+                    match ctx.shared.try_lock() {
                         Ok(mut shared) => {
-                            // Update active modifiers
                             shared.active_modifiers = get_active_modifiers_windows();
-                            let mods = shared.active_modifiers.clone();
-                            (
-                                shared.trigger_key.clone(),
-                                shared.trigger_mode.clone(),
-                                mods,
-                            )
-                        }
-                        Err(_) => return CallNextHookEx(None, n_code, w_param, l_param),
-                    };
+                            let active_mods = shared.active_modifiers.clone();
+                            let trigger = shared.trigger_key.clone();
+                            let mode = shared.trigger_mode.clone();
+                            drop(shared);
 
-                    // Combo trigger
-                    if let TriggerKey::Combo {
-                        ref modifiers,
-                        keycode: combo_kc,
-                    } = trigger
-                    {
-                        if kbd.vkCode == combo_kc as u32 {
-                            // Primary key press/release
-                            if is_key_down {
-                                if matches_combo_trigger(
-                                    combo_kc,
-                                    modifiers,
-                                    combo_kc,
-                                    &active_mods,
-                                ) {
-                                    (ctx.key_handler)(true, &mode);
-                                }
-                            } else if ctx.is_pressed.load(Ordering::SeqCst) {
-                                (ctx.key_handler)(false, &mode);
+                            ctx.cached_mode_is_toggle
+                                .store(matches!(mode, TriggerMode::Toggle), Ordering::SeqCst);
+
+                            let (decision, eff) = decide_trigger(
+                                &mut latch,
+                                event,
+                                &trigger,
+                                &active_mods,
+                                is_pressed,
+                            );
+
+                            if let Some(pressed) = eff.call_key_handler {
+                                (ctx.key_handler)(pressed, &mode);
                             }
-                        } else if is_key_up {
-                            // A modifier key released — only trigger release if combo was active
-                            let combo_was_active = ctx.is_pressed.load(Ordering::SeqCst);
-                            if combo_was_active {
-                                let still_all_held =
-                                    modifiers.iter().all(|m| active_mods.contains(m));
-                                if !still_all_held {
-                                    (ctx.key_handler)(false, &mode);
+
+                            // Persist trigger latch back to the context.
+                            ctx.suppressed_trigger_vk
+                                .store(latch.suppressed_trigger_vk, Ordering::SeqCst);
+                            ctx.combo_primary_down
+                                .store(latch.combo_primary_down, Ordering::SeqCst);
+
+                            if decision == HookDecision::Suppress {
+                                return LRESULT(1);
+                            }
+                            return CallNextHookEx(None, n_code, w_param, l_param);
+                        }
+                        Err(_) => {
+                            // Config lock busy (rare): resolve trigger suppression from the latch
+                            // alone so a key whose down was suppressed also has its up suppressed
+                            // (no split pair). A key-down with no latch passes through.
+                            let suppress_trigger = latch.suppressed_trigger_vk != 0
+                                && kbd.vkCode == latch.suppressed_trigger_vk;
+
+                            if is_key_up {
+                                // Clear the combo primary physical-down latch even for a bare
+                                // (passed) primary, so the next press is re-evaluated fresh
+                                // rather than misread as an auto-repeat.
+                                if latch.combo_primary_down != 0
+                                    && kbd.vkCode == latch.combo_primary_down
+                                {
+                                    ctx.combo_primary_down.store(0, Ordering::SeqCst);
+                                }
+                                if suppress_trigger {
+                                    ctx.suppressed_trigger_vk.store(0, Ordering::SeqCst);
+                                    // Fire the logical release so we never get stuck recording.
+                                    if is_pressed {
+                                        let mode =
+                                            if ctx.cached_mode_is_toggle.load(Ordering::SeqCst) {
+                                                TriggerMode::Toggle
+                                            } else {
+                                                TriggerMode::Hold
+                                            };
+                                        (ctx.key_handler)(false, &mode);
+                                    }
                                 }
                             }
+
+                            if suppress_trigger {
+                                return LRESULT(1);
+                            }
+                            return CallNextHookEx(None, n_code, w_param, l_param);
                         }
-
-                        return CallNextHookEx(None, n_code, w_param, l_param);
-                    }
-
-                    // Single-key triggers (existing logic)
-                    let matches = match trigger {
-                        TriggerKey::RightAlt => kbd.vkCode == VK_RMENU,
-                        TriggerKey::LeftAlt => kbd.vkCode == VK_LMENU,
-                        TriggerKey::Control => kbd.vkCode == VK_LCONTROL,
-                        TriggerKey::RightControl => kbd.vkCode == VK_RCONTROL,
-                        TriggerKey::Shift => kbd.vkCode == VK_LSHIFT,
-                        TriggerKey::Custom { keycode } => kbd.vkCode == keycode as u32,
-                        _ => false,
-                    };
-
-                    if matches {
-                        (ctx.key_handler)(is_key_down, &mode);
                     }
                 }
             }
         }
 
         CallNextHookEx(None, n_code, w_param, l_param)
+    }
+
+    #[cfg(test)]
+    mod hook_tests {
+        use super::*;
+        use std::collections::HashSet;
+
+        fn no_mods() -> HashSet<ModifierFlag> {
+            HashSet::new()
+        }
+
+        fn down(vk: u32) -> KeyEvent {
+            KeyEvent { vk, is_down: true }
+        }
+
+        fn up(vk: u32) -> KeyEvent {
+            KeyEvent { vk, is_down: false }
+        }
+
+        // ── Single-key / custom trigger ──
+
+        #[test]
+        fn single_key_trigger_suppresses_down_and_up() {
+            let mut latch = HookLatch::default();
+            let trigger = TriggerKey::RightAlt;
+            let (d1, e1) = decide_trigger(&mut latch, down(VK_RMENU), &trigger, &no_mods(), false);
+            assert_eq!(d1, HookDecision::Suppress);
+            assert_eq!(e1.call_key_handler, Some(true));
+            assert_eq!(latch.suppressed_trigger_vk, VK_RMENU);
+
+            let (d2, e2) = decide_trigger(&mut latch, up(VK_RMENU), &trigger, &no_mods(), true);
+            assert_eq!(d2, HookDecision::Suppress);
+            assert_eq!(e2.call_key_handler, Some(false));
+            assert_eq!(latch.suppressed_trigger_vk, 0);
+        }
+
+        #[test]
+        fn non_trigger_key_passes_through() {
+            let mut latch = HookLatch::default();
+            let (d, e) = decide_trigger(
+                &mut latch,
+                down(0x41),
+                &TriggerKey::RightAlt,
+                &no_mods(),
+                false,
+            );
+            assert_eq!(d, HookDecision::Pass);
+            assert_eq!(e.call_key_handler, None);
+        }
+
+        #[test]
+        fn trigger_up_suppressed_via_latch_after_config_change() {
+            let mut latch = HookLatch::default();
+            let _ = decide_trigger(
+                &mut latch,
+                down(VK_RMENU),
+                &TriggerKey::RightAlt,
+                &no_mods(),
+                false,
+            );
+            assert_eq!(latch.suppressed_trigger_vk, VK_RMENU);
+            // Trigger changed to LeftAlt mid-press; the RMENU up must still be paired via latch.
+            let (d, e) = decide_trigger(
+                &mut latch,
+                up(VK_RMENU),
+                &TriggerKey::LeftAlt,
+                &no_mods(),
+                true,
+            );
+            assert_eq!(d, HookDecision::Suppress);
+            assert_eq!(e.call_key_handler, Some(false));
+            assert_eq!(latch.suppressed_trigger_vk, 0);
+        }
+
+        #[test]
+        fn single_key_up_without_suppressed_down_passes() {
+            // A key-up matching the trigger but whose down was never latch-suppressed (e.g. the
+            // down leaked due to lock contention) must PASS — never a suppressed lone up.
+            let mut latch = HookLatch::default();
+            let (d, e) = decide_trigger(
+                &mut latch,
+                up(VK_RMENU),
+                &TriggerKey::RightAlt,
+                &no_mods(),
+                false,
+            );
+            assert_eq!(d, HookDecision::Pass);
+            assert_eq!(e.call_key_handler, None);
+        }
+
+        // ── ESC (config-lock-independent) ──
+
+        #[test]
+        fn esc_inactive_passes_but_emits_once() {
+            let mut latch = HookLatch::default();
+            let (d, e) = decide_escape(&mut latch, true, false);
+            assert_eq!(d, HookDecision::Pass);
+            assert!(e.emit_escape);
+            assert!(e.clear_double_tap);
+            assert!(latch.esc_press_active);
+            assert!(!latch.esc_press_suppress);
+
+            let (d2, e2) = decide_escape(&mut latch, false, false);
+            assert_eq!(d2, HookDecision::Pass);
+            assert!(!e2.emit_escape);
+            assert!(!latch.esc_press_active);
+        }
+
+        #[test]
+        fn esc_active_suppresses_down_and_up() {
+            let mut latch = HookLatch::default();
+            let (d, e) = decide_escape(&mut latch, true, true);
+            assert_eq!(d, HookDecision::Suppress);
+            assert!(e.emit_escape);
+            assert!(latch.esc_press_suppress);
+
+            let (d2, _e2) = decide_escape(&mut latch, false, true);
+            assert_eq!(d2, HookDecision::Suppress);
+            assert!(!latch.esc_press_active);
+        }
+
+        #[test]
+        fn esc_autorepeat_latches_disposition() {
+            let mut latch = HookLatch::default();
+            let (d1, e1) = decide_escape(&mut latch, true, true);
+            assert_eq!(d1, HookDecision::Suppress);
+            assert!(e1.emit_escape);
+            // Auto-repeat with voice_active now false must still suppress (latched), no re-emit.
+            let (d2, e2) = decide_escape(&mut latch, true, false);
+            assert_eq!(d2, HookDecision::Suppress);
+            assert!(!e2.emit_escape);
+            let (d3, _e3) = decide_escape(&mut latch, false, false);
+            assert_eq!(d3, HookDecision::Suppress);
+            assert!(!latch.esc_press_active);
+        }
+
+        // ── Combo trigger ──
+
+        fn ctrl_space() -> TriggerKey {
+            TriggerKey::Combo {
+                modifiers: vec![ModifierFlag::Control],
+                keycode: 0x20, // Space
+            }
+        }
+
+        fn ctrl_mods() -> HashSet<ModifierFlag> {
+            let mut mods = HashSet::new();
+            mods.insert(ModifierFlag::Control);
+            mods
+        }
+
+        #[test]
+        fn combo_bare_primary_passes_for_normal_typing() {
+            let mut latch = HookLatch::default();
+            let (d, e) = decide_trigger(&mut latch, down(0x20), &ctrl_space(), &no_mods(), false);
+            assert_eq!(d, HookDecision::Pass);
+            assert_eq!(e.call_key_handler, None);
+            assert_eq!(latch.suppressed_trigger_vk, 0);
+            assert_eq!(latch.combo_primary_down, 0x20);
+        }
+
+        #[test]
+        fn combo_engaged_suppresses_primary_down_and_up() {
+            let mut latch = HookLatch::default();
+            let (d, e) = decide_trigger(&mut latch, down(0x20), &ctrl_space(), &ctrl_mods(), false);
+            assert_eq!(d, HookDecision::Suppress);
+            assert_eq!(e.call_key_handler, Some(true));
+            assert_eq!(latch.suppressed_trigger_vk, 0x20);
+
+            let (d2, e2) = decide_trigger(&mut latch, up(0x20), &ctrl_space(), &ctrl_mods(), true);
+            assert_eq!(d2, HookDecision::Suppress);
+            assert_eq!(e2.call_key_handler, Some(false));
+            assert_eq!(latch.suppressed_trigger_vk, 0);
+            assert_eq!(latch.combo_primary_down, 0);
+        }
+
+        #[test]
+        fn combo_modifier_released_first_no_double_stop_no_leak() {
+            let mut latch = HookLatch::default();
+            let _ = decide_trigger(&mut latch, down(0x20), &ctrl_space(), &ctrl_mods(), false);
+            // Modifier (Ctrl) released first → stop, but modifier itself passes through.
+            let empty = HashSet::new();
+            let (dm, em) = decide_trigger(&mut latch, up(VK_LCONTROL), &ctrl_space(), &empty, true);
+            assert_eq!(dm, HookDecision::Pass);
+            assert_eq!(em.call_key_handler, Some(false));
+            // Primary up, already stopped (is_pressed=false): suppress (no leak) but no second stop.
+            let (dp, ep) = decide_trigger(&mut latch, up(0x20), &ctrl_space(), &empty, false);
+            assert_eq!(dp, HookDecision::Suppress);
+            assert_eq!(ep.call_key_handler, None);
+            assert_eq!(latch.suppressed_trigger_vk, 0);
+            assert_eq!(latch.combo_primary_down, 0);
+        }
+
+        #[test]
+        fn combo_primary_first_then_modifier_stays_pass() {
+            // Press the primary alone (types normally), THEN add the modifier while still held.
+            // Auto-repeat must NOT flip the disposition to suppressed (that would leak a lone
+            // down to the foreground); the whole physical press stays pass.
+            let mut latch = HookLatch::default();
+            let (d1, e1) = decide_trigger(&mut latch, down(0x20), &ctrl_space(), &no_mods(), false);
+            assert_eq!(d1, HookDecision::Pass);
+            assert_eq!(e1.call_key_handler, None);
+            assert_eq!(latch.combo_primary_down, 0x20);
+
+            // Modifier now held; auto-repeat of the primary must still pass (no start fired).
+            let (d2, e2) =
+                decide_trigger(&mut latch, down(0x20), &ctrl_space(), &ctrl_mods(), false);
+            assert_eq!(d2, HookDecision::Pass);
+            assert_eq!(e2.call_key_handler, None);
+            assert_eq!(latch.suppressed_trigger_vk, 0);
+
+            // Primary up also passes; no leaked/suppressed lone up.
+            let (d3, e3) = decide_trigger(&mut latch, up(0x20), &ctrl_space(), &ctrl_mods(), false);
+            assert_eq!(d3, HookDecision::Pass);
+            assert_eq!(e3.call_key_handler, None);
+            assert_eq!(latch.combo_primary_down, 0);
+        }
     }
 }
 
@@ -1230,6 +1744,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
                 })),
                 is_pressed: Arc::new(AtomicBool::new(false)),
                 is_toggled_on: Arc::new(AtomicBool::new(false)),
+                voice_active: Arc::new(AtomicBool::new(false)),
                 #[cfg(target_os = "macos")]
                 run_loop_ref: Arc::new(Mutex::new(None)),
             };
@@ -1290,6 +1805,7 @@ mod tests {
             })),
             is_pressed: Arc::new(AtomicBool::new(false)),
             is_toggled_on: Arc::new(AtomicBool::new(false)),
+            voice_active: Arc::new(AtomicBool::new(false)),
             #[cfg(target_os = "macos")]
             run_loop_ref: Arc::new(Mutex::new(None)),
         }
@@ -1403,9 +1919,11 @@ mod tests {
         let state = make_test_state();
         state.is_pressed.store(true, Ordering::SeqCst);
         state.is_toggled_on.store(true, Ordering::SeqCst);
+        state.voice_active.store(true, Ordering::SeqCst);
         state.reset_key_states();
         assert!(!state.is_pressed.load(Ordering::SeqCst));
         assert!(!state.is_toggled_on.load(Ordering::SeqCst));
+        assert!(!state.voice_active.load(Ordering::SeqCst));
     }
 
     // ── Combo matching tests ──
