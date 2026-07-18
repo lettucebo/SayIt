@@ -6,12 +6,12 @@ SayIt 版本更新紀錄。
 
 ### Added
 
-- 編輯模式改用 macOS 輔助使用（AX）偵測選取文字，取代模擬 Cmd+C（chenjackle45/SayIt#69）：先前判斷游標處是否有選取文字（決定要不要進「編輯模式」修改選取內容）靠模擬 Cmd+C，會造成兩個問題——按鍵還按著時偶爾多打一個「C」字元、以及某些編輯器在沒選取時會複製整行而被誤判成有選取。macOS 改為優先用被動 AX 查詢（三態：有選取／無選取／不可用），AX 可讀取時不需模擬按鍵、殘留字元問題不再發生，沒選取時也明確回報無選取以排除整行誤判；AX 讀不到時（某些 App）才在按鍵放開後退回原本的剪貼簿後備。Windows 仍沿用剪貼簿後備（UIA 待後續）。
-- 轉錄失敗自動重試（Groq / Azure）（chenjackle45/SayIt#10）：先前暫時性失敗（rate limit 429、5xx、連線中斷）會直接變成一次硬失敗、得重新錄音。現在最多嘗試 3 次（初次加最多 2 次重試）——429 尊重伺服器 Retry-After（超過 10 秒才放棄）、408／5xx／連線失敗用 1s／2s backoff；逾時與其他 4xx／解析錯誤不重試（重試也不會成功）。重試同時套用於 Groq 與 Azure Whisper。
-- 繁體中文使用者的轉錄結果自動轉為繁體字（chenjackle45/SayIt#39）：Whisper 預設輸出簡體中文，導致 zh-TW 使用者存下／貼上的原始轉錄是簡體（只有 AI 整理偶爾會修、不可靠）。新增以 opencc-js（台灣標準）在字元層級做轉換，套用在三個轉錄落地點（主流程、重送、歷史重新辨識）；只轉換字元、不改變使用者的用詞。字典（約 1.19MB）改為延遲載入、移出初始 bundle，且 fail-open——載入失敗回傳原文、絕不中斷貼上／重試。
+- 編輯模式改用 macOS 輔助使用（AX）偵測選取文字，取代模擬 Cmd+C：先前判斷游標處是否有選取文字（決定要不要進「編輯模式」修改選取內容）靠模擬 Cmd+C，會造成兩個問題——按鍵還按著時偶爾多打一個「C」字元、以及某些編輯器在沒選取時會複製整行而被誤判成有選取。macOS 改為優先用被動 AX 查詢（三態：有選取／無選取／不可用），AX 可讀取時不需模擬按鍵、殘留字元問題不再發生，沒選取時也明確回報無選取以排除整行誤判；AX 讀不到時（某些 App）才在按鍵放開後退回原本的剪貼簿後備。Windows 仍沿用剪貼簿後備（UIA 待後續）。
+- 轉錄失敗自動重試（Groq / Azure）：先前暫時性失敗（rate limit 429、5xx、連線中斷）會直接變成一次硬失敗、得重新錄音。現在最多嘗試 3 次（初次加最多 2 次重試）——429 尊重伺服器 Retry-After（超過 10 秒才放棄）、408／5xx／連線失敗用 1s／2s backoff；逾時與其他 4xx／解析錯誤不重試（重試也不會成功）。重試同時套用於 Groq 與 Azure Whisper。
+- 繁體中文使用者的轉錄結果自動轉為繁體字：Whisper 預設輸出簡體中文，導致 zh-TW 使用者存下／貼上的原始轉錄是簡體（只有 AI 整理偶爾會修、不可靠）。新增以 opencc-js（台灣標準）在字元層級做轉換，套用在三個轉錄落地點（主流程、重送、歷史重新辨識）；只轉換字元、不改變使用者的用詞。字典（約 1.19MB）改為延遲載入、移出初始 bundle，且 fail-open——載入失敗回傳原文、絕不中斷貼上／重試。
 - 新增 Gemini 3.1 Pro（Preview）模型：本版把 Gemini 更新至 3.x 後只提供兩個 flash 等級，缺 Pro 等級高品質選項。新增 `gemini-3.1-pro-preview`；Pro 不支援 `thinkingLevel: MINIMAL`（會 400）故改送 `LOW`，並依 Gemini 3 建議省略 temperature（既有 flash 模型不動，避免回歸）。
 - Azure / Microsoft Foundry 新增「省略 temperature」設定（給 reasoning 模型部署）：Azure／Foundry chat 一律送 `temperature`，但 GPT-5 系列 deployment 會以 HTTP 400 拒絕。由於 Azure model 是使用者自訂的不透明 deployment 名稱，app 無法自動判斷是否為 reasoning 模型，故新增明確開關；刻意不自動改送 `reasoning_effort`（原始 GPT-5 deployment 不一定支援 "none"，會把 400 換成另一個錯）。預設關閉、維持既有行為。
-- 隱藏 Dock 圖示設定（macOS）（chenjackle45/SayIt#56）：macOS 使用者可在設定開啟後隱藏 Dock 圖示，讓 SayIt 以背景常駐工具形式運作。
+- 隱藏 Dock 圖示設定（macOS）：macOS 使用者可在設定開啟後隱藏 Dock 圖示，讓 SayIt 以背景常駐工具形式運作。
 
 ### Fixed
 
@@ -19,8 +19,8 @@ SayIt 版本更新紀錄。
 
 ### Improved
 
-- 儀表板正確顯示 Gemini 的 LLM 用量（chenjackle45/SayIt#68）：Gemini 在模型登錄的免費配額為 0，儀表板現在把 Gemini 用量呈現為「今日用量」並加上提示（5 語系），且「已計費／無免費配額」的 tooltip 改由是否真的有付費 provider 決定，避免 Gemini 被誤標成付費方案。
-- 因應 Groq 2026-07 模型下架更新模型登錄（chenjackle45/SayIt#68）：Groq 於 2026-07 陸續下架多個模型（llama-4-scout、qwen3-32b 已於 07-17 下架；預設的 llama-3.3-70b 將於 08-16 下架）。更新為新的 Groq 模型組（預設改為 qwen3.6-27b，另有 gpt-oss-120b／20b）、加入 Gemini 3.x 與 gpt-5.6-luna、移除退役的 claude-3-5-haiku；並加入多跳退役模型對應表與跳數限制解析器，確保使用者先前存下的舊模型 id 永遠不會解析到已死的模型。同時修正各 provider 的 reasoning 請求參數（OpenAI GPT-5.x 送 `reasoning_effort: none` 避開 temperature-400、抑制 gpt-oss 的 reasoning、Qwen3.x 送 none、Gemini 3.x 送 MINIMAL、Gemini 3.1 Pro 送 LOW）。
+- 儀表板正確顯示 Gemini 的 LLM 用量：Gemini 在模型登錄的免費配額為 0，儀表板現在把 Gemini 用量呈現為「今日用量」並加上提示（5 語系），且「已計費／無免費配額」的 tooltip 改由是否真的有付費 provider 決定，避免 Gemini 被誤標成付費方案。
+- 因應 Groq 2026-07 模型下架更新模型登錄：Groq 於 2026-07 陸續下架多個模型（llama-4-scout、qwen3-32b 已於 07-17 下架；預設的 llama-3.3-70b 將於 08-16 下架）。更新為新的 Groq 模型組（預設改為 qwen3.6-27b，另有 gpt-oss-120b／20b）、加入 Gemini 3.x 與 gpt-5.6-luna、移除退役的 claude-3-5-haiku；並加入多跳退役模型對應表與跳數限制解析器，確保使用者先前存下的舊模型 id 永遠不會解析到已死的模型。同時修正各 provider 的 reasoning 請求參數（OpenAI GPT-5.x 送 `reasoning_effort: none` 避開 temperature-400、抑制 gpt-oss 的 reasoning、Qwen3.x 送 none、Gemini 3.x 送 MINIMAL、Gemini 3.1 Pro 送 LOW）。
 
 ## [0.11.11] - 2026-07-03
 
