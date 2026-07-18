@@ -100,7 +100,8 @@ CI（`.github/workflows/ci.yml`）：`vue-tsc --noEmit` → `eslint src` → `pn
 |---------|-----------|-----------|------|------|
 | `request_app_restart` | `lib.rs` | main-window.ts | — | `()` |
 | `update_hotkey_config` | `lib.rs` | useSettingsStore | `trigger_key: TriggerKey, trigger_mode: TriggerMode` | `Result<(), String>` |
-| `get_hud_target_position` | `lib.rs` | — | `app: AppHandle` | `Result<HudTargetPosition, String>` |
+| `get_hud_target_position` | `lib.rs` | useVoiceFlowStore | `app: AppHandle` | `Result<HudTargetPosition, String>`（含 `space: "physical"\|"logical"`，Windows 回 physical 以避開 tao 跨 DPI 錯位） |
+| `ensure_hud_visible` | `lib.rs` | useVoiceFlowStore（showHud 後） | `app: AppHandle` | `()`（Windows：記錄可見性快照 + 安全恢復：最小化還原、重宣告 topmost；非 Windows：no-op） |
 | `set_file_logging_enabled` | `plugins/logging.rs` | useSettingsStore, logger.ts | `enabled: bool` | `()` |
 | `open_log_folder` | `plugins/logging.rs` | logger.ts（SettingsView） | — | `Result<(), String>` |
 | `cleanup_old_logs` | `plugins/logging.rs` | main-window.ts | `days: u32, app: AppHandle` | `Result<Vec<String>, String>` |

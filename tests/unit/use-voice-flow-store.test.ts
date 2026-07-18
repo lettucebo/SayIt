@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 // "errors.apiKeyMissing" removed — now uses i18n key
 import { HOTKEY_ERROR_CODES } from "@/types/events";
+import { PhysicalPosition } from "@tauri-apps/api/dpi";
 
 const {
   mockListen,
@@ -9,6 +10,7 @@ const {
   mockInvoke,
   mockEnhanceText,
   mockGetCurrentWindow,
+  mockSetPosition,
   mockWebviewWindowGetByLabel,
   mockMainWindowShow,
   mockMainWindowSetFocus,
@@ -35,6 +37,7 @@ const {
   );
   const mockMainWindowShow = vi.fn().mockResolvedValue(undefined);
   const mockMainWindowSetFocus = vi.fn().mockResolvedValue(undefined);
+  const mockSetPosition = vi.fn().mockResolvedValue(undefined);
   const mockWebviewWindowGetByLabel = vi.fn(async (label: string) => {
     if (label !== "main-window") return null;
     return {
@@ -75,9 +78,11 @@ const {
       show: vi.fn().mockResolvedValue(undefined),
       hide: vi.fn().mockResolvedValue(undefined),
       setIgnoreCursorEvents: vi.fn().mockResolvedValue(undefined),
+      setPosition: mockSetPosition,
     })),
     mockMainWindowShow,
     mockMainWindowSetFocus,
+    mockSetPosition,
     mockWebviewWindowGetByLabel,
     mockLoadSettings: vi.fn().mockResolvedValue(undefined),
     mockSettingsState: {
@@ -373,6 +378,7 @@ describe("useVoiceFlowStore", () => {
       .mockResolvedValue(undefined);
     mockAddApiUsage.mockClear().mockResolvedValue(undefined);
     mockGetCurrentWindow.mockClear();
+    mockSetPosition.mockClear();
     mockWebviewWindowGetByLabel.mockClear();
     mockMainWindowShow.mockClear().mockResolvedValue(undefined);
     mockMainWindowSetFocus.mockClear().mockResolvedValue(undefined);
@@ -452,6 +458,28 @@ describe("useVoiceFlowStore", () => {
       status: "recording",
       message: "voiceFlow.recording",
     });
+  });
+
+  it("[P1] Windows physical space 應以 PhysicalPosition 定位 HUD（DPI-safe，RC1）", async () => {
+    const baseHandler = createMockInvokeHandler();
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_hud_target_position") {
+        return { monitorKey: "win-mixed-dpi", x: 1280, y: 0, space: "physical" };
+      }
+      return baseHandler(cmd);
+    });
+
+    const store = useVoiceFlowStore();
+    await store.initialize();
+
+    triggerHotkeyEvent("hotkey:pressed");
+    await vi.waitFor(() => {
+      expect(mockSetPosition).toHaveBeenCalled();
+    });
+
+    const lastArg = mockSetPosition.mock.calls.at(-1)?.[0];
+    expect(lastArg).toBeInstanceOf(PhysicalPosition);
+    expect(lastArg).toMatchObject({ x: 1280, y: 0 });
   });
 
   it("[P0] HOTKEY_RELEASED 應完成 錄音→轉錄→貼上→success 並廣播事件", async () => {

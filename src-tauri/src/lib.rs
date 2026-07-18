@@ -60,7 +60,7 @@ fn configure_windows_topmost_window(window: &tauri::WebviewWindow) {
             // 讀取現有 extended style，加入 TOOLWINDOW + NOACTIVATE
             let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
             let new_ex_style = WINDOW_EX_STYLE(ex_style as u32)
-                | WS_EX_TOOLWINDOW    // 不出現在 Alt+Tab / taskbar，出現在所有虛擬桌面
+                | WS_EX_TOOLWINDOW    // 不出現在 Alt+Tab / taskbar（與虛擬桌面顯示無關）
                 | WS_EX_NOACTIVATE; // 點擊不搶焦點
             SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new_ex_style.0 as isize);
 
@@ -215,6 +215,9 @@ pub struct HudTargetPosition {
     x: f64,
     y: f64,
     monitor_key: String,
+    /// 座標空間標記：Windows 回傳 "physical"（前端用 PhysicalPosition，DPI-safe），
+    /// 其餘平台回傳 "logical"（前端用 LogicalPosition，維持既有行為）。
+    space: String,
 }
 
 /// 抽象化的螢幕資訊，用於 `find_monitor_for_cursor()` 純函式測試
@@ -353,26 +356,152 @@ fn get_hud_target_position(app: tauri::AppHandle) -> Result<HudTargetPosition, S
     let matched_monitor = &monitor_infos[idx];
     let sf = matched_monitor.scale_factor;
 
-    // 還原螢幕的 logical origin（macOS: physical / sf = NSScreen points）
-    let monitor_logical_x = matched_monitor.position_x as f64 / sf;
-    let monitor_logical_y = matched_monitor.position_y as f64 / sf;
-
-    // 計算 HUD 在目標螢幕上的 logical 置中偏移
-    let centered_x_logical =
-        calculate_centered_window_x_logical(matched_monitor.width, sf, HUD_WINDOW_WIDTH_LOGICAL);
-
-    let hud_x = monitor_logical_x + centered_x_logical;
-    let hud_y = monitor_logical_y;
     let monitor_key = format!(
         "{},{}",
         matched_monitor.position_x, matched_monitor.position_y
     );
 
-    Ok(HudTargetPosition {
-        x: hud_x,
-        y: hud_y,
-        monitor_key,
-    })
+    // 依平台選座標空間，避免 tao 在混合 DPI 下錯位：
+    // - Windows：回傳「絕對 physical 座標」，前端以 PhysicalPosition 定位。dpi 的
+    //   PhysicalPosition → physical 轉換是 identity（不乘 scale factor），可避開 tao 對
+    //   LogicalPosition 以「視窗當前螢幕 SF」轉換，在多螢幕不同縮放時把 HUD 移到錯誤位置/離螢幕。
+    // - macOS（及其他）：維持既有 logical 座標路徑（NSScreen points），前端用 LogicalPosition。
+    let position = {
+        #[cfg(target_os = "windows")]
+        {
+            let centered_x_physical =
+                calculate_centered_window_x(matched_monitor.width, sf, HUD_WINDOW_WIDTH_LOGICAL);
+            HudTargetPosition {
+                x: matched_monitor.position_x as f64 + centered_x_physical as f64,
+                y: matched_monitor.position_y as f64,
+                monitor_key,
+                space: "physical".to_string(),
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            // 還原螢幕的 logical origin（macOS: physical / sf = NSScreen points）
+            let monitor_logical_x = matched_monitor.position_x as f64 / sf;
+            let monitor_logical_y = matched_monitor.position_y as f64 / sf;
+            let centered_x_logical = calculate_centered_window_x_logical(
+                matched_monitor.width,
+                sf,
+                HUD_WINDOW_WIDTH_LOGICAL,
+            );
+            HudTargetPosition {
+                x: monitor_logical_x + centered_x_logical,
+                y: monitor_logical_y,
+                monitor_key,
+                space: "logical".to_string(),
+            }
+        }
+    };
+
+    Ok(position)
+}
+
+/// 診斷並嘗試恢復 HUD 視窗的原生可見性狀態（RC2）。
+///
+/// 於前端每次 `showHud()`（`window.show()` 之後）呼叫。設計原則（依 RubberDuck）：
+/// **先記錄快照、再只針對已證實狀態做安全恢復；不做 blanket hide/show**（會閃爍、與 250ms
+/// 輪詢/ fire-and-forget showHud 疊成迴圈，且對 cloak/最小化未必有效）。cloak 僅記錄不強解。
+#[command]
+fn ensure_hud_visible(app: tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        #[cfg(target_os = "windows")]
+        ensure_hud_visible_windows(&window);
+        #[cfg(not(target_os = "windows"))]
+        let _ = window;
+    }
+}
+
+/// Windows：記錄 HUD 視窗原生可見性快照（供單螢幕/混合 DPI 現場 log 判定 RC2），
+/// 並做安全恢復：最小化 → 不搶焦點還原；重新宣告 topmost（保留 `SWP_NOACTIVATE`）。
+#[cfg(target_os = "windows")]
+fn ensure_hud_visible_windows(window: &tauri::WebviewWindow) {
+    use std::ffi::c_void;
+    use windows::Win32::Foundation::RECT;
+    use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetForegroundWindow, GetWindowLongPtrW, GetWindowRect, IsIconic, IsWindowVisible,
+        SetWindowPos, ShowWindow, GWL_EXSTYLE, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE,
+        SWP_NOSIZE, SW_SHOWNOACTIVATE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
+    };
+
+    let hwnd = match window.hwnd() {
+        Ok(h) => h,
+        Err(e) => {
+            log::error!("[hud-visibility] Failed to get HWND: {e}");
+            return;
+        }
+    };
+
+    unsafe {
+        let visible = IsWindowVisible(hwnd).as_bool();
+        let iconic = IsIconic(hwnd).as_bool();
+
+        let mut rect = RECT::default();
+        let _ = GetWindowRect(hwnd, &mut rect);
+
+        // DWMWA_CLOAKED：非 0 代表視窗被 DWM/Shell 隱藏（含虛擬桌面切走），
+        // bits: 0x1=APP, 0x2=SHELL(含虛擬桌面), 0x4=INHERITED。
+        let mut cloaked: u32 = 0;
+        let _ = DwmGetWindowAttribute(
+            hwnd,
+            DWMWA_CLOAKED,
+            &mut cloaked as *mut u32 as *mut c_void,
+            std::mem::size_of::<u32>() as u32,
+        );
+
+        let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
+        let is_topmost = ex_style & WS_EX_TOPMOST.0 != 0;
+        let has_toolwindow = ex_style & WS_EX_TOOLWINDOW.0 != 0;
+        let has_noactivate = ex_style & WS_EX_NOACTIVATE.0 != 0;
+        let foreground = GetForegroundWindow();
+
+        log::info!(
+            "[hud-visibility] visible={visible} iconic={iconic} cloaked=0x{cloaked:x} \
+             topmost={is_topmost} toolwindow={has_toolwindow} noactivate={has_noactivate} \
+             exstyle=0x{ex_style:x} rect=({},{},{},{}) foreground={foreground:?}",
+            rect.left,
+            rect.top,
+            rect.right,
+            rect.bottom,
+        );
+
+        // cloak/虛擬桌面：只能診斷。Shell cloak（含虛擬桌面切走）無法在此強制解除，
+        // 屬已知限制；待現場 log 佐證後再評估 IVirtualDesktopManager 等較重方案。
+        if cloaked != 0 {
+            log::warn!(
+                "[hud-visibility] DWM-cloaked (0x{cloaked:x})；shell/虛擬桌面 cloak 無法在此強制解除（已知限制，僅診斷）"
+            );
+        }
+        // 安全恢復（僅針對已證實狀態；不做 blanket hide/show）：
+        // 原生 visible=false 或最小化 → SW_SHOWNOACTIVATE（顯示/還原但不搶焦點），修 RC2 async-show latch
+        if !visible || iconic {
+            log::warn!(
+                "[hud-visibility] not-visible/minimized (visible={visible} iconic={iconic}) → SW_SHOWNOACTIVATE"
+            );
+            let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+            let visible_after = IsWindowVisible(hwnd).as_bool();
+            let iconic_after = IsIconic(hwnd).as_bool();
+            log::info!(
+                "[hud-visibility] after SW_SHOWNOACTIVATE: visible={visible_after} iconic={iconic_after}"
+            );
+        }
+        // 重新宣告 topmost（保留 NOACTIVATE：HUD 不可搶走貼上目標焦點）
+        if let Err(e) = SetWindowPos(
+            hwnd,
+            Some(HWND_TOPMOST),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+        ) {
+            log::warn!("[hud-visibility] SetWindowPos(HWND_TOPMOST) failed: {e}");
+        }
+    }
 }
 
 fn show_main_window(app: &AppHandle) {
@@ -487,6 +616,7 @@ pub fn run() {
             plugins::logging::cleanup_old_logs,
             update_hotkey_config,
             get_hud_target_position,
+            ensure_hud_visible,
             get_os_theme,
             plugins::audio_control::mute_system_audio,
             plugins::audio_control::restore_system_audio,
