@@ -507,6 +507,9 @@
     }
   },
   "featureGuide": {
+    "whatsNew": {
+      "title": "What's new in v{version}"
+    },
     "subtitle": "Here are all available features in SayIt to help you get started.",
     "voiceInput": {
       "title": "Voice Input",

@@ -507,6 +507,9 @@
     }
   },
   "featureGuide": {
+    "whatsNew": {
+      "title": "本次更新亮点（v{version}）"
+    },
     "subtitle": "以下是 SayIt 所有可用的操作功能，帮助你快速上手。",
     "voiceInput": {
       "title": "语音输入",

@@ -419,5 +419,38 @@ describe("i18n 設定功能", () => {
         ).toHaveLength(0);
       }
     });
+
+    it("[P1] featureGuide.whatsNew.title 在 5 語系皆含剛好一個 {version} 佔位符", async () => {
+      const zhTW = await import("../../src/i18n/locales/zh-TW.json");
+      const en = await import("../../src/i18n/locales/en.json");
+      const ja = await import("../../src/i18n/locales/ja.json");
+      const zhCN = await import("../../src/i18n/locales/zh-CN.json");
+      const ko = await import("../../src/i18n/locales/ko.json");
+
+      const localeMap: Record<string, Record<string, unknown>> = {
+        "zh-TW": zhTW.default,
+        en: en.default,
+        ja: ja.default,
+        "zh-CN": zhCN.default,
+        ko: ko.default,
+      };
+
+      for (const [locale, messages] of Object.entries(localeMap)) {
+        const featureGuide = messages.featureGuide as Record<string, unknown>;
+        const whatsNew = featureGuide?.whatsNew as
+          | Record<string, unknown>
+          | undefined;
+        const title = whatsNew?.title;
+        expect(
+          typeof title,
+          `${locale} 缺少 featureGuide.whatsNew.title`,
+        ).toBe("string");
+        const matches = (title as string).match(/\{version\}/g) ?? [];
+        expect(
+          matches.length,
+          `${locale} 的 whatsNew.title 應含剛好一個 {version}`,
+        ).toBe(1);
+      }
+    });
   });
 });
