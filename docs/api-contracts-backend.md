@@ -10,7 +10,7 @@
 
 | 軌道                       | 數量    | 來源                                                                        |
 | -------------------------- | ------- | --------------------------------------------------------------------------- |
-| Tauri Commands             | **34**  | `lib.rs::run()` 的 `invoke_handler!` macro                                  |
+| Tauri Commands             | **35**  | `lib.rs::run()` 的 `invoke_handler!` macro                                  |
 | Rust → Frontend Events     | **15**  | 各 plugin 模組頂部的 `pub const` 字串                                        |
 | Frontend-only Events       | **5**   | `src/composables/useTauriEvents.ts`                                         |
 
@@ -60,7 +60,7 @@ invoke('get_hud_target_position') → { x: number, y: number, monitorKey: string
 - **用途**：HUD 多螢幕追蹤（取得游標所在螢幕的 logical 中心位置）
 - **錯誤**：若 `app.available_monitors()` 失敗或無螢幕 → `Result::Err(String)`
 
-### 2.2 熱鍵（7 個 · `plugins/hotkey_listener.rs`）
+### 2.2 熱鍵（8 個 · `plugins/hotkey_listener.rs`）
 
 | Command                                  | 簽名                                                                   |
 | ---------------------------------------- | ---------------------------------------------------------------------- |
@@ -69,6 +69,7 @@ invoke('get_hud_target_position') → { x: number, y: number, monitorKey: string
 | `open_accessibility_settings`            | `() → Result<(), String>`                                              |
 | `reinitialize_hotkey_listener`           | `(app: AppHandle) → Result<(), String>`                                |
 | `reset_hotkey_state`                     | `(state: State<HotkeyListenerState>) → ()`                             |
+| `set_hotkey_capture_active`              | `(active: bool, state: State<HotkeyListenerState>) → ()`（Windows：語音流程進行中時攔截 ESC） |
 | `start_hotkey_recording`                 | `(state) → ()`                                                         |
 | `cancel_hotkey_recording`                | `(state) → ()`                                                         |
 
