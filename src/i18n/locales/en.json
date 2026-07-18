@@ -500,7 +500,9 @@
     },
     "upgradeNotice": {
       "title": "SayIt Update Summary",
-      "item1": "Performance and size improvements — faster app startup and view loading, lower voice-to-paste latency, and a smaller install. This release focuses on performance and stability; the interface is unchanged.",
+      "item1": "Automatic retry on failed transcription — when the network is unstable or the service is busy (rate limits, transient errors), transcription used to fail outright and force a full re-record. It now makes up to 3 attempts (the first try plus up to 2 retries), greatly reducing those 'finished talking but it failed' do-overs.",
+      "item2": "Traditional Chinese transcripts now auto-convert to Traditional characters — speech recognition (Whisper) outputs Simplified Chinese by default, so Traditional Chinese users often got Simplified raw transcripts. When the recognition language is Traditional Chinese, the text is now converted using fixed rules to Taiwan-standard Traditional characters (characters only, your wording is untouched), so pasted text and history entries are Traditional.",
+      "item3": "More accurate edit-mode detection (macOS) — detecting whether text was selected at the cursor used to rely on simulating Cmd+C, which occasionally left a stray 'C' character or misfired when nothing was selected. macOS now prefers direct detection via Accessibility, with no simulated keystrokes when it can read the selection, and falls back to the clipboard only when Accessibility can't.",
       "dismiss": "Got it"
     }
   },
