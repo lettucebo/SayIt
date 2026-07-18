@@ -507,6 +507,9 @@
     }
   },
   "featureGuide": {
+    "whatsNew": {
+      "title": "이번 업데이트 내용 (v{version})"
+    },
     "subtitle": "SayIt에서 사용할 수 있는 모든 기능을 소개합니다.",
     "voiceInput": {
       "title": "음성 입력",

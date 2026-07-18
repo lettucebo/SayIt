@@ -160,9 +160,11 @@ SayIt 版本更新紀錄。
 
 升級彈窗由 Dashboard 啟動時 `consumeUpgradeNotice()` 觸發，比對 `lastSeenVersion`（存在 tauri-plugin-store）和 `__APP_VERSION__`（build-time 從 package.json 注入）。不相等就顯示。
 
+> ⚠️ `mainApp.upgradeNotice.itemN` 除了升級彈窗，也被「功能介紹」頁（`/guide`，`FeatureGuideView.vue`）當作「本次更新內容（v{version}）」卡片顯示——且該卡片一律可見、並標上當下版本號。因此每次發版都必須同步替換這 5 語系內容，否則 `/guide` 會在新版本號下顯示上一版的舊亮點。
+
 需要動 7 個檔案：
 1. `src/MainApp.vue`：`upgradeNoticeItemCount` 常數（控制顯示幾個 item）
-2. `src/i18n/locales/zh-TW.json`：`mainView.upgradeNotice` 區塊
+2. `src/i18n/locales/zh-TW.json`：`mainApp.upgradeNotice` 區塊
 3. `src/i18n/locales/zh-CN.json`：同上
 4. `src/i18n/locales/en.json`：同上
 5. `src/i18n/locales/ja.json`：同上
@@ -214,7 +216,7 @@ SayIt 版本更新紀錄。
 ④ skill 翻譯 4 語系（zh-CN / en / ja / ko）
 ⑤ 把整組 upgradeNotice（5 語系 × N 個 item）展示給使用者遷訂
 ⑥ 使用者 OK 後實際 Edit 6 個檔案：
-   - 5 個 .json 的 mainView.upgradeNotice 區塊
+   - 5 個 .json 的 mainApp.upgradeNotice 區塊
    - MainApp.vue 的 upgradeNoticeItemCount
 ```
 
