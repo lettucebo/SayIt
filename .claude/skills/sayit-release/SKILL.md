@@ -109,13 +109,15 @@ CHANGELOG.md 在專案根目錄，格式固定。
 每條 bullet 的結構：
 
 ```
-- [簡述使用者感受到的事]：[為什麼出現問題或為什麼這樣設計]，[實際做的事和取捨]（#issue）
+- [簡述使用者感受到的事]：[為什麼出現問題或為什麼這樣設計]，[實際做的事和取捨]
 ```
+
+> 🔒 **不放 issue / PR 連結（硬規則）**：CHANGELOG 面向本 fork 使用者，且會被 `release.yml` 抽進 GitHub Release body。條目**不得**出現 `chenjackle45/SayIt#N`、裸 `#N` 或上游 URL——前者會 backlink 上游、後者在 fork 端會誤連自家不相關的 issue/PR。要標來源改用**不可被解析為引用**的純文字，例如「對應上游 issue 68」（數字不帶 `#`）。詳見 `AGENTS.md`「`main` 分支與上游關聯政策」。
 
 **範例**：
 
 ```markdown
-- Gemini 2.5 系列做 AI 整理時長轉錄文字被截斷的問題（#23、#34）：根因是 Gemini 把 thinking tokens 計入 `maxOutputTokens` 配額，原本對所有 provider 統一給 2048 token 預算被 thinking 吃掉一部分後不夠用。改為 per-provider 預設：Gemini / OpenAI 16384、Anthropic / Groq 8192（後者模型上限 8192，給 16384 會被 API reject）
+- Gemini 2.5 系列做 AI 整理時長轉錄文字被截斷的問題：根因是 Gemini 把 thinking tokens 計入 `maxOutputTokens` 配額，原本對所有 provider 統一給 2048 token 預算被 thinking 吃掉一部分後不夠用。改為 per-provider 預設：Gemini / OpenAI 16384、Anthropic / Groq 8192（後者模型上限 8192，給 16384 會被 API reject）
 ```
 
 注意三件事：
