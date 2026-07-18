@@ -2,6 +2,17 @@
 
 SayIt 版本更新紀錄。
 
+## [0.12.1] - 2026-07-19
+
+### Added
+
+- 「功能介紹」頁（/guide）最上方新增帶版本號的「本次更新」卡片：升級後想回頭確認「這版更新了什麼」時，過去只有升級後首次啟動會跳一次彈窗、關掉就找不回來。現在功能介紹頁最上方會以卡片顯示本版亮點，重用升級彈窗的五語系內容、標題帶當下版本號（`__APP_VERSION__`）；卡片動態萃取亮點項目（依數字排序、容忍不連續的 itemN key），沒有有效項目時自動隱藏。
+
+### Fixed
+
+- 觸發鍵與 ESC 會外洩到其他 App 的問題（Windows）：Windows 低階鍵盤 hook 先前一律以 `CallNextHookEx` 把按鍵放行給前景 App，導致按住觸發鍵（例如 Alt）會叫出選單、語音流程中按 ESC 會關掉對話框。hook 現在會攔截 SayIt 正在使用的按鍵——觸發鍵（單鍵／自訂／組合鍵主鍵）按住期間攔截、ESC 只在語音流程進行中（錄音／轉錄／整理／編輯）攔截（由前端推送的 voice_active 旗標控制）；SayIt 自己注入的按鍵（`LLKHF_INJECTED`，含貼上用的 Ctrl+V／Ctrl+C）一律排除、絕不會被擋。判斷邏輯抽成有單元測試的純函式（decide_escape／decide_trigger），並以「每次實體按壓」的 latch 確保同一鍵的按下與放開一起攔截（處理自動重複、組合鍵先後順序、執行期設定變更）。macOS 不受影響（其 event tap 為唯讀、本就無法攔截）。
+- HUD 浮窗跑一段時間後不再出現的問題（多螢幕混合 DPI 為主，偶爾單螢幕也會）：錄音／轉錄／貼上全都正常、只有 HUD 不顯示，因為 HUD 顯示與語音流程完全解耦。兩個根因——（1）混合 DPI：`get_hud_target_position` 先前回傳邏輯座標，Windows 的 tao 會用視窗「當前螢幕」的縮放比換算 LogicalPosition，游標移到不同 DPI 的螢幕時 HUD 被算到畫面外；Windows 改回傳絕對物理座標＋`space` 旗標並用 PhysicalPosition（等值轉換、DPI-safe），macOS 維持既有邏輯座標路徑。（2）與螢幕無關、會持續到重啟：新增 `ensure_hud_visible` 記錄原生可見性狀態（IsWindowVisible／IsIconic／DWMWA_CLOAKED／topmost 等）並做安全恢復（隱藏或最小化時 SW_SHOWNOACTIVATE、重新宣告 HWND_TOPMOST），不做全面 hide/show；殼層 cloak／虛擬桌面情形僅記錄為已知限制（診斷用）。另強化 showHud：單飛重定位、輪詢代數 token（避免重啟後輪詢迴圈把 HUD 復活）、500ms 競速讓重定位永不阻塞顯示。
+
 ## [0.12.0] - 2026-07-18
 
 ### Added
