@@ -500,9 +500,8 @@
     },
     "upgradeNotice": {
       "title": "SayIt Update Summary",
-      "item1": "More reliable HUD overlay display (Windows) — previously on Windows, especially on multi-monitor setups with different display scaling (DPI), the HUD overlay could stop appearing after SayIt had been running for a while (recording and pasting still worked). This release fixes positioning across monitors with different DPI and adds native visibility self-recovery, so the HUD shows more reliably.",
-      "item2": "Holding the trigger key or pressing ESC no longer disturbs other apps (Windows) — previously, holding the trigger key (e.g. Alt) could open another program's menu, and pressing ESC mid-recording could close a dialog you were using. SayIt now intercepts these keys while it's using them so they no longer leak to the foreground app; SayIt's own paste action is unaffected.",
-      "item3": "The Feature Guide now opens with a versioned What's New card — the Feature Guide page shows the current version's highlights in a card at the top, so you can revisit what changed anytime.",
+      "item1": "The custom dictionary now uses a single sortable table — AI-suggested and manually-added terms are no longer split into two sections. Sort by term, source, weight, or date added by clicking the column headers (ascending/descending toggle), and a new Source column shows at a glance whether each term was added by you or suggested by AI.",
+      "item2": "Double-click the Windows tray icon to open the Dashboard — no need to hunt through the right-click menu; just double-click the icon to open the Dashboard window, and a minimized window is restored to the foreground too.",
       "dismiss": "Got it"
     }
   },
