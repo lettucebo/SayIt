@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{
     command,
     menu::{Menu, MenuItem},
-    tray::TrayIconBuilder,
+    tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
     AppHandle, Manager, Runtime,
 };
 
@@ -506,6 +506,7 @@ fn ensure_hud_visible_windows(window: &tauri::WebviewWindow) {
 
 fn show_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main-window") {
+        let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
     }
@@ -731,7 +732,9 @@ pub fn run() {
                 ))?)
                 .icon_as_template(true)
                 .menu(&menu)
-                .show_menu_on_left_click(true)
+                // Windows：關閉左鍵選單，改由右鍵顯示選單、左鍵雙擊開啟 Dashboard；
+                // macOS/Linux：維持左鍵單擊顯示選單（menu bar 慣例）。
+                .show_menu_on_left_click(!cfg!(target_os = "windows"))
                 .tooltip("SayIt")
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "open-dashboard" => {
@@ -741,6 +744,16 @@ pub fn run() {
                         app.exit(0);
                     }
                     _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    // DoubleClick 為 Tauri 定義的 Windows Only 事件，macOS/Linux 不會觸發。
+                    if let TrayIconEvent::DoubleClick {
+                        button: MouseButton::Left,
+                        ..
+                    } = event
+                    {
+                        show_main_window(tray.app_handle());
+                    }
                 })
                 .build(app)?;
 
