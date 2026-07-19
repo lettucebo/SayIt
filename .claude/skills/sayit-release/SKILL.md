@@ -37,6 +37,9 @@ release.sh 的 guard 設計（working tree 乾淨、CHANGELOG 含目標版本區
      │ 使用者明確同意（「跑」「部署」「go」「發吧」之類）
      ▼
  ⑦ 跑 ./scripts/release.sh X.Y.Z（只在使用者明確同意時跑）
+     │
+     ▼
+ ⑧ 發版後驗證（gh --repo、監看 workflow、確認 Release 發佈與資產）
 ```
 
 ## 步驟 ① 對齊版本號
@@ -269,10 +272,11 @@ rg -n "^## \[X.Y.Z\]" C:/Source/Repos/SayIt/CHANGELOG.md
 cd C:/Source/Repos/SayIt && ./scripts/release.sh X.Y.Z
 ```
 
-> ⚠️ **Windows 注意（本機無 `jq`）**：`release.sh` 依賴 bash+jq+python3，在 `C:\Source\Repos\SayIt` 無法直接跑（jq 不存在、bash 為 WSL）。改用**等價手動 bump**（已驗證可行）：
-> 1. node 改 `package.json` 與 `src-tauri/tauri.conf.json` 的 `"version"`；位元組替換改 `src-tauri/Cargo.toml`（`version = "X"`，第一個出現）與 `src-tauri/Cargo.lock`（`name = "sayit"\r\nversion = "X"`，**Cargo.lock 是 CRLF**）。
-> 2. 驗證四處皆為新版本、`git diff` 只有版本行。
-> 3. `git add` 四檔 → `git commit -S -m "chore: bump version to X.Y.Z"` → `git tag vX.Y.Z` → 分開 `git push origin main` 與 `git push origin vX.Y.Z`（與 release.sh 等價，分開推送避免 tag 事件遺失）。
+> ⚠️ **Windows 注意（本機無 `jq`）**：`release.sh` 依賴 bash+jq+python3，在 `C:\Source\Repos\SayIt` 無法直接跑（jq 不存在、bash 為 WSL）。改用**等價手動 bump**（0.12.1 已驗證可行）：
+> 1. 改 `package.json` / `src-tauri/tauri.conf.json`：最穩是「唯一字串取代」只換 `"version": "OLD",` 那一行（先確認該字串在檔內唯一），以免 JSON round-trip 因序列化格式與原檔不同而整檔重排、diff 爆炸（release.sh 本身是用 jq 改這兩檔）。`src-tauri/Cargo.toml` 換第一個（`[package]` 下的）`version = "OLD"`。
+> 2. `src-tauri/Cargo.lock` 在此 checkout 是 **CRLF**（git 內其實存 LF，因 `core.autocrlf`；release.sh 的 python 用 `\n` 比對）：用 PowerShell `[IO.File]::ReadAllText` + `String.Replace`（比對含 `\r\n` 的 `name = "sayit"` 與 `version` 兩行）+ `WriteAllText`（UTF8 no BOM）精準改那一行、保留原換行；**勿用 edit 工具**（可能假設 LF 而 mismatch）。只改 sayit 自己的版本、不動任何相依。
+> 3. 驗證：四處皆新版本、`git --no-pager diff` 只有 4 行版本變更；`cd src-tauri; cargo metadata --locked`（只驗證相依解析 / lock 與 Cargo.toml 一致，exit 0 = 一致；**不編譯、不跑測試**，比 `cargo build` 快很多）。
+> 4. `git add` 四檔 → `git commit -S -m "chore: bump version to X.Y.Z"` → `git tag vX.Y.Z` → 先 `git push origin main`、**確認推送成功後**再 `git push origin vX.Y.Z`（分開推送，避免 branch+tags 一起推時 tag 事件遺失）。注意：緊接著推 tag **不會**等 main CI 跑完（CI 與 Release 是兩支獨立 workflow、幾乎同時開跑、互不相依）；若要 CI 綠燈才發 release，須先 `gh run watch` 等 main CI 完成再推 tag。
 
 ### release.sh 可能擋下來的情況
 
@@ -303,11 +307,23 @@ docs(release): prepare vX.Y.Z release notes
 - MainApp.vue: bump upgradeNoticeItemCount to N
 ```
 
+## 步驟 ⑧ 發版後驗證（push 之後別急著收工）
+
+push tag 後 release workflow 才剛開始，要確認「真的觸發、建置成功、Release 有發佈」再回報完成。0.12.1 實際踩過的坑：
+
+- **`gh run` 指令一律帶 `--repo lettucebo/SayIt`**：本 repo 有 `upstream` remote，`gh run view/watch/list` 不帶 `--repo` 會解析到上游 `chenjackle45/SayIt` → HTTP 404。`gh api repos/lettucebo/SayIt/...` 這種明確路徑不受影響。
+- **`gh run list` 不帶 `--repo` 會列到「上游」的 run**：曾出現 `gh run list --workflow=Release` 顯示上游最新版本（如 v0.11.0）、看似漏了剛觸發的 run，其實是查到 `chenjackle45/SayIt` 而非本 fork（不是快取）。一律帶 `--repo lettucebo/SayIt`，或用 `gh api "repos/lettucebo/SayIt/actions/runs?event=push&per_page=10"` 明確查本 repo。
+- **GitHub Actions 時間戳是 UTC**：本地 +8 時 UTC `T17:17Z` = 本地隔天 `01:17`。用日期過濾 run 時別拿本地「今天」去比 `created_at`，否則會誤判「今天沒有 run」。
+- **監看到完成再驗證**：`gh run watch <id> --repo lettucebo/SayIt --exit-status`（exit 0 = success）。發版會有**兩支獨立** workflow：`git push origin main` → CI、`git push origin vX.Y.Z` → Release（**tag push 不會觸發 CI**；兩支互不相依，Release 不等 CI）；兩支都要確認。
+- **驗證 Release 產物**：`gh api repos/lettucebo/SayIt/releases/tags/vX.Y.Z` 確認 `draft:false`，且資產齊全——`latest.json`、固定名稱 `SayIt-mac-arm64.dmg` / `SayIt-mac-x64.dmg` / `SayIt-windows-x64.exe`（各附 `.sha256`）、各平台 updater `.sig`。
+
 ## 共通注意事項
 
-### 不要動 Cargo.lock
+### 不要動 Cargo.lock（Windows 手動 bump 除外）
 
-Cargo.lock 是 release.sh 自動處理的（透過 cargo build 同步 sayit crate 版本）。skill 不要手動編輯 Cargo.lock，那是 hard-block 的保護檔案。
+Cargo.lock 是 release.sh 自動處理的（release.sh 用 python 直接**字串取代** `sayit` 的版本行，**不是**跑 cargo build）。一般情況 skill 不要手動編輯 Cargo.lock，那是 hard-block 的保護檔案。
+
+**唯一例外**：Windows 無法跑 release.sh 時（見步驟 ⑦），可**只**改 `sayit` 自己的 `version` 那一行——這正是 release.sh 對 Cargo.lock 做的同一件事（字串取代版本行，差別只在 checkout 是 CRLF），不算改相依。改完務必 `cargo metadata --locked` 驗證一致。
 
 ### 分支歸屬
 
