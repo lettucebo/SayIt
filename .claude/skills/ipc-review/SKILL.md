@@ -12,7 +12,7 @@ description: 審查 Rust↔Vue IPC 一致性 — 使用 tauri-reviewer agent 檢
 1. **Tauri Commands** — Rust `#[tauri::command]` 是否都在 `invoke_handler` 中註冊，前端呼叫的 command 名稱是否匹配
 2. **Event 名稱** — Rust `emit()` 的 event 名稱是否與前端 `listen()` 的常量一致
 3. **Payload 型別** — Rust `#[derive(Serialize)]` struct 的欄位是否與 TypeScript interface 對齊
-4. **AGENTS.md IPC 契約表** — 檢查契約表是否反映最新的程式碼狀態
+4. **`.github/copilot-instructions.md` IPC 契約表** — 檢查契約表是否反映最新的程式碼狀態
 
 ## 執行方式
 

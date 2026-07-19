@@ -115,7 +115,7 @@ CHANGELOG.md 在專案根目錄，格式固定。
 - [簡述使用者感受到的事]：[為什麼出現問題或為什麼這樣設計]，[實際做的事和取捨]
 ```
 
-> 🔒 **不放 issue / PR 連結（硬規則）**：CHANGELOG 面向本 fork 使用者，且會被 `release.yml` 抽進 GitHub Release body。條目**不得**出現 `chenjackle45/SayIt#N`、裸 `#N` 或上游 URL——前者會 backlink 上游、後者在 fork 端會誤連自家不相關的 issue/PR。要標來源改用**不可被解析為引用**的純文字，例如「對應上游 issue 68」（數字不帶 `#`）。詳見 `AGENTS.md`「`main` 分支與上游關聯政策」。
+> 🔒 **不放 issue / PR 連結（硬規則）**：CHANGELOG 面向本 fork 使用者，且會被 `release.yml` 抽進 GitHub Release body。條目**不得**出現 `chenjackle45/SayIt#N`、裸 `#N` 或上游 URL——前者會 backlink 上游、後者在 fork 端會誤連自家不相關的 issue/PR。要標來源改用**不可被解析為引用**的純文字，例如「對應上游 issue 68」（數字不帶 `#`）。詳見 `.github/copilot-instructions.md`「`main` 分支與上游關聯政策」。
 
 **範例**：
 
