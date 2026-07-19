@@ -365,14 +365,14 @@
     "dateHeader": "新增时间",
     "actionHeader": "操作",
     "loadFailed": "加载词汇清单失败",
-    "aiRecommended": "AI 推荐",
-    "manualAdded": "手动添加",
+    "sourceHeader": "来源",
+    "sourceManual": "手动",
+    "sourceAi": "AI 推荐",
     "weight": "权重",
     "description": "字典词汇会在语音识别时提供给 AI，提升专有名词与术语的识别准确度。",
     "weightDescription": "每次语音识别时，系统会将权重最高的前 {limit} 个词汇加入 AI 识别提示。当 AI 检测到你重复修正同一个词时，该词的权重会自动提升。",
     "noAiSuggestions": "暂无 AI 推荐词汇，启用智能字典学习后系统会自动学习",
     "noAiSuggestionsEnabled": "智能字典学习已启用，当你修正转录文字时系统会自动学习新词",
-    "aiTermCount": "{count} 个词",
     "importHint": "要从其他工具（如 Typeless）迁移吗？请到「设置 → 备份与还原」导入词表（.txt/.csv/.json）。"
   },
   "accessibility": {
