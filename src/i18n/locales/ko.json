@@ -365,14 +365,14 @@
     "dateHeader": "추가 일시",
     "actionHeader": "작업",
     "loadFailed": "단어 목록 로드에 실패했습니다",
-    "aiRecommended": "AI 추천",
-    "manualAdded": "수동 추가",
+    "sourceHeader": "출처",
+    "sourceManual": "수동",
+    "sourceAi": "AI",
     "weight": "가중치",
     "description": "사전 용어는 음성 인식 시 AI에 제공되어 고유명사와 기술 용어의 인식 정확도를 높입니다.",
     "weightDescription": "음성 인식 시 가중치가 가장 높은 상위 {limit}개 용어가 AI 인식 프롬프트에 포함됩니다. 동일한 수정이 반복 감지되면 해당 용어의 가중치가 자동으로 증가합니다.",
     "noAiSuggestions": "아직 AI 추천 용어가 없습니다. 스마트 사전 학습을 활성화하면 자동으로 학습됩니다",
     "noAiSuggestionsEnabled": "스마트 사전 학습이 켜져 있습니다. 전사를 수정하면 새 용어가 자동으로 학습됩니다",
-    "aiTermCount": "{count}개 용어",
     "importHint": "다른 도구(예: Typeless)에서 이전하시나요? '설정 → 백업 및 복원'에서 단어 목록(.txt/.csv/.json)을 가져오세요."
   },
   "accessibility": {

@@ -4,9 +4,19 @@ import { useVocabularyStore } from "../stores/useVocabularyStore";
 import { useSettingsStore } from "../stores/useSettingsStore";
 import { extractErrorMessage } from "../lib/errorUtils";
 import { useFeedbackMessage } from "../composables/useFeedbackMessage";
+import { useTableSort, type SortColumn } from "../composables/useTableSort";
 import { useI18n } from "vue-i18n";
-import { Plus, Trash2, Bot, Hand, Info } from "lucide-vue-next";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import {
+  Plus,
+  Trash2,
+  Bot,
+  Hand,
+  Info,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpDown,
+} from "lucide-vue-next";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,6 +29,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { captureError } from "../lib/sentry";
+import type { VocabularyEntry, VocabularySource } from "../types/vocabulary";
+
+type SortKey = "term" | "source" | "weight" | "createdAt";
 
 const vocabularyStore = useVocabularyStore();
 const settingsStore = useSettingsStore();
@@ -38,6 +51,69 @@ const showDuplicateHint = computed(
     newTermInput.value.trim() !== "" &&
     vocabularyStore.isDuplicateTerm(newTermInput.value),
 );
+
+// 手動優先：使用者自訂詞排在機器建議之前
+const SOURCE_RANK: Record<VocabularySource, number> = { manual: 0, ai: 1 };
+
+// SQLite created_at 為 UTC 且不帶時區後綴，附加 "Z" 確保以 UTC 解析
+const timestampOf = (entry: VocabularyEntry) =>
+  new Date(entry.createdAt + "Z").getTime();
+
+const sortColumns: SortColumn<VocabularyEntry, SortKey>[] = [
+  {
+    key: "term",
+    compare: (a, b) => a.term.localeCompare(b.term, locale.value),
+    defaultDirection: "asc",
+  },
+  {
+    key: "source",
+    compare: (a, b) => SOURCE_RANK[a.source] - SOURCE_RANK[b.source],
+    defaultDirection: "asc",
+  },
+  {
+    key: "weight",
+    compare: (a, b) => a.weight - b.weight,
+    defaultDirection: "desc",
+  },
+  {
+    key: "createdAt",
+    compare: (a, b) => timestampOf(a) - timestampOf(b),
+    defaultDirection: "desc",
+  },
+];
+
+// 固定次鍵：weight desc → createdAt desc → id asc
+// id 為全序鍵，保證排序決定性（避免同秒時間戳造成順序不定）
+const sortTieBreak = (a: VocabularyEntry, b: VocabularyEntry) =>
+  b.weight - a.weight ||
+  timestampOf(b) - timestampOf(a) ||
+  a.id.localeCompare(b.id);
+
+const { sortState, toggleSort, sortedList } = useTableSort<
+  VocabularyEntry,
+  SortKey
+>(
+  () => vocabularyStore.termList,
+  sortColumns,
+  { key: "weight", direction: "desc" },
+  sortTieBreak,
+);
+
+function sortIconFor(key: SortKey) {
+  if (sortState.value.key !== key) return ArrowUpDown;
+  return sortState.value.direction === "asc" ? ArrowUp : ArrowDown;
+}
+
+function ariaSortFor(key: SortKey): "ascending" | "descending" | "none" {
+  if (sortState.value.key !== key) return "none";
+  return sortState.value.direction === "asc" ? "ascending" : "descending";
+}
+
+function sourceLabel(source: VocabularySource): string {
+  return source === "ai"
+    ? t("dictionary.sourceAi")
+    : t("dictionary.sourceManual");
+}
 
 function getWeightVariant(weight: number): "default" | "secondary" | "outline" {
   if (weight >= 30) return "default";
@@ -140,6 +216,13 @@ onBeforeUnmount(() => {
         <div class="space-y-1 text-sm text-muted-foreground">
           <p>{{ $t("dictionary.description") }}</p>
           <p>{{ $t("dictionary.weightDescription", { limit: 50 }) }}</p>
+          <p v-if="vocabularyStore.aiSuggestedTermList.length === 0">
+            {{
+              settingsStore.isSmartDictionaryEnabled
+                ? $t("dictionary.noAiSuggestionsEnabled")
+                : $t("dictionary.noAiSuggestions")
+            }}
+          </p>
           <p>{{ $t("dictionary.importHint") }}</p>
         </div>
       </div>
@@ -170,44 +253,79 @@ onBeforeUnmount(() => {
       </Card>
     </div>
 
-    <!-- Dictionary sections -->
-    <div v-else class="mt-6 space-y-6">
-      <!-- AI Recommended Section -->
+    <!-- Dictionary table -->
+    <div v-else class="mt-6">
       <Card>
-        <CardHeader class="pb-3">
-          <div class="flex items-center gap-2">
-            <CardTitle class="text-base">
-              <Bot class="inline h-4 w-4 mr-1" />
-              {{ $t("dictionary.aiRecommended") }}
-            </CardTitle>
-            <Badge v-if="vocabularyStore.aiSuggestedTermList.length > 0" variant="secondary">
-              {{ $t("dictionary.aiTermCount", { count: vocabularyStore.aiSuggestedTermList.length }) }}
-            </Badge>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div
-            v-if="vocabularyStore.aiSuggestedTermList.length === 0"
-            class="py-4 text-center text-sm text-muted-foreground"
-          >
-            {{
-              settingsStore.isSmartDictionaryEnabled
-                ? $t("dictionary.noAiSuggestionsEnabled")
-                : $t("dictionary.noAiSuggestions")
-            }}
-          </div>
-          <Table v-else>
+        <CardContent class="pt-6">
+          <Table>
             <TableHeader>
               <TableRow>
-                <TableHead class="w-full">{{ $t("dictionary.termHeader") }}</TableHead>
-                <TableHead class="w-24 text-center">{{ $t("dictionary.weight") }}</TableHead>
-                <TableHead class="w-40">{{ $t("dictionary.dateHeader") }}</TableHead>
+                <TableHead class="w-full" :aria-sort="ariaSortFor('term')">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    class="-ml-2 h-8"
+                    data-testid="sort-term"
+                    @click="toggleSort('term')"
+                  >
+                    {{ $t("dictionary.termHeader") }}
+                    <component :is="sortIconFor('term')" class="ml-1 h-3.5 w-3.5" />
+                  </Button>
+                </TableHead>
+                <TableHead class="w-28" :aria-sort="ariaSortFor('source')">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    class="-ml-2 h-8"
+                    data-testid="sort-source"
+                    @click="toggleSort('source')"
+                  >
+                    {{ $t("dictionary.sourceHeader") }}
+                    <component :is="sortIconFor('source')" class="ml-1 h-3.5 w-3.5" />
+                  </Button>
+                </TableHead>
+                <TableHead class="w-24 text-center" :aria-sort="ariaSortFor('weight')">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    class="h-8"
+                    data-testid="sort-weight"
+                    @click="toggleSort('weight')"
+                  >
+                    {{ $t("dictionary.weight") }}
+                    <component :is="sortIconFor('weight')" class="ml-1 h-3.5 w-3.5" />
+                  </Button>
+                </TableHead>
+                <TableHead class="w-40" :aria-sort="ariaSortFor('createdAt')">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    class="-ml-2 h-8"
+                    data-testid="sort-date"
+                    @click="toggleSort('createdAt')"
+                  >
+                    {{ $t("dictionary.dateHeader") }}
+                    <component :is="sortIconFor('createdAt')" class="ml-1 h-3.5 w-3.5" />
+                  </Button>
+                </TableHead>
                 <TableHead class="w-20 text-right">{{ $t("dictionary.actionHeader") }}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              <TableRow v-for="entry in vocabularyStore.aiSuggestedTermList" :key="entry.id">
-                <TableCell class="font-medium text-foreground">{{ entry.term }}</TableCell>
+              <TableRow
+                v-for="entry in sortedList"
+                :key="entry.id"
+                :data-testid="`vocab-row-${entry.id}`"
+              >
+                <TableCell class="font-medium text-foreground" data-testid="vocab-term">
+                  {{ entry.term }}
+                </TableCell>
+                <TableCell>
+                  <Badge variant="outline" class="gap-1 font-normal" data-testid="vocab-source">
+                    <component :is="entry.source === 'ai' ? Bot : Hand" class="h-3 w-3" />
+                    {{ sourceLabel(entry.source) }}
+                  </Badge>
+                </TableCell>
                 <TableCell class="text-center">
                   <Badge :variant="getWeightVariant(entry.weight)">{{ entry.weight }}</Badge>
                 </TableCell>
@@ -226,51 +344,6 @@ onBeforeUnmount(() => {
               </TableRow>
             </TableBody>
           </Table>
-        </CardContent>
-      </Card>
-
-      <!-- Manual Section -->
-      <Card>
-        <CardHeader class="pb-3">
-          <CardTitle class="text-base">
-            <Hand class="inline h-4 w-4 mr-1" />
-            {{ $t("dictionary.manualAdded") }}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Table v-if="vocabularyStore.manualTermList.length > 0">
-            <TableHeader>
-              <TableRow>
-                <TableHead class="w-full">{{ $t("dictionary.termHeader") }}</TableHead>
-                <TableHead class="w-24 text-center">{{ $t("dictionary.weight") }}</TableHead>
-                <TableHead class="w-40">{{ $t("dictionary.dateHeader") }}</TableHead>
-                <TableHead class="w-20 text-right">{{ $t("dictionary.actionHeader") }}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              <TableRow v-for="entry in vocabularyStore.manualTermList" :key="entry.id">
-                <TableCell class="font-medium text-foreground">{{ entry.term }}</TableCell>
-                <TableCell class="text-center">
-                  <Badge :variant="getWeightVariant(entry.weight)">{{ entry.weight }}</Badge>
-                </TableCell>
-                <TableCell class="text-muted-foreground">{{ formatDate(entry.createdAt) }}</TableCell>
-                <TableCell class="text-right">
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    class="text-destructive"
-                    :disabled="removingTermIdSet.has(entry.id)"
-                    @click="handleRemoveTerm(entry.id, entry.term)"
-                  >
-                    <Trash2 class="h-4 w-4" />
-                  </Button>
-                </TableCell>
-              </TableRow>
-            </TableBody>
-          </Table>
-          <div v-else class="py-4 text-center text-sm text-muted-foreground">
-            {{ $t("dictionary.emptyState") }}
-          </div>
         </CardContent>
       </Card>
     </div>
