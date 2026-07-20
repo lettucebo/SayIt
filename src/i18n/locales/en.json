@@ -500,8 +500,7 @@
     },
     "upgradeNotice": {
       "title": "SayIt Update Summary",
-      "item1": "The custom dictionary now uses a single sortable table — AI-suggested and manually-added terms are no longer split into two sections. Sort by term, source, weight, or date added by clicking the column headers (ascending/descending toggle), and a new Source column shows at a glance whether each term was added by you or suggested by AI.",
-      "item2": "Double-click the Windows tray icon to open the Dashboard — no need to hunt through the right-click menu; just double-click the icon to open the Dashboard window, and a minimized window is restored to the foreground too.",
+      "item1": "Days with no usage now show a 0 in the daily usage trend chart — hovering over a day with no usage previously showed the usage-count label but a blank value beside it, making it look like data was missing. Zero-usage days now correctly display 0.",
       "dismiss": "Got it"
     }
   },
