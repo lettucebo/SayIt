@@ -724,30 +724,20 @@ export const useHistoryStore = defineStore("history", () => {
       return { ok: false, errorKey: "history.retranscribeFailed" };
     }
 
-    // #39/#55：同主路徑，重新辨識後套 beforeAI 取代 → 簡→繁（寫回 raw_text 前）
-    const replacementStore = useReplacementStore();
-    await replacementStore.ensureLoaded();
-    result.rawText = await applyTranscriptTextTransforms(
-      result.rawText,
-      resolveEffectiveTranscriptionLocale(
-        settingsStore.selectedTranscriptionLocale,
-        settingsStore.selectedLocale,
-      ),
-      replacementStore.rules,
-    );
+    const whisperRawText = result.rawText;
 
     // HTTP 成功即計費（不論轉錄內容）→ 記錄 whisper 用量
     recordWhisperUsage(record.id, record.recordingDurationMs, model);
 
     // 空轉錄或幻覺 → 保留 failed、不覆寫原文
-    const isEmpty = !result.rawText || !result.rawText.trim();
+    const isEmpty = !whisperRawText || !whisperRawText.trim();
     // 時長未知/非正時跳過語速異常層（無法判斷語速），仍保留能量/NSP 偵測
     const recordingDurationForDetection =
       record.recordingDurationMs > 0
         ? record.recordingDurationMs
         : Number.MAX_SAFE_INTEGER;
     const hallucination = detectHallucination({
-      rawText: result.rawText,
+      rawText: whisperRawText,
       recordingDurationMs: recordingDurationForDetection,
       peakEnergyLevel: result.peakEnergyLevel,
       rmsEnergyLevel: result.rmsEnergyLevel,
@@ -756,6 +746,18 @@ export const useHistoryStore = defineStore("history", () => {
     if (isEmpty || hallucination.isHallucination) {
       return { ok: false, errorKey: "history.retranscribeFailed" };
     }
+
+    // #39/#55：同主路徑，重新辨識通過偵測後才套 beforeAI 取代 → 簡→繁
+    const replacementStore = useReplacementStore();
+    await replacementStore.ensureLoaded();
+    result.rawText = await applyTranscriptTextTransforms(
+      whisperRawText,
+      resolveEffectiveTranscriptionLocale(
+        settingsStore.selectedTranscriptionLocale,
+        settingsStore.selectedLocale,
+      ),
+      replacementStore.rules,
+    );
 
     const charCount = result.rawText.length;
     const transcriptionDurationMs = Math.round(result.transcriptionDurationMs);

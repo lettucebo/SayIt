@@ -594,7 +594,7 @@ function isReplacementTiming(value: unknown): value is ReplacementTiming {
 
 function parseReplacementPatterns(input: string): string[] {
   return input
-    .split(",")
+    .split(/\r?\n/u)
     .map((pattern) => pattern.trim())
     .filter((pattern) => pattern.length > 0);
 }
@@ -620,7 +620,7 @@ function resetReplacementForm() {
 function startEditingReplacementRule(rule: ReplacementRule) {
   editingReplacementRuleId.value = rule.id;
   replacementForm.value = {
-    patternsText: rule.patterns.join(", "),
+    patternsText: rule.patterns.join("\n"),
     replacement: rule.replacement,
     isRegex: rule.isRegex,
     timing: rule.timing,
@@ -686,7 +686,14 @@ async function handleToggleReplacementRule(rule: ReplacementRule, enabled: boole
 
 async function handleDeleteReplacementRule(rule: ReplacementRule) {
   try {
-    await replacementStore.removeRule(rule.id);
+    const removed = await replacementStore.removeRule(rule.id);
+    if (!removed) {
+      replacementFeedback.show(
+        "error",
+        replacementErrorMessage("persistence-failed"),
+      );
+      return;
+    }
     if (editingReplacementRuleId.value === rule.id) resetReplacementForm();
     replacementFeedback.show("success", t("settings.replacements.deleted"));
   } catch (err) {

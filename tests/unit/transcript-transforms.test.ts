@@ -166,6 +166,42 @@ describe("applyWordReplacements", () => {
     );
   });
 
+  it("[P1] both 規則可連續跑 beforeAI 與 afterAI 階段", () => {
+    const bothRule = createReplacementRule({
+      patterns: ["copilot"],
+      replacement: "Copilot",
+      timing: "both",
+    });
+    const afterRule = createReplacementRule({
+      patterns: ["Copilot"],
+      replacement: "GitHub Copilot™",
+      timing: "afterAI",
+    });
+
+    const before = applyWordReplacements(
+      "open copilot",
+      [bothRule, afterRule],
+      "beforeAI",
+    );
+    const after = applyWordReplacements(
+      before,
+      [bothRule, afterRule],
+      "afterAI",
+    );
+
+    expect(after).toBe("open GitHub Copilot™");
+  });
+
+  it("[P1] 正則 pattern 可包含逗號量詞 {1,3}", () => {
+    const rule = createReplacementRule({
+      patterns: ["^\\d{1,3}$"],
+      replacement: "N",
+      isRegex: true,
+    });
+
+    expect(applyWordReplacements("123", [rule], "beforeAI")).toBe("N");
+  });
+
   it("[P2] enabled=false 不套用", () => {
     const rule = createReplacementRule({
       patterns: ["latency"],

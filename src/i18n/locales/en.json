@@ -137,8 +137,8 @@
       "addTitle": "Add rule",
       "editTitle": "Edit rule",
       "patternsLabel": "Source patterns",
-      "patternsPlaceholder": "e.g. copilot, copy lot, code pilot",
-      "patternsHint": "Separate multiple variants with commas. Literal mode is case-insensitive and word-boundary aware.",
+      "patternsPlaceholder": "e.g.\ncopilot\ncopy lot\ncode pilot",
+      "patternsHint": "Enter one source pattern per line. Literal mode is case-insensitive and word-boundary aware.",
       "replacementLabel": "Replacement",
       "replacementPlaceholder": "e.g. Copilot",
       "timingLabel": "Apply timing",
@@ -174,6 +174,9 @@
         "replacement-too-long": "The replacement is too long",
         "invalid-regex": "Invalid regular expression",
         "too-many-rules": "Rule limit reached",
+        "too-many-patterns": "Too many source patterns in one rule",
+        "patterns-total-too-long": "Source patterns are too long in total",
+        "persistence-failed": "Failed to save replacement rule. Please try again.",
         "not-found": "Rule not found",
         "unknown": "Unable to save replacement rule"
       }

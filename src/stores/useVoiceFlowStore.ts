@@ -852,7 +852,7 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
     record: TranscriptionRecord;
     chatUsage: ChatUsageData | null;
     skipRecordSaving?: boolean;
-  }) {
+  }): Promise<string | null> {
     try {
       const settingsStore = useSettingsStore();
       // #55 afterAI：completePasteFlow 是所有貼上路徑（主流程 / AI 跳過 /
@@ -870,6 +870,7 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
           params.record.processedText = pasteText;
         } else {
           params.record.rawText = pasteText;
+          params.record.charCount = pasteText.length;
         }
       }
       await invoke("paste_text", {
@@ -893,6 +894,7 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
 
       // 修正偵測（fire-and-forget；API key / 設定檢查移至 flow 內部）
       startCorrectionDetectionFlow(pasteText, params.record.id);
+      return pasteText;
     } catch (pasteError) {
       isRecording.value = false;
       failRecordingFlow(
@@ -900,6 +902,7 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
         `useVoiceFlowStore: paste_text failed: ${extractErrorMessage(pasteError)}`,
         pasteError,
       );
+      return null;
     }
   }
 
@@ -1363,25 +1366,14 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
       // 不會額外拖慢流程（perf 稽核 F4）。之後所有分支都需要 audioFilePath。
       audioFilePath = await saveRecordingFilePromise;
 
-      // #39/#55：落地前一次到位——beforeAI 取代 → 簡→繁（zh-TW）
-      const replacementStore = useReplacementStore();
-      await replacementStore.ensureLoaded();
-      result.rawText = await applyTranscriptTextTransforms(
-        result.rawText,
-        resolveEffectiveTranscriptionLocale(
-          settingsStore.selectedTranscriptionLocale,
-          settingsStore.selectedLocale,
-        ),
-        replacementStore.rules,
-      );
+      const whisperRawText = result.rawText;
+      writeInfoLog(`轉錄原文: "${whisperRawText}"`);
 
-      writeInfoLog(`轉錄原文: "${result.rawText}"`);
-
-      if (isEmptyTranscription(result.rawText)) {
+      if (isEmptyTranscription(whisperRawText)) {
         // 空轉錄 → 寫入 failed 記錄，保留錄音檔
         const failedRecord = buildTranscriptionRecord({
           id: transcriptionId,
-          rawText: result.rawText || "",
+          rawText: whisperRawText || "",
           processedText: null,
           recordingDurationMs,
           transcriptionDurationMs: result.transcriptionDurationMs,
@@ -1410,11 +1402,11 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
 
       // ── 幻覺偵測（純物理信號：語速異常 + 無人聲）──
       writeInfoLog(
-        `useVoiceFlowStore: hallucination detection input: peakEnergy=${peakEnergyLevel.toFixed(4)}, rmsEnergy=${rmsEnergyLevel.toFixed(4)}, nsp=${result.noSpeechProbability.toFixed(3)}, rawText="${result.rawText}", durationMs=${Math.round(recordingDurationMs)}`,
+        `useVoiceFlowStore: hallucination detection input: peakEnergy=${peakEnergyLevel.toFixed(4)}, rmsEnergy=${rmsEnergyLevel.toFixed(4)}, nsp=${result.noSpeechProbability.toFixed(3)}, rawText="${whisperRawText}", durationMs=${Math.round(recordingDurationMs)}`,
       );
 
       const hallucinationDetectionResult = detectHallucination({
-        rawText: result.rawText,
+        rawText: whisperRawText,
         recordingDurationMs,
         peakEnergyLevel,
         rmsEnergyLevel,
@@ -1429,7 +1421,7 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
         // 寫入 failed 記錄
         const failedRecord = buildTranscriptionRecord({
           id: transcriptionId,
-          rawText: result.rawText,
+          rawText: whisperRawText,
           processedText: null,
           recordingDurationMs,
           transcriptionDurationMs: result.transcriptionDurationMs,
@@ -1455,6 +1447,18 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
         );
         return;
       }
+
+      // #39/#55：通過空轉錄/幻覺偵測後才套 beforeAI 取代 → 簡→繁（zh-TW）
+      const replacementStore = useReplacementStore();
+      await replacementStore.ensureLoaded();
+      result.rawText = await applyTranscriptTextTransforms(
+        whisperRawText,
+        resolveEffectiveTranscriptionLocale(
+          settingsStore.selectedTranscriptionLocale,
+          settingsStore.selectedLocale,
+        ),
+        replacementStore.rules,
+      );
 
       // 剪貼簿後備可能還在等按鍵放開（轉錄比後備快時）：判定模式前先等它。
       // 加 timeout 防 read_selected_text 永不 settle（Rust 端卡死）拖住整條流程；
@@ -1822,21 +1826,10 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
       );
       if (isAborted.value) return;
 
-      // #39/#55：同主路徑，重送轉錄後也套 beforeAI 取代 → 簡→繁
-      const replacementStore = useReplacementStore();
-      await replacementStore.ensureLoaded();
-      result.rawText = await applyTranscriptTextTransforms(
-        result.rawText,
-        resolveEffectiveTranscriptionLocale(
-          settingsStore.selectedTranscriptionLocale,
-          settingsStore.selectedLocale,
-        ),
-        replacementStore.rules,
-      );
+      const retryWhisperRawText = result.rawText;
+      writeInfoLog(`重送轉錄原文: "${retryWhisperRawText}"`);
 
-      writeInfoLog(`重送轉錄原文: "${result.rawText}"`);
-
-      if (isEmptyTranscription(result.rawText)) {
+      if (isEmptyTranscription(retryWhisperRawText)) {
         // 重送也失敗 → 不再提供重送
         transitionTo("error", t("voiceFlow.retryFailed"));
         playSoundIfEnabled("play_error_sound");
@@ -1847,7 +1840,7 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
 
       // ── 重送也需幻覺偵測（使用原始錄音的 energy levels）──
       const retryHallucinationResult = detectHallucination({
-        rawText: result.rawText,
+        rawText: retryWhisperRawText,
         recordingDurationMs,
         peakEnergyLevel: lastFailedPeakEnergyLevel.value,
         rmsEnergyLevel: lastFailedRmsEnergyLevel.value,
@@ -1864,6 +1857,18 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
         isRetryAttempt.value = false;
         return;
       }
+
+      // #39/#55：同主路徑，重送通過偵測後才套 beforeAI 取代 → 簡→繁
+      const replacementStore = useReplacementStore();
+      await replacementStore.ensureLoaded();
+      result.rawText = await applyTranscriptTextTransforms(
+        retryWhisperRawText,
+        resolveEffectiveTranscriptionLocale(
+          settingsStore.selectedTranscriptionLocale,
+          settingsStore.selectedLocale,
+        ),
+        replacementStore.rules,
+      );
 
       // 重送成功 → 進入 AI 整理 → 貼上流程
       if (
@@ -1920,13 +1925,14 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
 
           writeInfoLog(`重送 AI 整理: "${enhanceResult.text}"`);
 
-          await completePasteFlow({
+          const pasteText = await completePasteFlow({
             text: enhanceResult.text,
             successMessage: t("voiceFlow.pasteSuccess"),
             record,
             chatUsage: enhanceResult.usage,
             skipRecordSaving: true,
           });
+          if (!pasteText) return;
 
           // 更新 DB status（UPDATE 而非 INSERT）→ 完成後記錄 API 用量（FK 依賴）
           const historyStore = useHistoryStore();
@@ -1934,7 +1940,7 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
             .updateTranscriptionOnRetrySuccess({
               id: transcriptionId,
               rawText: result.rawText,
-              processedText: enhanceResult.text,
+              processedText: pasteText,
               transcriptionDurationMs: Math.round(
                 result.transcriptionDurationMs,
               ),
@@ -1974,26 +1980,27 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
             status: "success",
           });
 
-          await completePasteFlow({
+          const pasteText = await completePasteFlow({
             text: result.rawText,
             successMessage: t("voiceFlow.pasteSuccessUnenhanced"),
             record: fallbackRecord,
             chatUsage: null,
             skipRecordSaving: true,
           });
+          if (!pasteText) return;
 
           const historyStore = useHistoryStore();
           void historyStore
             .updateTranscriptionOnRetrySuccess({
               id: transcriptionId,
-              rawText: result.rawText,
+              rawText: pasteText,
               processedText: null,
               transcriptionDurationMs: Math.round(
                 result.transcriptionDurationMs,
               ),
               enhancementDurationMs: Math.round(fallbackEnhancementDurationMs),
               wasEnhanced: false,
-              charCount: result.rawText.length,
+              charCount: pasteText.length,
             })
             .then(() => {
               saveApiUsageRecordList(fallbackRecord, null);
@@ -2018,24 +2025,25 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
           status: "success",
         });
 
-        await completePasteFlow({
+        const pasteText = await completePasteFlow({
           text: result.rawText,
           successMessage: t("voiceFlow.pasteSuccess"),
           record,
           chatUsage: null,
           skipRecordSaving: true,
         });
+        if (!pasteText) return;
 
         const historyStore = useHistoryStore();
         void historyStore
           .updateTranscriptionOnRetrySuccess({
             id: transcriptionId,
-            rawText: result.rawText,
+            rawText: pasteText,
             processedText: null,
             transcriptionDurationMs: Math.round(result.transcriptionDurationMs),
             enhancementDurationMs: null,
             wasEnhanced: false,
-            charCount: result.rawText.length,
+            charCount: pasteText.length,
           })
           .then(() => {
             saveApiUsageRecordList(record, null);

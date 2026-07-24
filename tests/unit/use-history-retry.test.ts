@@ -7,6 +7,17 @@ const h = vi.hoisted(() => {
   const mockInvoke = vi.fn();
   const mockEnhanceGuard = vi.fn();
   const mockGetTopTerms = vi.fn();
+  const mockReplacementState = {
+    rules: [] as Array<{
+      id: string;
+      patterns: string[];
+      replacement: string;
+      isRegex: boolean;
+      timing: "beforeAI" | "afterAI" | "both";
+      enabled: boolean;
+    }>,
+    ensureLoaded: vi.fn().mockResolvedValue(undefined),
+  };
   const settingsStub = {
     whisperProviderId: "groq",
     getApiKey: () => "whisper-key",
@@ -24,6 +35,7 @@ const h = vi.hoisted(() => {
     mockInvoke,
     mockEnhanceGuard,
     mockGetTopTerms,
+    mockReplacementState,
     settingsStub,
   };
 });
@@ -45,8 +57,8 @@ vi.mock("../../src/stores/useSettingsStore", () => ({
 }));
 vi.mock("../../src/stores/useReplacementStore", () => ({
   useReplacementStore: () => ({
-    rules: [],
-    ensureLoaded: vi.fn().mockResolvedValue(undefined),
+    rules: h.mockReplacementState.rules,
+    ensureLoaded: h.mockReplacementState.ensureLoaded,
   }),
 }));
 vi.mock("../../src/stores/useVocabularyStore", () => ({
@@ -96,6 +108,8 @@ describe("useHistoryStore retry", () => {
     h.mockInvoke.mockReset();
     h.mockEnhanceGuard.mockReset();
     h.mockGetTopTerms.mockReset().mockResolvedValue([]);
+    h.mockReplacementState.rules = [];
+    h.mockReplacementState.ensureLoaded.mockClear().mockResolvedValue(undefined);
     h.settingsStub.refreshApiKey.mockReset().mockResolvedValue(undefined);
     h.settingsStub.refreshLlmApiKey.mockReset().mockResolvedValue(undefined);
     h.settingsStub.getWhisperRequestConfig
@@ -145,6 +159,33 @@ describe("useHistoryStore retry", () => {
       const record = createRecord({ rawText: "原本失敗" });
       store.transcriptionList.push(record);
       const res = await store.retranscribeRecord(record);
+      expect(res.ok).toBe(false);
+      expect(res.errorKey).toBe("history.retranscribeFailed");
+      expect(store.transcriptionList[0].status).toBe("failed");
+      expect(store.transcriptionList[0].rawText).toBe("原本失敗");
+    });
+
+    it("[P1] 空轉錄偵測使用 Whisper 原始結果，不被 beforeAI 規則繞過", async () => {
+      h.mockReplacementState.rules = [
+        {
+          id: "before-empty-history",
+          patterns: ["^\\s*$"],
+          replacement: "被規則補出的文字",
+          isRegex: true,
+          timing: "beforeAI",
+          enabled: true,
+        },
+      ];
+      h.mockInvoke.mockResolvedValue({
+        ...GOOD_TRANSCRIBE_RESULT,
+        rawText: "  ",
+      });
+      const store = useHistoryStore();
+      const record = createRecord({ rawText: "原本失敗" });
+      store.transcriptionList.push(record);
+
+      const res = await store.retranscribeRecord(record);
+
       expect(res.ok).toBe(false);
       expect(res.errorKey).toBe("history.retranscribeFailed");
       expect(store.transcriptionList[0].status).toBe("failed");

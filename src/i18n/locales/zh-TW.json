@@ -137,8 +137,8 @@
       "addTitle": "新增規則",
       "editTitle": "編輯規則",
       "patternsLabel": "來源寫法",
-      "patternsPlaceholder": "例如：copilot, copy lot, code pilot",
-      "patternsHint": "多個來源寫法請用逗號分隔；字面模式會忽略大小寫並套用詞界。",
+      "patternsPlaceholder": "例如：\ncopilot\ncopy lot\ncode pilot",
+      "patternsHint": "每行一個來源寫法；字面模式會忽略大小寫並套用詞界。",
       "replacementLabel": "正確寫法",
       "replacementPlaceholder": "例如：Copilot",
       "timingLabel": "套用時機",
@@ -174,6 +174,9 @@
         "replacement-too-long": "正確寫法太長",
         "invalid-regex": "正則語法不正確",
         "too-many-rules": "規則已達上限",
+        "too-many-patterns": "單一規則的來源寫法太多",
+        "patterns-total-too-long": "來源寫法總長度太長",
+        "persistence-failed": "取代規則儲存失敗，請稍後再試",
         "not-found": "找不到要更新的規則",
         "unknown": "無法儲存取代規則"
       }

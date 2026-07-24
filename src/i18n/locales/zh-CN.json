@@ -137,8 +137,8 @@
       "addTitle": "新增规则",
       "editTitle": "编辑规则",
       "patternsLabel": "来源写法",
-      "patternsPlaceholder": "例如：copilot, copy lot, code pilot",
-      "patternsHint": "多个来源写法请用逗号分隔；字面模式会忽略大小写并套用词界。",
+      "patternsPlaceholder": "例如：\ncopilot\ncopy lot\ncode pilot",
+      "patternsHint": "每行一个来源写法；字面模式会忽略大小写并套用词界。",
       "replacementLabel": "正确写法",
       "replacementPlaceholder": "例如：Copilot",
       "timingLabel": "套用时机",
@@ -174,6 +174,9 @@
         "replacement-too-long": "正确写法太长",
         "invalid-regex": "正则语法不正确",
         "too-many-rules": "规则已达上限",
+        "too-many-patterns": "单一规则的来源写法太多",
+        "patterns-total-too-long": "来源写法总长度太长",
+        "persistence-failed": "取代规则保存失败，请稍后再试",
         "not-found": "找不到要更新的规则",
         "unknown": "无法保存替换规则"
       }

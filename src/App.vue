@@ -6,11 +6,13 @@ import { getCurrentWindow, Window } from "@tauri-apps/api/window";
 import { useVoiceFlowStore } from "./stores/useVoiceFlowStore";
 import { useSettingsStore } from "./stores/useSettingsStore";
 import { useVocabularyStore } from "./stores/useVocabularyStore";
+import { useReplacementStore } from "./stores/useReplacementStore";
 import { connectToDatabase } from "./lib/database";
 import {
   listenToEvent,
   SETTINGS_UPDATED,
   VOCABULARY_CHANGED,
+  REPLACEMENTS_CHANGED,
   waitForDatabaseReady,
 } from "./composables/useTauriEvents";
 import { useI18n } from "vue-i18n";
@@ -19,8 +21,10 @@ const { t } = useI18n();
 const voiceFlowStore = useVoiceFlowStore();
 const settingsStore = useSettingsStore();
 const vocabularyStore = useVocabularyStore();
+const replacementStore = useReplacementStore();
 let unlistenSettingsUpdated: UnlistenFn | null = null;
 let unlistenVocabularyChanged: UnlistenFn | null = null;
+let unlistenReplacementsChanged: UnlistenFn | null = null;
 
 const promptModeLabel = computed(() => {
   const mode = settingsStore.promptMode;
@@ -77,6 +81,13 @@ onMounted(async () => {
     },
   );
 
+  unlistenReplacementsChanged = await listenToEvent(
+    REPLACEMENTS_CHANGED,
+    () => {
+      void replacementStore.reload();
+    },
+  );
+
   const appWindow = getCurrentWindow();
   await appWindow.show();
   await voiceFlowStore.initialize();
@@ -102,6 +113,7 @@ function handleRetry() {
 onUnmounted(() => {
   unlistenSettingsUpdated?.();
   unlistenVocabularyChanged?.();
+  unlistenReplacementsChanged?.();
   voiceFlowStore.cleanup();
 });
 </script>

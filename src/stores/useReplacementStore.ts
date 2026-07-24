@@ -1,6 +1,10 @@
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { load, type Store } from "@tauri-apps/plugin-store";
+import {
+  emitEvent,
+  REPLACEMENTS_CHANGED,
+} from "../composables/useTauriEvents";
 import { captureError } from "../lib/sentry";
 import type { ReplacementRule, ReplacementTiming } from "../types/replacement";
 
@@ -13,6 +17,8 @@ const RULES_KEY = "rules";
  */
 export const MAX_REPLACEMENT_RULES = 200;
 export const MAX_PATTERN_LENGTH = 200;
+export const MAX_PATTERNS_PER_RULE = 50;
+export const MAX_TOTAL_PATTERN_CHARS_PER_RULE = 2000;
 export const MAX_REPLACEMENT_LENGTH = 500;
 
 const VALID_TIMINGS: readonly ReplacementTiming[] = [
@@ -26,11 +32,47 @@ export interface RuleValidationResult {
   error?: string;
 }
 
-/** 執行期防呆：過濾掉損毀 / 型別不符的持久化資料。 */
-export function isValidRule(value: unknown): value is ReplacementRule {
-  if (typeof value !== "object" || value === null) return false;
+function cleanPatterns(patterns: readonly string[]): string[] {
+  return patterns.map((p) => p.trim()).filter((p) => p.length > 0);
+}
+
+/** 純驗證：長度上限 + 正則可編譯性。回傳錯誤碼供 UI i18n。 */
+function validateReplacementRuleInput(
+  patterns: string[],
+  replacement: string,
+  isRegex: boolean,
+): RuleValidationResult {
+  const cleaned = cleanPatterns(patterns);
+  if (cleaned.length === 0) return { valid: false, error: "empty-patterns" };
+  if (cleaned.length > MAX_PATTERNS_PER_RULE) {
+    return { valid: false, error: "too-many-patterns" };
+  }
+  if (cleaned.some((p) => p.length > MAX_PATTERN_LENGTH)) {
+    return { valid: false, error: "pattern-too-long" };
+  }
+  const totalPatternChars = cleaned.reduce((sum, p) => sum + p.length, 0);
+  if (totalPatternChars > MAX_TOTAL_PATTERN_CHARS_PER_RULE) {
+    return { valid: false, error: "patterns-total-too-long" };
+  }
+  if (replacement.length > MAX_REPLACEMENT_LENGTH) {
+    return { valid: false, error: "replacement-too-long" };
+  }
+  if (isRegex) {
+    for (const p of cleaned) {
+      try {
+        new RegExp(p, "g");
+      } catch {
+        return { valid: false, error: "invalid-regex" };
+      }
+    }
+  }
+  return { valid: true };
+}
+
+function sanitizeRule(value: unknown): ReplacementRule | null {
+  if (typeof value !== "object" || value === null) return null;
   const r = value as Record<string, unknown>;
-  return (
+  if (
     typeof r.id === "string" &&
     Array.isArray(r.patterns) &&
     r.patterns.every((p) => typeof p === "string") &&
@@ -39,7 +81,37 @@ export function isValidRule(value: unknown): value is ReplacementRule {
     typeof r.timing === "string" &&
     VALID_TIMINGS.includes(r.timing as ReplacementTiming) &&
     typeof r.enabled === "boolean"
-  );
+  ) {
+    const patterns = cleanPatterns(r.patterns);
+    const validation = validateReplacementRuleInput(
+      patterns,
+      r.replacement,
+      r.isRegex,
+    );
+    if (!validation.valid) return null;
+    return {
+      id: r.id,
+      patterns,
+      replacement: r.replacement,
+      isRegex: r.isRegex,
+      timing: r.timing as ReplacementTiming,
+      enabled: r.enabled,
+    };
+  }
+  return null;
+}
+
+/** 執行期防呆：過濾掉損毀 / 型別不符的持久化資料。 */
+export function isValidRule(value: unknown): value is ReplacementRule {
+  return sanitizeRule(value) !== null;
+}
+
+function sanitizeRuleList(value: unknown): ReplacementRule[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    const rule = sanitizeRule(item);
+    return rule ? [rule] : [];
+  });
 }
 
 export const useReplacementStore = defineStore("replacement", () => {
@@ -54,50 +126,53 @@ export const useReplacementStore = defineStore("replacement", () => {
     return storeInstance;
   }
 
-  async function ensureLoaded(): Promise<void> {
-    if (isLoaded.value) return;
+  async function reload(): Promise<void> {
     try {
       const store = await getStore();
-      const saved = await store.get<unknown[]>(RULES_KEY);
-      rules.value = Array.isArray(saved) ? saved.filter(isValidRule) : [];
+      const saved = await store.get<unknown>(RULES_KEY);
+      rules.value = sanitizeRuleList(saved);
+      isLoaded.value = true;
     } catch (error) {
       // fail-open：讀取失敗不阻斷主流程，視為無規則
       console.warn("[replacement-store] load failed:", error);
+      captureError(error, { source: "replacement", step: "load" });
       rules.value = [];
+      isLoaded.value = false;
     }
-    isLoaded.value = true;
   }
 
-  /** 純驗證：長度上限 + 正則可編譯性。回傳錯誤碼供 UI i18n。 */
+  async function ensureLoaded(): Promise<void> {
+    if (isLoaded.value) return;
+    await reload();
+  }
+
   function validateRuleInput(
     patterns: string[],
     replacement: string,
     isRegex: boolean,
   ): RuleValidationResult {
-    const cleaned = patterns.map((p) => p.trim()).filter((p) => p.length > 0);
-    if (cleaned.length === 0) return { valid: false, error: "empty-patterns" };
-    if (cleaned.some((p) => p.length > MAX_PATTERN_LENGTH)) {
-      return { valid: false, error: "pattern-too-long" };
-    }
-    if (replacement.length > MAX_REPLACEMENT_LENGTH) {
-      return { valid: false, error: "replacement-too-long" };
-    }
-    if (isRegex) {
-      for (const p of cleaned) {
-        try {
-          new RegExp(p, "g");
-        } catch {
-          return { valid: false, error: "invalid-regex" };
-        }
-      }
-    }
-    return { valid: true };
+    return validateReplacementRuleInput(patterns, replacement, isRegex);
   }
 
-  async function persist(): Promise<void> {
+  async function persist(nextRules: readonly ReplacementRule[]): Promise<void> {
     const store = await getStore();
-    await store.set(RULES_KEY, rules.value);
+    await store.set(RULES_KEY, [...nextRules]);
     await store.save();
+  }
+
+  async function commitRules(
+    nextRules: ReplacementRule[],
+    step: string,
+  ): Promise<RuleValidationResult> {
+    try {
+      await persist(nextRules);
+      rules.value = nextRules;
+      void emitEvent(REPLACEMENTS_CHANGED);
+      return { valid: true };
+    } catch (error) {
+      captureError(error, { source: "replacement", step });
+      return { valid: false, error: "persistence-failed" };
+    }
   }
 
   async function addRule(
@@ -115,19 +190,13 @@ export const useReplacementStore = defineStore("replacement", () => {
     if (!validation.valid) return validation;
     const rule: ReplacementRule = {
       id: crypto.randomUUID(),
-      patterns: input.patterns.map((p) => p.trim()).filter((p) => p.length > 0),
+      patterns: cleanPatterns(input.patterns),
       replacement: input.replacement,
       isRegex: input.isRegex,
       timing: input.timing,
       enabled: input.enabled,
     };
-    rules.value = [...rules.value, rule];
-    try {
-      await persist();
-    } catch (error) {
-      captureError(error, { source: "replacement", step: "add" });
-    }
-    return { valid: true };
+    return commitRules([...rules.value, rule], "add");
   }
 
   async function updateRule(
@@ -137,7 +206,13 @@ export const useReplacementStore = defineStore("replacement", () => {
     await ensureLoaded();
     const index = rules.value.findIndex((r) => r.id === id);
     if (index === -1) return { valid: false, error: "not-found" };
-    const merged: ReplacementRule = { ...rules.value[index], ...patch };
+    const merged: ReplacementRule = {
+      ...rules.value[index],
+      ...patch,
+      patterns: patch.patterns
+        ? cleanPatterns(patch.patterns)
+        : rules.value[index].patterns,
+    };
     const validation = validateRuleInput(
       merged.patterns,
       merged.replacement,
@@ -146,29 +221,22 @@ export const useReplacementStore = defineStore("replacement", () => {
     if (!validation.valid) return validation;
     const next = [...rules.value];
     next[index] = merged;
-    rules.value = next;
-    try {
-      await persist();
-    } catch (error) {
-      captureError(error, { source: "replacement", step: "update" });
-    }
-    return { valid: true };
+    return commitRules(next, "update");
   }
 
-  async function removeRule(id: string): Promise<void> {
+  async function removeRule(id: string): Promise<boolean> {
     await ensureLoaded();
-    rules.value = rules.value.filter((r) => r.id !== id);
-    try {
-      await persist();
-    } catch (error) {
-      captureError(error, { source: "replacement", step: "remove" });
-    }
+    const next = rules.value.filter((r) => r.id !== id);
+    if (next.length === rules.value.length) return false;
+    const result = await commitRules(next, "remove");
+    return result.valid;
   }
 
   return {
     rules,
     ruleCount,
     ensureLoaded,
+    reload,
     addRule,
     updateRule,
     removeRule,

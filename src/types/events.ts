@@ -53,6 +53,8 @@ export interface VocabularyChangedPayload {
   term: string;
 }
 
+export type ReplacementsChangedPayload = void;
+
 export interface HotkeyEventPayload {
   mode: TriggerMode;
   action: "start" | "stop";
