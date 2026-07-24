@@ -307,6 +307,11 @@
       "privacyNote": "When enabled, the system reads text near the cursor for AI analysis. No original text is stored",
       "analysisModelUpdated": "Dictionary analysis model updated"
     },
+    "contextInjection": {
+      "title": "Context Injection",
+      "description": "After recording stops and before AI enhancement, read text near the cursor and the current foreground app name to align terminology and tone with your context.",
+      "privacyNote": "Privacy note: this is off by default. When enabled, nearby cursor text and the app name are sent to your configured AI service; sensitive fields such as passwords are skipped automatically, and read failures degrade silently."
+    },
     "azure": {
       "title": "Azure / Microsoft Foundry",
       "description": "Configure one Azure endpoint and credential shared by text enhancement and transcription.",

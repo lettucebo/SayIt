@@ -13,7 +13,12 @@ import {
 } from "../lib/errorUtils";
 import { captureError } from "../lib/sentry";
 import { logInfoLine, logErrorLine } from "../lib/logger";
-import { enhanceText, enhanceWithAnomalyGuard, buildSystemPrompt } from "../lib/enhancer";
+import {
+  enhanceText,
+  enhanceWithAnomalyGuard,
+  buildSystemPrompt,
+  type EnhanceOptions,
+} from "../lib/enhancer";
 import { observeSemanticDrift } from "../lib/semanticDriftObserver";
 import { getEditModePromptForLocale } from "../i18n/prompts";
 import type { SupportedLocale } from "../i18n/languageConfig";
@@ -74,6 +79,7 @@ const ERROR_WITH_RETRY_DISPLAY_DURATION_MS = 6000;
 const START_SOUND_DURATION_MS = 400;
 const CANCELLED_DISPLAY_DURATION_MS = 1000;
 const EDIT_MODE_MAX_TOKENS = 4096;
+const CONTEXT_READ_TIMEOUT_MS = 800;
 
 /**
  * 判斷轉錄結果是否為空（無內容可貼上）。
@@ -88,6 +94,18 @@ function isEmptyTranscription(rawText: string): boolean {
 }
 function t(key: string, params?: Record<string, unknown>): string {
   return i18n.global.t(key, params ?? {});
+}
+
+async function withSoftTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+): Promise<T | null> {
+  return Promise.race([
+    promise.catch(() => null),
+    new Promise<null>((resolve) => {
+      setTimeout(resolve, ms);
+    }),
+  ]);
 }
 
 const MONITOR_POLL_INTERVAL_MS = 250;
@@ -177,6 +195,28 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
 
   function writeErrorLog(logMessage: string) {
     logErrorLine(logMessage);
+  }
+
+  async function readEnhancementContext(
+    enabled: boolean,
+  ): Promise<Pick<EnhanceOptions, "contextText" | "appName">> {
+    if (!enabled) return {};
+
+    const [contextText, appName] = await Promise.all([
+      withSoftTimeout(
+        invoke<string | null>("read_focused_text_field"),
+        CONTEXT_READ_TIMEOUT_MS,
+      ),
+      withSoftTimeout(
+        invoke<string | null>("get_foreground_app_name"),
+        CONTEXT_READ_TIMEOUT_MS,
+      ),
+    ]);
+
+    return {
+      contextText: contextText?.trim() || undefined,
+      appName: appName?.trim() || undefined,
+    };
   }
 
   function clearAutoHideTimer() {
@@ -1506,6 +1546,9 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
           }
 
           const enhancementTermList = whisperTermList;
+          const contextOptions = await readEnhancementContext(
+            settingsStore.contextInjectionEnabled,
+          );
           const enhanceOptions = {
             systemPrompt: settingsStore.getAiPrompt(),
             vocabularyTermList:
@@ -1514,6 +1557,7 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
             provider: llmCfg.provider,
             azure: llmCfg.azure,
             signal: abortController?.signal,
+            ...contextOptions,
           };
 
           let enhanceResult = await enhanceText(
@@ -1886,6 +1930,9 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
           }
 
           const enhancementTermList = whisperTermList;
+          const contextOptions = await readEnhancementContext(
+            settingsStore.contextInjectionEnabled,
+          );
           const enhanceResult = await enhanceWithAnomalyGuard(
             result.rawText,
             llmCfg.apiKey,
@@ -1897,6 +1944,7 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
               provider: llmCfg.provider,
               azure: llmCfg.azure,
               signal: abortController?.signal,
+              ...contextOptions,
             },
           );
           if (isAborted.value) return;

@@ -485,6 +485,48 @@ describe("useSettingsStore", () => {
     });
   });
 
+  describe("contextInjectionEnabled", () => {
+    it("[P0] loadSettings 未存過 contextInjectionEnabled 時預設 false", async () => {
+      const { useSettingsStore } = await import(
+        "../../src/stores/useSettingsStore"
+      );
+      const store = useSettingsStore();
+
+      await store.loadSettings();
+
+      expect(store.contextInjectionEnabled).toBe(false);
+    });
+
+    it("[P0] loadSettings 應載入已儲存的 contextInjectionEnabled", async () => {
+      mockStoreData.set("contextInjectionEnabled", true);
+      const { useSettingsStore } = await import(
+        "../../src/stores/useSettingsStore"
+      );
+      const store = useSettingsStore();
+
+      await store.loadSettings();
+
+      expect(store.contextInjectionEnabled).toBe(true);
+    });
+
+    it("[P0] saveContextInjectionEnabled 應持久化、更新 ref 並 emit settings:updated", async () => {
+      const { useSettingsStore } = await import(
+        "../../src/stores/useSettingsStore"
+      );
+      const store = useSettingsStore();
+
+      await store.saveContextInjectionEnabled(true);
+
+      expect(mockStoreSet).toHaveBeenCalledWith("contextInjectionEnabled", true);
+      expect(mockStoreSave).toHaveBeenCalled();
+      expect(store.contextInjectionEnabled).toBe(true);
+      expect(mockEmit).toHaveBeenCalledWith("settings:updated", {
+        key: "contextInjectionEnabled",
+        value: true,
+      });
+    });
+  });
+
   describe("saveAzureOmitTemperature (azure-reasoning-fix)", () => {
     it("[P1] 應持久化 azureOmitTemperature、設定 ref 並 emit settings:updated", async () => {
       const { useSettingsStore } = await import(

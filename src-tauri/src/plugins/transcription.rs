@@ -857,7 +857,7 @@ mod tests {
     fn test_format_whisper_prompt_skips_oversized_term() {
         // 超過單詞字元上限的異常長詞被略過 → 無其他詞時回 None
         let huge = "y".repeat(MAX_WHISPER_TERM_CHARS + 1);
-        assert_eq!(format_whisper_prompt(&[huge.clone()]), None);
+        assert_eq!(format_whisper_prompt(std::slice::from_ref(&huge)), None);
         // 異常長詞被略過、正常詞保留
         let result = format_whisper_prompt(&[huge, "API".to_string()]).unwrap();
         assert_eq!(result, "Important Vocabulary: API".to_string());

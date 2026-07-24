@@ -84,6 +84,7 @@ const STORE_NAME = "settings.json";
 
 export const DEFAULT_ENHANCEMENT_THRESHOLD_ENABLED = false;
 export const DEFAULT_ENHANCEMENT_THRESHOLD_CHAR_COUNT = 10;
+export const DEFAULT_CONTEXT_INJECTION_ENABLED = false;
 export const DEFAULT_MUTE_ON_RECORDING = true;
 const DEFAULT_SMART_DICTIONARY_ENABLED = navigator.userAgent.includes("Mac"); // macOS only — Windows 尚未支援 text field 讀取
 const DEFAULT_SOUND_EFFECTS_ENABLED = true;
@@ -186,6 +187,9 @@ export const useSettingsStore = defineStore("settings", () => {
   const selectedAudioInputDeviceName = ref<string>("");
   const isCopyTranscriptionToClipboardEnabled = ref<boolean>(
     DEFAULT_COPY_TRANSCRIPTION_TO_CLIPBOARD,
+  );
+  const contextInjectionEnabled = ref<boolean>(
+    DEFAULT_CONTEXT_INJECTION_ENABLED,
   );
   // ── Azure / Microsoft Foundry ──
   const azureEnabled = ref<boolean>(false);
@@ -608,6 +612,10 @@ export const useSettingsStore = defineStore("settings", () => {
         savedCopyTranscriptionToClipboard ??
         DEFAULT_COPY_TRANSCRIPTION_TO_CLIPBOARD;
 
+      contextInjectionEnabled.value =
+        (await store.get<boolean>("contextInjectionEnabled")) ??
+        DEFAULT_CONTEXT_INJECTION_ENABLED;
+
       // Sync saved (or default) config to Rust on startup
       await syncHotkeyConfigToRust(key, mode);
       isLoaded = true;
@@ -633,6 +641,7 @@ export const useSettingsStore = defineStore("settings", () => {
       isHideDockIconEnabled.value = DEFAULT_HIDE_DOCK_ICON;
       isCopyTranscriptionToClipboardEnabled.value =
         DEFAULT_COPY_TRANSCRIPTION_TO_CLIPBOARD;
+      contextInjectionEnabled.value = DEFAULT_CONTEXT_INJECTION_ENABLED;
     }
   }
 
@@ -1649,6 +1658,32 @@ export const useSettingsStore = defineStore("settings", () => {
     }
   }
 
+  async function saveContextInjectionEnabled(enabled: boolean) {
+    try {
+      const store = await load(STORE_NAME);
+      await store.set("contextInjectionEnabled", enabled);
+      await store.save();
+      contextInjectionEnabled.value = enabled;
+
+      const payload: SettingsUpdatedPayload = {
+        key: "contextInjectionEnabled",
+        value: enabled,
+      };
+      await emitEvent(SETTINGS_UPDATED, payload);
+      console.log(`[useSettingsStore] contextInjectionEnabled saved: ${enabled}`);
+    } catch (err) {
+      console.error(
+        "[useSettingsStore] saveContextInjectionEnabled failed:",
+        extractErrorMessage(err),
+      );
+      captureError(err, {
+        source: "settings",
+        step: "save-context-injection",
+      });
+      throw err;
+    }
+  }
+
   async function saveRecordingAutoCleanup(enabled: boolean, days: number) {
     const validatedDays =
       !Number.isInteger(days) || days < 1
@@ -1804,6 +1839,9 @@ export const useSettingsStore = defineStore("settings", () => {
       const savedSmartDictionary = await store.get<boolean>(
         "smartDictionaryEnabled",
       );
+      const savedContextInjectionEnabled = await store.get<boolean>(
+        "contextInjectionEnabled",
+      );
 
       hotkeyConfig.value = {
         triggerKey: savedKey ?? getDefaultTriggerKey(),
@@ -1875,6 +1913,8 @@ export const useSettingsStore = defineStore("settings", () => {
         savedMuteOnRecording ?? DEFAULT_MUTE_ON_RECORDING;
       isSoundEffectsEnabled.value =
         savedSoundEffects ?? DEFAULT_SOUND_EFFECTS_ENABLED;
+      contextInjectionEnabled.value =
+        savedContextInjectionEnabled ?? DEFAULT_CONTEXT_INJECTION_ENABLED;
       const nextHideDockIcon = savedHideDockIcon ?? DEFAULT_HIDE_DOCK_ICON;
       if (nextHideDockIcon !== isHideDockIconEnabled.value) {
         void applyDockVisibility(nextHideDockIcon);
@@ -2153,6 +2193,8 @@ export const useSettingsStore = defineStore("settings", () => {
     saveHideDockIcon,
     isSmartDictionaryEnabled,
     saveSmartDictionaryEnabled,
+    contextInjectionEnabled,
+    saveContextInjectionEnabled,
     isRecordingAutoCleanupEnabled,
     recordingAutoCleanupDays,
     saveRecordingAutoCleanup,

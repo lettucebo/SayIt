@@ -343,6 +343,26 @@ describe("enhancer.ts", () => {
       const body = JSON.parse(callArgs[1].body);
       expect(body.messages[0].content).not.toContain("<vocabulary>");
     });
+
+    it("[P0] 傳入 contextText 與 appName 應注入受限用途的 <context> 區塊", async () => {
+      mockFetch.mockResolvedValue(createSuccessResponse("整理後文字"));
+
+      const { enhanceText } = await import("../../src/lib/enhancer");
+      await enhanceText("測試輸入文字", TEST_API_KEY, {
+        systemPrompt: "基礎 prompt",
+        contextText: "kubectl apply deployment Kubernetes",
+        appName: "Code",
+      });
+
+      const callArgs = mockFetch.mock.calls[0];
+      const body = JSON.parse(callArgs[1].body);
+      const systemPrompt = body.messages[0].content as string;
+      expect(systemPrompt).toContain("<context>");
+      expect(systemPrompt).toContain("前景 App：Code");
+      expect(systemPrompt).toContain("kubectl apply deployment Kubernetes");
+      expect(systemPrompt).toContain("僅供理解專有名詞/風格參考");
+      expect(systemPrompt).toContain("不得複製進輸出");
+    });
   });
 
   describe("buildSystemPrompt (Story 2.2)", () => {
@@ -374,6 +394,48 @@ describe("enhancer.ts", () => {
       const result = buildSystemPrompt("基礎 prompt");
 
       expect(result).not.toContain("<vocabulary>");
+    });
+
+    it("[P0] 有 context 時應在 vocabulary 後附加 <context> 區塊", async () => {
+      const { buildSystemPrompt } = await import("../../src/lib/enhancer");
+      const result = buildSystemPrompt("基礎 prompt", ["Kubernetes"], {
+        contextText: "目前正在看 Kubernetes Deployment YAML",
+        appName: "Code",
+      });
+
+      expect(result.indexOf("<vocabulary>")).toBeLessThan(
+        result.indexOf("<context>"),
+      );
+      expect(result).toContain("前景 App：Code");
+      expect(result).toContain("游標周圍文字：");
+      expect(result).toContain("目前正在看 Kubernetes Deployment YAML");
+      expect(result).toContain("不是要處理的內容");
+      expect(result).toContain("不得複製進輸出");
+    });
+
+    it("[P0] contextText 超過上限時應截斷到 500 字元", async () => {
+      const { buildSystemPrompt } = await import("../../src/lib/enhancer");
+      const contextText = `${"甲".repeat(500)}乙`;
+      const result = buildSystemPrompt("基礎 prompt", undefined, {
+        contextText,
+      });
+
+      expect(result).toContain("甲".repeat(500));
+      expect(result).not.toContain("乙");
+      expect(result).toContain("…");
+    });
+
+    it("[P1] appName 或 contextText 其一存在時仍應注入 context", async () => {
+      const { buildSystemPrompt } = await import("../../src/lib/enhancer");
+
+      expect(
+        buildSystemPrompt("基礎 prompt", undefined, { appName: "Safari" }),
+      ).toContain("前景 App：Safari");
+      expect(
+        buildSystemPrompt("基礎 prompt", undefined, {
+          contextText: "Kubernetes",
+        }),
+      ).toContain("Kubernetes");
     });
   });
 

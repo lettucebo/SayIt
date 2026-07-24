@@ -1108,6 +1108,18 @@ async function handleToggleSmartDictionary(newValue: boolean) {
   }
 }
 
+// ── 情境注入 ────────────────────────────────────────────────
+const contextInjectionFeedback = useFeedbackMessage();
+
+async function handleToggleContextInjection(newValue: boolean) {
+  try {
+    await settingsStore.saveContextInjectionEnabled(newValue);
+    contextInjectionFeedback.show("success", t("common.save"));
+  } catch (err) {
+    contextInjectionFeedback.show("error", extractErrorMessage(err));
+  }
+}
+
 // ── 錄音儲存管理 ──────────────────────────────────────────
 const recordingCleanupFeedback = useFeedbackMessage();
 const recordingAutoCleanupEnabled = ref(false);
@@ -1627,6 +1639,7 @@ onBeforeUnmount(() => {
   transcriptionLocaleFeedback.clearTimer();
   autoStartFeedback.clearTimer();
   smartDictionaryFeedback.clearTimer();
+  contextInjectionFeedback.clearTimer();
   recordingCleanupFeedback.clearTimer();
   debugLogFeedback.clearTimer();
   providerFeedback.clearTimer();
@@ -2838,6 +2851,46 @@ onBeforeUnmount(() => {
             "
           >
             {{ smartDictionaryFeedback.message.value }}
+          </p>
+        </transition>
+      </CardContent>
+    </Card>
+
+    <!-- 情境注入（opt-in 隱私功能） -->
+    <Card>
+      <CardHeader class="border-b border-border">
+        <CardTitle class="text-base">{{ $t("settings.contextInjection.title") }}</CardTitle>
+      </CardHeader>
+      <CardContent class="space-y-4">
+        <p class="text-sm text-muted-foreground leading-relaxed">
+          {{ $t("settings.contextInjection.description") }}
+        </p>
+
+        <div class="flex items-center justify-between gap-4">
+          <Label for="context-injection-toggle">{{ $t("settings.contextInjection.title") }}</Label>
+          <Switch
+            id="context-injection-toggle"
+            :model-value="settingsStore.contextInjectionEnabled"
+            data-testid="context-injection-switch"
+            @update:model-value="handleToggleContextInjection"
+          />
+        </div>
+
+        <p class="text-xs text-muted-foreground" data-testid="context-injection-privacy-note">
+          {{ $t("settings.contextInjection.privacyNote") }}
+        </p>
+
+        <transition name="feedback-fade">
+          <p
+            v-if="contextInjectionFeedback.message.value !== ''"
+            class="text-sm"
+            :class="
+              contextInjectionFeedback.type.value === 'success'
+                ? 'text-green-400'
+                : 'text-red-400'
+            "
+          >
+            {{ contextInjectionFeedback.message.value }}
           </p>
         </transition>
       </CardContent>

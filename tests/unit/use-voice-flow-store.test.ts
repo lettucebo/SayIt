@@ -97,6 +97,7 @@ const {
       isMuteOnRecordingEnabled: false,
       isSoundEffectsEnabled: true,
       isSmartDictionaryEnabled: false,
+      contextInjectionEnabled: false,
       isCopyTranscriptionToClipboardEnabled: true,
       whisperLanguageCode: "zh" as string | null,
       selectedTranscriptionLocale: "auto" as string,
@@ -248,6 +249,9 @@ vi.mock("../../src/stores/useSettingsStore", () => ({
     get isSmartDictionaryEnabled() {
       return mockSettingsState.isSmartDictionaryEnabled;
     },
+    get contextInjectionEnabled() {
+      return mockSettingsState.contextInjectionEnabled;
+    },
     get isCopyTranscriptionToClipboardEnabled() {
       return mockSettingsState.isCopyTranscriptionToClipboardEnabled;
     },
@@ -381,6 +385,7 @@ describe("useVoiceFlowStore", () => {
     mockSettingsState.isMuteOnRecordingEnabled = false;
     mockSettingsState.isSoundEffectsEnabled = true;
     mockSettingsState.isSmartDictionaryEnabled = false;
+    mockSettingsState.contextInjectionEnabled = false;
     mockSettingsState.whisperLanguageCode = "zh";
     mockSettingsState.selectedTranscriptionLocale = "auto";
     mockSettingsState.selectedLocale = "en";
@@ -1266,6 +1271,122 @@ describe("useVoiceFlowStore", () => {
         status: "success",
         message: "voiceFlow.pasteSuccess",
       });
+    });
+
+    it("[P0] 情境注入關閉時不應讀取游標文字或前景 App", async () => {
+      const longText = "這是一段超過十個字的測試轉錄文字內容";
+      mockSettingsState.contextInjectionEnabled = false;
+      mockInvoke.mockImplementation(
+        createMockInvokeHandler({
+          transcribeResult: {
+            rawText: longText,
+            transcriptionDurationMs: 400,
+            noSpeechProbability: 0.01,
+          },
+        }),
+      );
+
+      const store = useVoiceFlowStore();
+      await store.initialize();
+      triggerHotkeyEvent("hotkey:pressed");
+      await vi.waitFor(() => {
+        expect(mockInvoke).toHaveBeenCalledWith("start_recording", {
+          deviceName: "",
+        });
+      });
+      triggerHotkeyEvent("hotkey:released");
+
+      await vi.waitFor(() => {
+        expect(mockEnhanceText).toHaveBeenCalled();
+      });
+
+      expect(mockInvoke).not.toHaveBeenCalledWith("read_focused_text_field");
+      expect(mockInvoke).not.toHaveBeenCalledWith("get_foreground_app_name");
+      expect(mockEnhanceText).toHaveBeenCalledWith(
+        longText,
+        "test-api-key-123",
+        expect.not.objectContaining({
+          contextText: expect.any(String),
+          appName: expect.any(String),
+        }),
+      );
+    });
+
+    it("[P0] 情境注入開啟時應讀取游標文字與前景 App 並傳給 enhancer", async () => {
+      const longText = "這是一段超過十個字的測試轉錄文字內容";
+      mockSettingsState.contextInjectionEnabled = true;
+      const baseHandler = createMockInvokeHandler({
+        transcribeResult: {
+          rawText: longText,
+          transcriptionDurationMs: 400,
+          noSpeechProbability: 0.01,
+        },
+      });
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === "read_focused_text_field") return "Kubernetes Deployment";
+        if (cmd === "get_foreground_app_name") return "Code";
+        return baseHandler(cmd);
+      });
+
+      const store = useVoiceFlowStore();
+      await store.initialize();
+      triggerHotkeyEvent("hotkey:pressed");
+      await vi.waitFor(() => {
+        expect(mockInvoke).toHaveBeenCalledWith("start_recording", {
+          deviceName: "",
+        });
+      });
+      triggerHotkeyEvent("hotkey:released");
+
+      await vi.waitFor(() => {
+        expect(mockEnhanceText).toHaveBeenCalledWith(
+          longText,
+          "test-api-key-123",
+          expect.objectContaining({
+            contextText: "Kubernetes Deployment",
+            appName: "Code",
+          }),
+        );
+      });
+    });
+
+    it("[P1] 情境讀取失敗時應靜默降級並仍送出 enhancer", async () => {
+      const longText = "這是一段超過十個字的測試轉錄文字內容";
+      mockSettingsState.contextInjectionEnabled = true;
+      const baseHandler = createMockInvokeHandler({
+        transcribeResult: {
+          rawText: longText,
+          transcriptionDurationMs: 400,
+          noSpeechProbability: 0.01,
+        },
+      });
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === "read_focused_text_field") throw new Error("AX timeout");
+        if (cmd === "get_foreground_app_name") throw new Error("no window");
+        return baseHandler(cmd);
+      });
+
+      const store = useVoiceFlowStore();
+      await store.initialize();
+      triggerHotkeyEvent("hotkey:pressed");
+      await vi.waitFor(() => {
+        expect(mockInvoke).toHaveBeenCalledWith("start_recording", {
+          deviceName: "",
+        });
+      });
+      triggerHotkeyEvent("hotkey:released");
+
+      await vi.waitFor(() => {
+        expect(mockEnhanceText).toHaveBeenCalledWith(
+          longText,
+          "test-api-key-123",
+          expect.not.objectContaining({
+            contextText: expect.any(String),
+            appName: expect.any(String),
+          }),
+        );
+      });
+      expect(store.status).toBe("success");
     });
 
     it("[P1] main AI 成功路徑套用 afterAI 並回寫 processedText", async () => {
@@ -2661,6 +2782,42 @@ describe("useVoiceFlowStore", () => {
         mockUpdateTranscriptionOnRetrySuccess.mock.calls[0][0];
       expect(updateParams.processedText).toBe("AI 整理後的最終文字");
       expect(updateParams.wasEnhanced).toBe(true);
+    });
+
+    it("[P1] 重送 AI 整理前若情境注入開啟，應傳入 contextText 與 appName", async () => {
+      const store = useVoiceFlowStore();
+      await store.initialize();
+
+      await setupFailedTranscription(store);
+      expect(store.canRetry).toBe(true);
+
+      mockSettingsState.contextInjectionEnabled = true;
+      const retryText = "這是一段夠長需要整理的重送逐字稿內容";
+      const baseHandler = createMockInvokeHandler({
+        retranscribeResult: {
+          rawText: retryText,
+          transcriptionDurationMs: 350,
+          noSpeechProbability: 0.02,
+        },
+      });
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === "read_focused_text_field") return "Kubernetes Service";
+        if (cmd === "get_foreground_app_name") return "Terminal";
+        return baseHandler(cmd);
+      });
+
+      await store.handleRetryTranscription();
+
+      await vi.waitFor(() => {
+        expect(mockEnhanceText).toHaveBeenCalledWith(
+          retryText,
+          "test-api-key-123",
+          expect.objectContaining({
+            contextText: "Kubernetes Service",
+            appName: "Terminal",
+          }),
+        );
+      });
     });
 
     it("[P1] 重送 fallback 路徑套用 afterAI 並用最終文字更新 rawText/charCount", async () => {

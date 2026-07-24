@@ -307,6 +307,11 @@
       "privacyNote": "啟用後，系統會讀取游標附近的文字用於 AI 分析，不儲存原文",
       "analysisModelUpdated": "字典分析模型已更新"
     },
+    "contextInjection": {
+      "title": "情境注入",
+      "description": "錄音停止後、AI 整理前，讀取游標周圍文字與目前前景 App 名稱，幫助專有名詞與語氣對齊上下文。",
+      "privacyNote": "隱私提醒：此功能預設關閉。啟用後，游標周圍文字與 App 名稱會送給你設定的 AI 服務；密碼等敏感欄位會自動略過，讀取失敗會靜默降級。"
+    },
     "azure": {
       "title": "Azure / Microsoft Foundry",
       "description": "設定一組 Azure 端點與憑證，文字整理與語音轉錄可共用。",

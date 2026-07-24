@@ -21,6 +21,56 @@ pub fn read_focused_text_field() -> Result<Option<String>, String> {
     }
 }
 
+#[cfg(test)]
+mod app_name_tests {
+    use super::app_name_from_path;
+
+    #[test]
+    fn test_app_name_from_windows_exe_path() {
+        assert_eq!(
+            app_name_from_path(r"C:\Users\me\AppData\Local\Programs\Code.exe"),
+            Some("Code".to_string())
+        );
+    }
+
+    #[test]
+    fn test_app_name_from_path_without_extension() {
+        assert_eq!(
+            app_name_from_path(r"C:\Windows\System32\notepad"),
+            Some("notepad".to_string())
+        );
+    }
+}
+
+#[tauri::command]
+pub fn get_foreground_app_name() -> Option<String> {
+    #[cfg(target_os = "macos")]
+    {
+        macos::get_foreground_app_name_impl()
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        windows_impl::get_foreground_app_name_impl()
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        None
+    }
+}
+
+fn app_name_from_path(path: &str) -> Option<String> {
+    let file_name = path.rsplit(['\\', '/']).next()?;
+    let stem = file_name
+        .rsplit_once('.')
+        .map(|(name, _)| name)
+        .unwrap_or(file_name);
+    Some(str::trim(stem))
+        .filter(|name| !name.is_empty())
+        .map(ToOwned::to_owned)
+}
+
 /// 編輯模式的「剪貼簿後備」路徑：僅在 `read_selection_state` 回報
 /// unavailable（AX 不可見的 App）時、於錄音停止且按鍵放開後由前端呼叫。
 /// 透過模擬 Cmd+C / Ctrl+C 擷取剪貼簿內容。
@@ -337,6 +387,37 @@ mod macos {
         }
     }
 
+    pub fn get_foreground_app_name_impl() -> Option<String> {
+        use objc::runtime::Object;
+        use std::ffi::CStr;
+        use std::os::raw::c_char;
+
+        unsafe {
+            let workspace: *mut Object = msg_send![class!(NSWorkspace), sharedWorkspace];
+            if workspace.is_null() {
+                return None;
+            }
+            let app: *mut Object = msg_send![workspace, frontmostApplication];
+            if app.is_null() {
+                return None;
+            }
+            let name: *mut Object = msg_send![app, localizedName];
+            if name.is_null() {
+                return None;
+            }
+            let utf8: *const c_char = msg_send![name, UTF8String];
+            if utf8.is_null() {
+                return None;
+            }
+            CStr::from_ptr(utf8)
+                .to_str()
+                .ok()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToOwned::to_owned)
+        }
+    }
+
     // ========== 選取狀態偵測（#24/#25 編輯模式判定） ==========
 
     use super::SelectionState;
@@ -628,6 +709,46 @@ mod windows_impl {
         let outcome = read_once(&sender);
         IN_FLIGHT.store(false, Ordering::Release);
         Ok(outcome)
+    }
+
+    pub fn get_foreground_app_name_impl() -> Option<String> {
+        use windows::core::PWSTR;
+        use windows::Win32::Foundation::CloseHandle;
+        use windows::Win32::System::Threading::{
+            OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT,
+            PROCESS_QUERY_LIMITED_INFORMATION,
+        };
+        use windows::Win32::UI::WindowsAndMessaging::{
+            GetForegroundWindow, GetWindowThreadProcessId,
+        };
+
+        unsafe {
+            let hwnd = GetForegroundWindow();
+            if hwnd.0.is_null() {
+                return None;
+            }
+
+            let mut process_id = 0_u32;
+            GetWindowThreadProcessId(hwnd, Some(&mut process_id));
+            if process_id == 0 {
+                return None;
+            }
+
+            let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, process_id).ok()?;
+            let mut buffer = vec![0_u16; 32_768];
+            let mut size = buffer.len() as u32;
+            let result = QueryFullProcessImageNameW(
+                process,
+                PROCESS_NAME_FORMAT(0),
+                PWSTR(buffer.as_mut_ptr()),
+                &mut size,
+            );
+            let _ = CloseHandle(process);
+            result.ok()?;
+
+            let path = String::from_utf16_lossy(&buffer[..size as usize]);
+            super::app_name_from_path(&path)
+        }
     }
 
     /// 送一次讀取請求並等 `READ_TIMEOUT_MS`；逾時 / 送出失敗一律回 `None`。
