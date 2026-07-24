@@ -13,6 +13,7 @@ import { extractErrorMessage } from "../lib/errorUtils";
 import { useFeedbackMessage } from "../composables/useFeedbackMessage";
 import { useHistoryStore } from "../stores/useHistoryStore";
 import { useVocabularyStore } from "../stores/useVocabularyStore";
+import { useReplacementStore } from "../stores/useReplacementStore";
 import {
   buildBackupFile,
   buildBackupFilename,
@@ -42,6 +43,7 @@ import type {
   RecordingRejectedPayload,
 } from "../types/events";
 import type { TriggerMode } from "../types";
+import type { ReplacementRule, ReplacementTiming } from "../types/replacement";
 import {
   getDomCodeByKeycode,
   getKeyDisplayNameByKeycode,
@@ -98,6 +100,14 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
   AtSign,
   Bug,
   CircleAlert,
@@ -110,8 +120,11 @@ import {
   Linkedin,
   Lock,
   Mic,
+  Pencil,
+  Plus,
   RefreshCw,
   Trash2,
+  X,
   Upload,
 } from "lucide-vue-next";
 import { openLogFolder } from "../lib/logger";
@@ -126,6 +139,7 @@ import {
 const settingsStore = useSettingsStore();
 const historyStore = useHistoryStore();
 const vocabularyStore = useVocabularyStore();
+const replacementStore = useReplacementStore();
 const { t } = useI18n();
 
 declare const __APP_VERSION__: string;
@@ -531,6 +545,152 @@ async function handleSaveThresholdCharCount() {
     enhancementThresholdFeedback.show("success", t("settings.threshold.charCountSaved"));
   } catch (err) {
     enhancementThresholdFeedback.show("error", extractErrorMessage(err));
+  }
+}
+
+// ── 取代規則 ──────────────────────────────────────────────
+type ReplacementFormState = {
+  patternsText: string;
+  replacement: string;
+  isRegex: boolean;
+  timing: ReplacementTiming;
+  enabled: boolean;
+};
+
+const REPLACEMENT_TIMINGS: readonly ReplacementTiming[] = [
+  "beforeAI",
+  "afterAI",
+  "both",
+];
+
+const replacementFeedback = useFeedbackMessage();
+const isSavingReplacementRule = ref(false);
+const editingReplacementRuleId = ref<string | null>(null);
+const replacementForm = ref<ReplacementFormState>({
+  patternsText: "",
+  replacement: "",
+  isRegex: false,
+  timing: "beforeAI",
+  enabled: true,
+});
+
+const isEditingReplacementRule = computed(
+  () => editingReplacementRuleId.value !== null,
+);
+
+const replacementTimingOptions = computed(() =>
+  REPLACEMENT_TIMINGS.map((value) => ({
+    value,
+    label: t(`settings.replacements.timing.${value}`),
+  })),
+);
+
+function isReplacementTiming(value: unknown): value is ReplacementTiming {
+  return (
+    typeof value === "string" &&
+    REPLACEMENT_TIMINGS.includes(value as ReplacementTiming)
+  );
+}
+
+function parseReplacementPatterns(input: string): string[] {
+  return input
+    .split(",")
+    .map((pattern) => pattern.trim())
+    .filter((pattern) => pattern.length > 0);
+}
+
+function replacementErrorMessage(code?: string): string {
+  if (!code) return t("settings.replacements.errors.unknown");
+  const key = `settings.replacements.errors.${code}`;
+  const message = t(key);
+  return message === key ? t("settings.replacements.errors.unknown") : message;
+}
+
+function resetReplacementForm() {
+  editingReplacementRuleId.value = null;
+  replacementForm.value = {
+    patternsText: "",
+    replacement: "",
+    isRegex: false,
+    timing: "beforeAI",
+    enabled: true,
+  };
+}
+
+function startEditingReplacementRule(rule: ReplacementRule) {
+  editingReplacementRuleId.value = rule.id;
+  replacementForm.value = {
+    patternsText: rule.patterns.join(", "),
+    replacement: rule.replacement,
+    isRegex: rule.isRegex,
+    timing: rule.timing,
+    enabled: rule.enabled,
+  };
+}
+
+function handleReplacementTimingChange(value: unknown) {
+  if (!isReplacementTiming(value)) return;
+  replacementForm.value.timing = value;
+}
+
+async function handleSubmitReplacementRule() {
+  const patterns = parseReplacementPatterns(replacementForm.value.patternsText);
+  const validation = replacementStore.validateRuleInput(
+    patterns,
+    replacementForm.value.replacement,
+    replacementForm.value.isRegex,
+  );
+  if (!validation.valid) {
+    replacementFeedback.show("error", replacementErrorMessage(validation.error));
+    return;
+  }
+
+  try {
+    isSavingReplacementRule.value = true;
+    const input = {
+      patterns,
+      replacement: replacementForm.value.replacement,
+      isRegex: replacementForm.value.isRegex,
+      timing: replacementForm.value.timing,
+      enabled: replacementForm.value.enabled,
+    };
+    const result = editingReplacementRuleId.value
+      ? await replacementStore.updateRule(editingReplacementRuleId.value, input)
+      : await replacementStore.addRule(input);
+
+    if (!result.valid) {
+      replacementFeedback.show("error", replacementErrorMessage(result.error));
+      return;
+    }
+
+    replacementFeedback.show(
+      "success",
+      editingReplacementRuleId.value
+        ? t("settings.replacements.updated")
+        : t("settings.replacements.added"),
+    );
+    resetReplacementForm();
+  } catch (err) {
+    replacementFeedback.show("error", extractErrorMessage(err));
+  } finally {
+    isSavingReplacementRule.value = false;
+  }
+}
+
+async function handleToggleReplacementRule(rule: ReplacementRule, enabled: boolean) {
+  const result = await replacementStore.updateRule(rule.id, { enabled });
+  if (!result.valid) {
+    replacementFeedback.show("error", replacementErrorMessage(result.error));
+  }
+}
+
+async function handleDeleteReplacementRule(rule: ReplacementRule) {
+  try {
+    await replacementStore.removeRule(rule.id);
+    if (editingReplacementRuleId.value === rule.id) resetReplacementForm();
+    replacementFeedback.show("success", t("settings.replacements.deleted"));
+  } catch (err) {
+    replacementFeedback.show("error", extractErrorMessage(err));
   }
 }
 
@@ -1413,6 +1573,7 @@ async function applyBackupImport() {
 }
 
 onMounted(async () => {
+  await replacementStore.ensureLoaded();
   // F5 fix: 先載入裝置列表，完成後再啟動預覽（避免 cpal 並行 host 查詢）
   void loadAudioInputDeviceList().then(() => {
     void startPreview(settingsStore.selectedAudioInputDeviceName);
@@ -1448,6 +1609,7 @@ onBeforeUnmount(() => {
   apiKeyFeedback.clearTimer();
   promptFeedback.clearTimer();
   enhancementThresholdFeedback.clearTimer();
+  replacementFeedback.clearTimer();
   modelFeedback.clearTimer();
   muteOnRecordingFeedback.clearTimer();
   soundFeedbackFeedback.clearTimer();
@@ -2372,6 +2534,264 @@ onBeforeUnmount(() => {
             "
           >
             {{ enhancementThresholdFeedback.message.value }}
+          </p>
+        </transition>
+      </CardContent>
+    </Card>
+
+    <!-- 取代規則 -->
+    <Card>
+      <CardHeader class="flex-row items-center justify-between border-b border-border">
+        <div class="space-y-1">
+          <CardTitle class="text-base">{{ $t("settings.replacements.title") }}</CardTitle>
+          <p class="text-sm text-muted-foreground">
+            {{ $t("settings.replacements.description") }}
+          </p>
+        </div>
+        <Badge variant="secondary" data-testid="replacement-rule-count">
+          {{ $t("settings.replacements.ruleCount", { count: replacementStore.ruleCount }) }}
+        </Badge>
+      </CardHeader>
+      <CardContent class="space-y-5">
+        <div class="rounded-lg border border-border p-4 space-y-4">
+          <div class="flex items-center justify-between gap-3">
+            <h3 class="text-sm font-medium">
+              {{ isEditingReplacementRule ? $t("settings.replacements.editTitle") : $t("settings.replacements.addTitle") }}
+            </h3>
+            <Button
+              v-if="isEditingReplacementRule"
+              type="button"
+              variant="ghost"
+              size="sm"
+              data-testid="replacement-cancel-edit"
+              @click="resetReplacementForm"
+            >
+              <X class="mr-1 size-4" />
+              {{ $t("common.cancel") }}
+            </Button>
+          </div>
+
+          <div class="grid gap-4 md:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
+            <div class="space-y-2">
+              <Label for="replacement-patterns">
+                {{ $t("settings.replacements.patternsLabel") }}
+              </Label>
+              <Textarea
+                id="replacement-patterns"
+                v-model="replacementForm.patternsText"
+                class="min-h-[84px]"
+                :placeholder="$t('settings.replacements.patternsPlaceholder')"
+                data-testid="replacement-patterns-input"
+              />
+              <p class="text-xs text-muted-foreground">
+                {{ $t("settings.replacements.patternsHint") }}
+              </p>
+            </div>
+
+            <div class="space-y-2">
+              <Label for="replacement-target">
+                {{ $t("settings.replacements.replacementLabel") }}
+              </Label>
+              <Input
+                id="replacement-target"
+                v-model="replacementForm.replacement"
+                :placeholder="$t('settings.replacements.replacementPlaceholder')"
+                data-testid="replacement-target-input"
+              />
+            </div>
+          </div>
+
+          <div class="grid gap-4 md:grid-cols-3">
+            <div class="space-y-2">
+              <Label for="replacement-timing">
+                {{ $t("settings.replacements.timingLabel") }}
+              </Label>
+              <Select
+                :model-value="replacementForm.timing"
+                @update:model-value="handleReplacementTimingChange"
+              >
+                <SelectTrigger id="replacement-timing" data-testid="replacement-timing-select">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem
+                    v-for="option in replacementTimingOptions"
+                    :key="option.value"
+                    :value="option.value"
+                  >
+                    {{ option.label }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div class="flex items-center justify-between rounded-md border border-border px-3 py-2">
+              <div class="space-y-1">
+                <Label for="replacement-regex">
+                  {{ $t("settings.replacements.regexLabel") }}
+                </Label>
+                <p class="text-xs text-muted-foreground">
+                  {{ $t("settings.replacements.regexHint") }}
+                </p>
+              </div>
+              <Switch
+                id="replacement-regex"
+                :model-value="replacementForm.isRegex"
+                data-testid="replacement-regex-switch"
+                @update:model-value="replacementForm.isRegex = $event"
+              />
+            </div>
+
+            <div class="flex items-center justify-between rounded-md border border-border px-3 py-2">
+              <div class="space-y-1">
+                <Label for="replacement-enabled">
+                  {{ $t("settings.replacements.enabledLabel") }}
+                </Label>
+                <p class="text-xs text-muted-foreground">
+                  {{ $t("settings.replacements.enabledHint") }}
+                </p>
+              </div>
+              <Switch
+                id="replacement-enabled"
+                :model-value="replacementForm.enabled"
+                data-testid="replacement-enabled-switch"
+                @update:model-value="replacementForm.enabled = $event"
+              />
+            </div>
+          </div>
+
+          <div class="flex justify-end">
+            <Button
+              type="button"
+              :disabled="isSavingReplacementRule"
+              data-testid="replacement-save-button"
+              @click="handleSubmitReplacementRule"
+            >
+              <Pencil v-if="isEditingReplacementRule" class="mr-1 size-4" />
+              <Plus v-else class="mr-1 size-4" />
+              {{ isEditingReplacementRule ? $t("settings.replacements.updateButton") : $t("settings.replacements.addButton") }}
+            </Button>
+          </div>
+        </div>
+
+        <div v-if="replacementStore.rules.length === 0" class="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground" data-testid="replacement-empty-state">
+          {{ $t("settings.replacements.emptyState") }}
+        </div>
+
+        <div v-else class="rounded-lg border border-border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>{{ $t("settings.replacements.patternsHeader") }}</TableHead>
+                <TableHead>{{ $t("settings.replacements.replacementHeader") }}</TableHead>
+                <TableHead>{{ $t("settings.replacements.timingHeader") }}</TableHead>
+                <TableHead>{{ $t("settings.replacements.typeHeader") }}</TableHead>
+                <TableHead>{{ $t("settings.replacements.enabledHeader") }}</TableHead>
+                <TableHead class="text-right">{{ $t("settings.replacements.actionsHeader") }}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              <TableRow
+                v-for="rule in replacementStore.rules"
+                :key="rule.id"
+                data-testid="replacement-rule-row"
+              >
+                <TableCell class="max-w-[220px]">
+                  <div class="truncate font-medium" :title="rule.patterns.join(', ')">
+                    {{ rule.patterns.join(", ") }}
+                  </div>
+                </TableCell>
+                <TableCell class="max-w-[180px]">
+                  <div class="truncate" :title="rule.replacement">
+                    {{ rule.replacement }}
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <Badge variant="secondary">
+                    {{ $t(`settings.replacements.timing.${rule.timing}`) }}
+                  </Badge>
+                </TableCell>
+                <TableCell>
+                  <Badge :variant="rule.isRegex ? 'secondary' : 'outline'">
+                    {{ rule.isRegex ? $t("settings.replacements.regexBadge") : $t("settings.replacements.literalBadge") }}
+                  </Badge>
+                </TableCell>
+                <TableCell>
+                  <Label :for="`replacement-rule-enabled-${rule.id}`" class="sr-only">
+                    {{ $t("settings.replacements.enabledHeader") }}
+                  </Label>
+                  <Switch
+                    :id="`replacement-rule-enabled-${rule.id}`"
+                    :model-value="rule.enabled"
+                    data-testid="replacement-row-enabled-switch"
+                    @update:model-value="handleToggleReplacementRule(rule, $event)"
+                  />
+                </TableCell>
+                <TableCell>
+                  <div class="flex justify-end gap-2">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      data-testid="replacement-edit-button"
+                      @click="startEditingReplacementRule(rule)"
+                    >
+                      <Pencil class="mr-1 size-4" />
+                      {{ $t("settings.replacements.edit") }}
+                    </Button>
+                    <AlertDialog>
+                      <AlertDialogTrigger as-child>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          class="text-destructive hover:text-destructive"
+                          data-testid="replacement-delete-button"
+                        >
+                          <Trash2 class="mr-1 size-4" />
+                          {{ $t("common.delete") }}
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>
+                            {{ $t("settings.replacements.deleteConfirmTitle") }}
+                          </AlertDialogTitle>
+                          <AlertDialogDescription>
+                            {{ $t("settings.replacements.deleteConfirmDescription") }}
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>
+                            {{ $t("common.cancel") }}
+                          </AlertDialogCancel>
+                          <AlertDialogAction
+                            data-testid="replacement-delete-confirm"
+                            @click="handleDeleteReplacementRule(rule)"
+                          >
+                            {{ $t("common.delete") }}
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  </div>
+                </TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        </div>
+
+        <transition name="feedback-fade">
+          <p
+            v-if="replacementFeedback.message.value !== ''"
+            class="text-sm"
+            :class="
+              replacementFeedback.type.value === 'error'
+                ? 'text-destructive'
+                : 'text-muted-foreground'
+            "
+          >
+            {{ replacementFeedback.message.value }}
           </p>
         </transition>
       </CardContent>
