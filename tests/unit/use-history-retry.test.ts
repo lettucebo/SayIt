@@ -43,6 +43,12 @@ vi.mock("../../src/lib/enhancer", () => ({
 vi.mock("../../src/stores/useSettingsStore", () => ({
   useSettingsStore: () => h.settingsStub,
 }));
+vi.mock("../../src/stores/useReplacementStore", () => ({
+  useReplacementStore: () => ({
+    rules: [],
+    ensureLoaded: vi.fn().mockResolvedValue(undefined),
+  }),
+}));
 vi.mock("../../src/stores/useVocabularyStore", () => ({
   useVocabularyStore: () => ({ getTopTermListByWeight: h.mockGetTopTerms }),
 }));

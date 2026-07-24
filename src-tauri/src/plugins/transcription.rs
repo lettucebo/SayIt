@@ -8,6 +8,11 @@ use super::audio_recorder::AudioRecorderState;
 
 const GROQ_API_URL: &str = "https://api.groq.com/openai/v1/audio/transcriptions";
 const MAX_WHISPER_PROMPT_TERMS: usize = 50;
+/// Whisper 只讀 `prompt` 的最後 ~224 tokens，超過會被忽略（保留的是**尾端**）。
+/// 無 tokenizer 下以保守估算逼近，預算取 200 token（對 224 留 buffer）。
+const MAX_WHISPER_PROMPT_TOKENS: usize = 200;
+/// 單一詞的字元上限：超過視為異常（避免巨型 request），組 prompt 時略過。
+const MAX_WHISPER_TERM_CHARS: usize = 100;
 const MINIMUM_AUDIO_SIZE: usize = 1000;
 /// Groq free tier 上限 25MB
 const MAX_AUDIO_FILE_SIZE: usize = 25 * 1024 * 1024;
@@ -94,13 +99,47 @@ struct WhisperSegment {
 
 // ========== Helpers ==========
 
-fn format_whisper_prompt(term_list: &[String]) -> String {
-    let terms: Vec<&str> = term_list
-        .iter()
-        .take(MAX_WHISPER_PROMPT_TERMS)
-        .map(|s| s.as_str())
-        .collect();
-    format!("Important Vocabulary: {}", terms.join(", "))
+/// 粗略估算 Whisper multilingual tokenizer 的 token 數（無 tokenizer 的保守近似）：
+/// ASCII 每 3 字元約 1 token；非 ASCII（CJK 等）保守以每字元 1 token 計。寧可高估。
+fn estimate_whisper_tokens(text: &str) -> usize {
+    let ascii = text.chars().filter(char::is_ascii).count();
+    let non_ascii = text.chars().count() - ascii;
+    ascii.div_ceil(3) + non_ascii
+}
+
+/// 組出 Whisper 的 `prompt`：詞彙已由前端依 weight 由高到低排序。
+/// - 略過超過 `MAX_WHISPER_TERM_CHARS` 的異常長詞（避免巨型 request，Whisper 亦無益）。
+/// - 在 `MAX_WHISPER_PROMPT_TOKENS`（估算）預算內納入，超出即停止。
+/// - **反轉輸出**讓高權重詞落在 prompt 尾端：Whisper 超限時只保留尾端 tokens，
+///   反轉可確保最重要的詞不被靜默丟棄。
+/// - 無任何可納入的詞時回 `None`（呼叫端不送出空前綴 prompt）。
+fn format_whisper_prompt(term_list: &[String]) -> Option<String> {
+    const PREFIX: &str = "Important Vocabulary: ";
+    const SEPARATOR: &str = ", ";
+    let mut selected: Vec<&str> = Vec::new();
+    let mut used = estimate_whisper_tokens(PREFIX);
+    for term in term_list.iter().take(MAX_WHISPER_PROMPT_TERMS) {
+        let term = term.as_str();
+        if term.chars().count() > MAX_WHISPER_TERM_CHARS {
+            continue;
+        }
+        let mut addition = estimate_whisper_tokens(term);
+        if !selected.is_empty() {
+            addition += estimate_whisper_tokens(SEPARATOR);
+        }
+        // 詞已依權重由高到低排列；達預算即停止（不為塞低權重詞而繼續）
+        if used + addition > MAX_WHISPER_PROMPT_TOKENS {
+            break;
+        }
+        used += addition;
+        selected.push(term);
+    }
+    if selected.is_empty() {
+        return None;
+    }
+    // 反轉讓高權重詞落在 prompt 尾端（Whisper 保留尾端 tokens）
+    selected.reverse();
+    Some(format!("{PREFIX}{}", selected.join(SEPARATOR)))
 }
 
 const DEFAULT_AZURE_WHISPER_API_VERSION: &str = "2024-06-01";
@@ -280,8 +319,7 @@ async fn attempt_transcription_request(
     }
 
     if let Some(terms) = vocabulary_term_list {
-        if !terms.is_empty() {
-            let prompt = format_whisper_prompt(terms);
+        if let Some(prompt) = format_whisper_prompt(terms) {
             form = form.text("prompt", prompt);
         }
     }
@@ -718,7 +756,10 @@ mod tests {
             }),
             "rate-limited"
         );
-        assert_eq!(failure_kind_label(&FailureKind::ServerError), "server-error");
+        assert_eq!(
+            failure_kind_label(&FailureKind::ServerError),
+            "server-error"
+        );
         assert_eq!(failure_kind_label(&FailureKind::Connect), "connect-failed");
         assert_eq!(failure_kind_label(&FailureKind::NoRetry), "no-retry");
     }
@@ -756,32 +797,70 @@ mod tests {
     }
 
     #[test]
-    fn test_format_whisper_prompt_basic() {
+    fn test_estimate_whisper_tokens() {
+        assert_eq!(estimate_whisper_tokens(""), 0);
+        assert_eq!(estimate_whisper_tokens("abc"), 1); // 3 ASCII → 1 token
+        assert_eq!(estimate_whisper_tokens("中文"), 2); // 非 ASCII 每字元 1 token
+    }
+
+    #[test]
+    fn test_format_whisper_prompt_basic_reversed() {
         let terms = vec!["Tauri".to_string(), "Rust".to_string(), "Vue".to_string()];
-        let result = format_whisper_prompt(&terms);
-        assert_eq!(result, "Important Vocabulary: Tauri, Rust, Vue");
+        // 反轉讓最高權重（Tauri）落在 prompt 尾端
+        assert_eq!(
+            format_whisper_prompt(&terms),
+            Some("Important Vocabulary: Vue, Rust, Tauri".to_string())
+        );
     }
 
     #[test]
-    fn test_format_whisper_prompt_empty() {
+    fn test_format_whisper_prompt_empty_is_none() {
         let terms: Vec<String> = vec![];
-        let result = format_whisper_prompt(&terms);
-        assert_eq!(result, "Important Vocabulary: ");
+        assert_eq!(format_whisper_prompt(&terms), None);
     }
 
     #[test]
-    fn test_format_whisper_prompt_exceeds_max() {
+    fn test_format_whisper_prompt_hits_term_hard_cap() {
         let terms: Vec<String> = (0..100).map(|i| format!("term{i}")).collect();
-        let result = format_whisper_prompt(&terms);
-        // Should only include first 30 terms
+        let result = format_whisper_prompt(&terms).unwrap();
         let parts: Vec<&str> = result
             .strip_prefix("Important Vocabulary: ")
             .unwrap()
             .split(", ")
             .collect();
+        // 短詞未達 token 預算，取滿 MAX_WHISPER_PROMPT_TERMS 硬上限
         assert_eq!(parts.len(), MAX_WHISPER_PROMPT_TERMS);
-        assert_eq!(parts[0], "term0");
-        assert_eq!(parts[29], "term29");
+        // 反轉後最高權重 term0 落在尾端
+        assert_eq!(*parts.last().unwrap(), "term0");
+        assert_eq!(parts[parts.len() - 2], "term1");
+    }
+
+    #[test]
+    fn test_format_whisper_prompt_token_budget_truncates() {
+        // 每個詞 100 字元 → 數個詞即達 token 預算，遠少於 50 硬上限
+        let long = "x".repeat(MAX_WHISPER_TERM_CHARS);
+        let terms: Vec<String> = (0..MAX_WHISPER_PROMPT_TERMS)
+            .map(|_| long.clone())
+            .collect();
+        let result = format_whisper_prompt(&terms).unwrap();
+        let parts: Vec<&str> = result
+            .strip_prefix("Important Vocabulary: ")
+            .unwrap()
+            .split(", ")
+            .collect();
+        assert!(parts.len() < MAX_WHISPER_PROMPT_TERMS);
+        // 估算 token 不超過預算
+        assert!(estimate_whisper_tokens(&result) <= MAX_WHISPER_PROMPT_TOKENS);
+    }
+
+    #[test]
+    fn test_format_whisper_prompt_skips_oversized_term() {
+        // 超過單詞字元上限的異常長詞被略過 → 無其他詞時回 None
+        let huge = "y".repeat(MAX_WHISPER_TERM_CHARS + 1);
+        assert_eq!(format_whisper_prompt(&[huge.clone()]), None);
+        // 異常長詞被略過、正常詞保留
+        let result = format_whisper_prompt(&[huge, "API".to_string()]).unwrap();
+        assert_eq!(result, "Important Vocabulary: API".to_string());
     }
 
     #[test]

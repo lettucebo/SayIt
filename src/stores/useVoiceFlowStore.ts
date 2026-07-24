@@ -20,10 +20,12 @@ import type { SupportedLocale } from "../i18n/languageConfig";
 import { analyzeCorrections } from "../lib/vocabularyAnalyzer";
 import {
   applyTranscriptTextTransforms,
+  applyWordReplacements,
   resolveEffectiveTranscriptionLocale,
 } from "../lib/transcriptTransforms";
 import i18n from "../i18n";
 import { useVocabularyStore } from "./useVocabularyStore";
+import { useReplacementStore } from "./useReplacementStore";
 import { useHistoryStore } from "./useHistoryStore";
 import type {
   TranscriptionRecord,
@@ -853,8 +855,25 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
   }) {
     try {
       const settingsStore = useSettingsStore();
+      // #55 afterAI：completePasteFlow 是所有貼上路徑（主流程 / AI 跳過 /
+      // 失敗 fallback / 重送 / edit mode）的唯一出口，在此套用 afterAI 取代可
+      // 涵蓋全部情境，並同步更新 record 讓歷史與實際貼上一致。
+      const replacementStore = useReplacementStore();
+      await replacementStore.ensureLoaded();
+      const pasteText = applyWordReplacements(
+        params.text,
+        replacementStore.rules,
+        "afterAI",
+      );
+      if (pasteText !== params.text) {
+        if (params.record.processedText != null) {
+          params.record.processedText = pasteText;
+        } else {
+          params.record.rawText = pasteText;
+        }
+      }
       await invoke("paste_text", {
-        text: params.text,
+        text: pasteText,
         restoreClipboard: !settingsStore.isCopyTranscriptionToClipboardEnabled,
       });
       isRecording.value = false;
@@ -873,7 +892,7 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
       updateVocabularyWeightsAfterPaste(finalText);
 
       // 修正偵測（fire-and-forget；API key / 設定檢查移至 flow 內部）
-      startCorrectionDetectionFlow(params.text, params.record.id);
+      startCorrectionDetectionFlow(pasteText, params.record.id);
     } catch (pasteError) {
       isRecording.value = false;
       failRecordingFlow(
@@ -1344,13 +1363,16 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
       // 不會額外拖慢流程（perf 稽核 F4）。之後所有分支都需要 audioFilePath。
       audioFilePath = await saveRecordingFilePromise;
 
-      // #39：轉譯語言為繁中時，把 Whisper 簡體輸出轉繁體（落地前一次到位）
+      // #39/#55：落地前一次到位——beforeAI 取代 → 簡→繁（zh-TW）
+      const replacementStore = useReplacementStore();
+      await replacementStore.ensureLoaded();
       result.rawText = await applyTranscriptTextTransforms(
         result.rawText,
         resolveEffectiveTranscriptionLocale(
           settingsStore.selectedTranscriptionLocale,
           settingsStore.selectedLocale,
         ),
+        replacementStore.rules,
       );
 
       writeInfoLog(`轉錄原文: "${result.rawText}"`);
@@ -1800,13 +1822,16 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
       );
       if (isAborted.value) return;
 
-      // #39：同主路徑，重送轉錄後也套用簡→繁
+      // #39/#55：同主路徑，重送轉錄後也套 beforeAI 取代 → 簡→繁
+      const replacementStore = useReplacementStore();
+      await replacementStore.ensureLoaded();
       result.rawText = await applyTranscriptTextTransforms(
         result.rawText,
         resolveEffectiveTranscriptionLocale(
           settingsStore.selectedTranscriptionLocale,
           settingsStore.selectedLocale,
         ),
+        replacementStore.rules,
       );
 
       writeInfoLog(`重送轉錄原文: "${result.rawText}"`);

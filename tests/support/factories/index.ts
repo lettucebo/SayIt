@@ -6,3 +6,7 @@ export {
   createVocabularyEntry,
   type VocabularyEntry,
 } from "./vocabulary-factory";
+export {
+  createReplacementRule,
+  type ReplacementRule,
+} from "./replacement-factory";

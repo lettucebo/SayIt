@@ -244,6 +244,13 @@ vi.mock("../../src/stores/useSettingsStore", () => ({
   }),
 }));
 
+vi.mock("../../src/stores/useReplacementStore", () => ({
+  useReplacementStore: () => ({
+    rules: [],
+    ensureLoaded: vi.fn().mockResolvedValue(undefined),
+  }),
+}));
+
 vi.mock("../../src/stores/useVocabularyStore", () => ({
   useVocabularyStore: () => ({
     termList: mockVocabularyState.termList,

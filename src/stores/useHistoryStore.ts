@@ -32,6 +32,7 @@ import {
 } from "../lib/transcriptTransforms";
 import { useSettingsStore } from "./useSettingsStore";
 import { useVocabularyStore } from "./useVocabularyStore";
+import { useReplacementStore } from "./useReplacementStore";
 import {
   emitToWindow,
   TRANSCRIPTION_COMPLETED,
@@ -723,13 +724,16 @@ export const useHistoryStore = defineStore("history", () => {
       return { ok: false, errorKey: "history.retranscribeFailed" };
     }
 
-    // #39：同主路徑，重新辨識後也套用簡→繁（寫回 raw_text 前）
+    // #39/#55：同主路徑，重新辨識後套 beforeAI 取代 → 簡→繁（寫回 raw_text 前）
+    const replacementStore = useReplacementStore();
+    await replacementStore.ensureLoaded();
     result.rawText = await applyTranscriptTextTransforms(
       result.rawText,
       resolveEffectiveTranscriptionLocale(
         settingsStore.selectedTranscriptionLocale,
         settingsStore.selectedLocale,
       ),
+      replacementStore.rules,
     );
 
     // HTTP 成功即計費（不論轉錄內容）→ 記錄 whisper 用量
