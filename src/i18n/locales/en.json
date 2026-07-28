@@ -310,7 +310,7 @@
     "contextInjection": {
       "title": "Context Injection",
       "description": "After recording stops and before AI enhancement, read text near the cursor and the current foreground app name to align terminology and tone with your context.",
-      "privacyNote": "Privacy note: this is off by default. When enabled, nearby cursor text and the app name are sent to your configured AI service; sensitive fields such as passwords are skipped automatically, and read failures degrade silently."
+      "privacyNote": "Privacy note: off by default. When enabled, nearby cursor text and the foreground app name are sent together with your speech to your configured cloud AI service (e.g. Groq/OpenAI) for cleanup. Only fields the OS explicitly marks as password are skipped; passwords, API keys, or personal data inside ordinary documents or text boxes are not guaranteed to be excluded. Do not enable while handling confidential content. Read failures degrade silently."
     },
     "azure": {
       "title": "Azure / Microsoft Foundry",
