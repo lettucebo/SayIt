@@ -61,6 +61,9 @@ import {
   type LlmModelId,
   type LlmProviderId,
   type WhisperModelId,
+  type TranscriptionProviderId,
+  GEMINI_TRANSCRIPTION_MODEL,
+  getEffectiveTranscriptionProviderId,
 } from "../lib/modelRegistry";
 import {
   normalizeAzureEndpoint,
@@ -203,8 +206,9 @@ export const useSettingsStore = defineStore("settings", () => {
   const azureOmitTemperature = ref<boolean>(false);
   const azureChatDeployment = ref<string>("");
   const azureWhisperDeployment = ref<string>("");
-  const whisperProviderId = ref<"groq" | "azure">("groq");
+  const whisperProviderId = ref<TranscriptionProviderId>("groq");
   const hasWhisperConfig = computed(() => {
+    if (whisperProviderId.value === "gemini") return geminiApiKey.value !== "";
     if (whisperProviderId.value !== "azure") return apiKey.value !== "";
     return (
       azureEnabled.value &&
@@ -318,19 +322,34 @@ export const useSettingsStore = defineStore("settings", () => {
   }
 
   /**
-   * 解析語音轉錄所需的 auth + provider + Azure 連線參數。
+   * 解析語音轉錄所需的 auth + provider + 模型 + Azure 連線參數。
    * Azure-Entra 用 cognitiveservices scope（deployments 路徑）。
+   * modelId 由 provider 決定：Gemini 有自己的固定轉錄模型，不可沿用 WhisperModelId。
    */
   async function getWhisperRequestConfig(): Promise<{
     apiKey: string;
-    provider: "groq" | "azure";
+    provider: TranscriptionProviderId;
+    modelId: string;
     endpoint?: string;
     deployment?: string;
     apiVersion?: string;
     authMode?: "key" | "entra";
   }> {
+    // Gemini 走 generateContent，模型固定（沿用 whisper-large-v3 會打到不存在的端點）
+    if (whisperProviderId.value === "gemini") {
+      return {
+        apiKey: geminiApiKey.value,
+        provider: "gemini",
+        modelId: GEMINI_TRANSCRIPTION_MODEL,
+      };
+    }
+
     if (whisperProviderId.value !== "azure") {
-      return { apiKey: apiKey.value, provider: "groq" };
+      return {
+        apiKey: apiKey.value,
+        provider: "groq",
+        modelId: selectedWhisperModelId.value,
+      };
     }
 
     if (
@@ -338,11 +357,16 @@ export const useSettingsStore = defineStore("settings", () => {
       azureEndpoint.value === "" ||
       azureWhisperDeployment.value === ""
     ) {
-      return { apiKey: "", provider: "azure" };
+      return {
+        apiKey: "",
+        provider: "azure",
+        modelId: selectedWhisperModelId.value,
+      };
     }
 
     const base = {
       provider: "azure" as const,
+      modelId: selectedWhisperModelId.value,
       endpoint: azureEndpoint.value,
       deployment: azureWhisperDeployment.value,
       apiVersion: azureApiVersion.value || undefined,
@@ -518,8 +542,9 @@ export const useSettingsStore = defineStore("settings", () => {
         (await store.get<string>("azureChatDeployment"))?.trim() ?? "";
       azureWhisperDeployment.value =
         (await store.get<string>("azureWhisperDeployment"))?.trim() ?? "";
-      whisperProviderId.value =
-        (await store.get<"groq" | "azure">("whisperProviderId")) ?? "groq";
+      whisperProviderId.value = getEffectiveTranscriptionProviderId(
+        await store.get<string>("whisperProviderId"),
+      );
 
       // LLM Model ID（含 Kimi K2 遷移）
       const savedLlmModelId = await store.get<string>("llmModelId");
@@ -803,6 +828,32 @@ export const useSettingsStore = defineStore("settings", () => {
     } catch (err) {
       console.error(
         "[useSettingsStore] refreshApiKey failed:",
+        extractErrorMessage(err),
+      );
+    }
+  }
+
+  /**
+   * 依「轉錄 provider」刷新對應金鑰。
+   * 與 refreshLlmApiKey（依 LLM provider）不同：使用者可能用 Groq LLM + Gemini 轉錄，
+   * 那條路徑刷不到 Gemini key，會讓 HUD 一直持有空值而轉錄失敗。
+   */
+  async function refreshTranscriptionApiKey() {
+    try {
+      const store = await load(STORE_NAME);
+      if (whisperProviderId.value === "gemini") {
+        const savedKey = await store.get<string>("geminiApiKey");
+        geminiApiKey.value = savedKey?.trim() ?? "";
+        return;
+      }
+      if (whisperProviderId.value === "groq") {
+        const savedApiKey = await store.get<string>("groqApiKey");
+        apiKey.value = savedApiKey?.trim() ?? "";
+      }
+      // azure：連線參數由 refreshCrossWindowSettings 統一刷新
+    } catch (err) {
+      console.error(
+        "[useSettingsStore] refreshTranscriptionApiKey failed:",
         extractErrorMessage(err),
       );
     }
@@ -1121,6 +1172,10 @@ export const useSettingsStore = defineStore("settings", () => {
       await store.set("geminiApiKey", trimmedKey);
       await store.save();
       geminiApiKey.value = trimmedKey;
+      // 通知其他視窗（HUD）重讀：Gemini 也可能是「轉錄」provider，
+      // 舊 key 若不刷新會讓 HUD 繼續用過期憑證。payload 不含金鑰值。
+      const payload: SettingsUpdatedPayload = { key: "geminiApiKey", value: "" };
+      await emitEvent(SETTINGS_UPDATED, payload);
       console.log("[useSettingsStore] Gemini API Key saved");
     } catch (err) {
       console.error(
@@ -1141,6 +1196,9 @@ export const useSettingsStore = defineStore("settings", () => {
       await store.delete("geminiApiKey");
       await store.save();
       geminiApiKey.value = "";
+      // 刪除同樣要廣播，否則 HUD 會繼續持有已刪除的 key 並送出請求
+      const payload: SettingsUpdatedPayload = { key: "geminiApiKey", value: "" };
+      await emitEvent(SETTINGS_UPDATED, payload);
       console.log("[useSettingsStore] Gemini API Key deleted");
     } catch (err) {
       console.error(
@@ -1336,7 +1394,7 @@ export const useSettingsStore = defineStore("settings", () => {
     }
   }
 
-  async function saveWhisperProvider(id: "groq" | "azure") {
+  async function saveWhisperProvider(id: TranscriptionProviderId) {
     try {
       const store = await load(STORE_NAME);
       await store.set("whisperProviderId", id);
@@ -1974,8 +2032,9 @@ export const useSettingsStore = defineStore("settings", () => {
         (await store.get<string>("azureChatDeployment"))?.trim() ?? "";
       azureWhisperDeployment.value =
         (await store.get<string>("azureWhisperDeployment"))?.trim() ?? "";
-      whisperProviderId.value =
-        (await store.get<"groq" | "azure">("whisperProviderId")) ?? "groq";
+      whisperProviderId.value = getEffectiveTranscriptionProviderId(
+        await store.get<string>("whisperProviderId"),
+      );
     } catch (err) {
       console.error(
         "[useSettingsStore] refreshCrossWindowSettings failed:",
@@ -2136,6 +2195,7 @@ export const useSettingsStore = defineStore("settings", () => {
     saveAiPrompt,
     resetAiPrompt,
     refreshApiKey,
+    refreshTranscriptionApiKey,
     loadSettings,
     saveHotkeyConfig,
     saveCustomTriggerKey,

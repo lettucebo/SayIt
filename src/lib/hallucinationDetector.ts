@@ -29,7 +29,8 @@ export interface HallucinationDetectionParams {
   recordingDurationMs: number;
   peakEnergyLevel: number;
   rmsEnergyLevel: number;
-  noSpeechProbability: number;
+  /** Whisper 的 no-speech 機率；provider 未提供此信號時為 null（Layer 2b 跳過）。 */
+  noSpeechProbability: number | null;
 }
 
 export interface HallucinationDetectionResult {
@@ -185,9 +186,12 @@ export function detectHallucination(
   // 2a: 完全靜音 — 麥克風確認無任何聲音（peak < 0.02）
   // 2b: peak 偏低（< 0.03）+ 低 RMS + 高 NSP 聯合判斷
   //     若 peak >= 0.03 表示有明確可聽聲音，跳過此檢查（escape hatch）
+  //     NSP 為 null（provider 未提供，如 Gemini）時跳過 2b：不可用 0 假裝「有語音」
+  //     （fail-open 會漏判），也不可用 1 假裝「無語音」（會誤殺真實低音量語音）。
   if (
     peakEnergyLevel < SILENCE_PEAK_ENERGY_THRESHOLD ||
-    (peakEnergyLevel < LAYER2B_PEAK_ENERGY_CEILING &&
+    (noSpeechProbability !== null &&
+      peakEnergyLevel < LAYER2B_PEAK_ENERGY_CEILING &&
       rmsEnergyLevel < SILENCE_RMS_THRESHOLD &&
       noSpeechProbability > SILENCE_NSP_THRESHOLD)
   ) {

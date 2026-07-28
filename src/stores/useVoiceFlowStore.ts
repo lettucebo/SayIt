@@ -41,6 +41,7 @@ import {
   calculateWhisperCostCeiling,
   calculateChatCostCeiling,
 } from "../lib/apiPricing";
+import { GEMINI_TRANSCRIPTION_MODEL } from "../lib/modelRegistry";
 import type { StopRecordingResult, TranscriptionResult } from "../types/audio";
 import {
   HOTKEY_ERROR,
@@ -953,6 +954,12 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
     const historyStore = useHistoryStore();
     const settingsStore = useSettingsStore();
     const roundedAudioMs = record.recordingDurationMs;
+    // 記錄實際使用的轉錄 provider/model（Gemini 有自己的固定模型，不可記成 Whisper 模型）
+    const transcriptionProvider = settingsStore.whisperProviderId;
+    const isGeminiTranscription = transcriptionProvider === "gemini";
+    const transcriptionModel = isGeminiTranscription
+      ? GEMINI_TRANSCRIPTION_MODEL
+      : settingsStore.selectedWhisperModelId;
 
     function fireAndForget(usageRecord: ApiUsageRecord) {
       historyStore
@@ -968,7 +975,7 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
       id: crypto.randomUUID(),
       transcriptionId: record.id,
       apiType: "whisper",
-      model: settingsStore.selectedWhisperModelId,
+      model: transcriptionModel,
       promptTokens: null,
       completionTokens: null,
       totalTokens: null,
@@ -976,9 +983,12 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
       completionTimeMs: null,
       totalTimeMs: null,
       audioDurationMs: roundedAudioMs,
+      // Gemini 走 audio-token 計價（非 Groq 每小時費率）且尚未追蹤 usageMetadata；
+      // calculateWhisperCostCeiling 對非 Whisper 系模型一律回 0（單一真相來源，
+      // 與歷史重新辨識路徑一致）。
       estimatedCostCeiling: calculateWhisperCostCeiling(
         roundedAudioMs,
-        settingsStore.selectedWhisperModelId,
+        transcriptionModel,
       ),
     });
 
@@ -1367,11 +1377,9 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
 
       transitionTo("transcribing", t("voiceFlow.transcribing"));
       const settingsStore = useSettingsStore();
-      if (
-        settingsStore.whisperProviderId === "groq" &&
-        !settingsStore.getApiKey()
-      ) {
-        await settingsStore.refreshApiKey();
+      // 跨視窗：HUD 可能持有過期或空的金鑰，依轉錄 provider 補刷一次
+      if (!settingsStore.hasWhisperConfig) {
+        await settingsStore.refreshTranscriptionApiKey();
       }
 
       const whisperCfg = await settingsStore.getWhisperRequestConfig();
@@ -1392,7 +1400,7 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
       const result = await invoke<TranscriptionResult>("transcribe_audio", {
         apiKey: whisperCfg.apiKey,
         vocabularyTermList: hasVocabulary ? whisperTermList : null,
-        modelId: settingsStore.selectedWhisperModelId,
+        modelId: whisperCfg.modelId,
         language: settingsStore.getWhisperLanguageCode(),
         provider: whisperCfg.provider,
         endpoint: whisperCfg.endpoint ?? null,
@@ -1435,14 +1443,14 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
 
         failRecordingFlow(
           t("voiceFlow.noSpeechDetected"),
-          `useVoiceFlowStore: empty transcription (noSpeechProb=${result.noSpeechProbability.toFixed(3)})`,
+          `useVoiceFlowStore: empty transcription (noSpeechProb=${result.noSpeechProbability?.toFixed(3) ?? "n/a"})`,
         );
         return;
       }
 
       // ── 幻覺偵測（純物理信號：語速異常 + 無人聲）──
       writeInfoLog(
-        `useVoiceFlowStore: hallucination detection input: peakEnergy=${peakEnergyLevel.toFixed(4)}, rmsEnergy=${rmsEnergyLevel.toFixed(4)}, nsp=${result.noSpeechProbability.toFixed(3)}, rawText="${whisperRawText}", durationMs=${Math.round(recordingDurationMs)}`,
+        `useVoiceFlowStore: hallucination detection input: peakEnergy=${peakEnergyLevel.toFixed(4)}, rmsEnergy=${rmsEnergyLevel.toFixed(4)}, nsp=${result.noSpeechProbability?.toFixed(3) ?? "n/a"}, rawText="${whisperRawText}", durationMs=${Math.round(recordingDurationMs)}`,
       );
 
       const hallucinationDetectionResult = detectHallucination({
@@ -1832,11 +1840,9 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
 
     try {
       const settingsStore = useSettingsStore();
-      if (
-        settingsStore.whisperProviderId === "groq" &&
-        !settingsStore.getApiKey()
-      ) {
-        await settingsStore.refreshApiKey();
+      // 跨視窗：HUD 可能持有過期或空的金鑰，依轉錄 provider 補刷一次
+      if (!settingsStore.hasWhisperConfig) {
+        await settingsStore.refreshTranscriptionApiKey();
       }
 
       const whisperCfg = await settingsStore.getWhisperRequestConfig();
@@ -1859,7 +1865,7 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
           filePath,
           apiKey: whisperCfg.apiKey,
           vocabularyTermList: hasVocabulary ? whisperTermList : null,
-          modelId: settingsStore.selectedWhisperModelId,
+          modelId: whisperCfg.modelId,
           language: settingsStore.getWhisperLanguageCode(),
           provider: whisperCfg.provider,
           endpoint: whisperCfg.endpoint ?? null,

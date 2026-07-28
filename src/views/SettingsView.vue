@@ -56,6 +56,8 @@ import {
   type LlmModelId,
   type LlmProviderId,
   type WhisperModelId,
+  type TranscriptionProviderId,
+  GEMINI_TRANSCRIPTION_MODEL,
 } from "../lib/modelRegistry";
 import { LLM_PROVIDER_LIST, findProviderConfig } from "../lib/llmProvider";
 import {
@@ -878,12 +880,27 @@ function azureConnectionIssue(deployment: string): string {
   return "";
 }
 
-async function handleWhisperProviderChange(id: "groq" | "azure") {
+async function handleWhisperProviderChange(id: TranscriptionProviderId) {
   try {
     await settingsStore.saveWhisperProvider(id);
     modelFeedback.show("success", t("settings.model.whisperUpdated"));
   } catch (err) {
     modelFeedback.show("error", extractErrorMessage(err));
+  }
+}
+
+async function testGeminiWhisperConnection() {
+  try {
+    const cfg = await settingsStore.getWhisperRequestConfig();
+    return await testWhisperConnection(cfg.modelId, cfg.apiKey, {
+      provider: cfg.provider,
+    });
+  } catch (err) {
+    return {
+      ok: false as const,
+      durationMs: 0,
+      errorMessage: extractErrorMessage(err),
+    };
   }
 }
 
@@ -2096,12 +2113,12 @@ onBeforeUnmount(() => {
         <div class="space-y-2">
           <Label for="whisper-model">{{ $t("settings.model.whisperLabel") }}</Label>
 
-          <!-- 轉錄 provider 切換（僅在 Azure 啟用時顯示） -->
+          <!-- 轉錄 provider 切換：Groq / Gemini 常駐，Azure 啟用時才出現 -->
           <RadioGroup
-            v-if="settingsStore.azureEnabled"
             :model-value="settingsStore.whisperProviderId"
-            class="grid grid-cols-2 gap-2"
-            @update:model-value="(v: unknown) => handleWhisperProviderChange(v as 'groq' | 'azure')"
+            class="grid gap-2"
+            :class="settingsStore.azureEnabled ? 'grid-cols-3' : 'grid-cols-2'"
+            @update:model-value="(v: unknown) => handleWhisperProviderChange(v as TranscriptionProviderId)"
           >
             <Label
               for="whisper-provider-groq"
@@ -2112,6 +2129,15 @@ onBeforeUnmount(() => {
               <span class="text-sm font-medium">Groq</span>
             </Label>
             <Label
+              for="whisper-provider-gemini"
+              class="flex cursor-pointer items-center gap-2.5 rounded-md border border-border p-3 transition-colors"
+              :class="settingsStore.whisperProviderId === 'gemini' ? 'border-primary bg-primary/5' : 'hover:bg-muted/50'"
+            >
+              <RadioGroupItem id="whisper-provider-gemini" value="gemini" class="!size-0 !border-0 !shadow-none overflow-hidden" />
+              <span class="text-sm font-medium">Gemini</span>
+            </Label>
+            <Label
+              v-if="settingsStore.azureEnabled"
               for="whisper-provider-azure"
               class="flex cursor-pointer items-center gap-2.5 rounded-md border border-border p-3 transition-colors"
               :class="settingsStore.whisperProviderId === 'azure' ? 'border-primary bg-primary/5' : 'hover:bg-muted/50'"
@@ -2147,6 +2173,49 @@ onBeforeUnmount(() => {
             <ConnectionTestButton
               :on-test="() => testWhisperConnection(settingsStore.selectedWhisperModelId, settingsStore.getApiKey())"
               :disabled="!settingsStore.hasApiKey"
+            />
+          </template>
+
+          <!-- Gemini 轉錄（模型固定，需 Gemini API Key；與 LLM 共用同一把 key） -->
+          <template v-else-if="settingsStore.whisperProviderId === 'gemini'">
+            <p class="text-xs text-muted-foreground">
+              {{ $t("settings.model.geminiTranscriptionHint", { model: GEMINI_TRANSCRIPTION_MODEL }) }}
+            </p>
+            <Label for="gemini-whisper-api-key">{{ $t("settings.providerApiKey.geminiTitle") }}</Label>
+            <div v-if="settingsStore.geminiApiKey" class="flex items-center gap-2">
+              <Input
+                id="gemini-whisper-api-key"
+                :model-value="isGeminiApiKeyVisible ? settingsStore.geminiApiKey : '••••••••••'"
+                readonly
+                class="flex-1 font-mono text-xs"
+              />
+              <Button variant="ghost" size="sm" @click="isGeminiApiKeyVisible = !isGeminiApiKeyVisible">
+                {{ isGeminiApiKeyVisible ? $t('settings.apiKey.hide') : $t('settings.apiKey.show') }}
+              </Button>
+              <Button variant="ghost" size="sm" class="text-destructive" @click="handleDeleteGeminiApiKey">
+                {{ $t('settings.apiKey.delete') }}
+              </Button>
+            </div>
+            <div v-else class="flex gap-2">
+              <Input
+                id="gemini-whisper-api-key"
+                v-model="geminiApiKeyInput"
+                type="password"
+                :placeholder="findProviderConfig('gemini')?.apiKeyPrefix + '...'"
+                class="flex-1 font-mono text-xs"
+              />
+              <Button size="sm" :disabled="!geminiApiKeyInput.trim()" @click="handleSaveGeminiApiKey">
+                {{ $t('common.save') }}
+              </Button>
+            </div>
+            <p class="text-xs text-muted-foreground">
+              {{ $t("settings.providerApiKey.geminiInstruction") }}
+              ·
+              <a :href="findProviderConfig('gemini')?.consoleUrl" target="_blank" rel="noopener noreferrer" class="underline">{{ $t("settings.providerApiKey.goToGemini") }}</a>
+            </p>
+            <ConnectionTestButton
+              :on-test="testGeminiWhisperConnection"
+              :disabled="!settingsStore.hasWhisperConfig"
             />
           </template>
 

@@ -20,8 +20,10 @@ const h = vi.hoisted(() => {
   };
   const settingsStub = {
     whisperProviderId: "groq",
+    hasWhisperConfig: true,
     getApiKey: () => "whisper-key",
     refreshApiKey: vi.fn(),
+    refreshTranscriptionApiKey: vi.fn(),
     getWhisperRequestConfig: vi.fn(),
     selectedWhisperModelId: "whisper-large-v3-turbo",
     getWhisperLanguageCode: () => "zh",
@@ -111,10 +113,15 @@ describe("useHistoryStore retry", () => {
     h.mockReplacementState.rules = [];
     h.mockReplacementState.ensureLoaded.mockClear().mockResolvedValue(undefined);
     h.settingsStub.refreshApiKey.mockReset().mockResolvedValue(undefined);
-    h.settingsStub.refreshLlmApiKey.mockReset().mockResolvedValue(undefined);
-    h.settingsStub.getWhisperRequestConfig
+    h.settingsStub.refreshTranscriptionApiKey
       .mockReset()
-      .mockResolvedValue({ apiKey: "whisper-key", provider: "groq" });
+      .mockResolvedValue(undefined);
+    h.settingsStub.refreshLlmApiKey.mockReset().mockResolvedValue(undefined);
+    h.settingsStub.getWhisperRequestConfig.mockReset().mockResolvedValue({
+      apiKey: "whisper-key",
+      provider: "groq",
+      modelId: "whisper-large-v3-turbo",
+    });
     h.settingsStub.getLlmRequestConfig.mockReset().mockResolvedValue({
       apiKey: "llm-key",
       provider: "groq",

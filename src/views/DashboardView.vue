@@ -49,6 +49,12 @@ const isPaidWhisperProvider = computed(
   () => settingsStore.whisperProviderId === "azure",
 );
 
+// Gemini 轉錄的免費額度依帳號浮動且不公開（同 Gemini LLM）：不套用 Groq 的
+// RPD/音訊秒數上限，否則額度條會顯示與實際無關的數字。
+const isQuotaHiddenWhisperProvider = computed(
+  () => settingsStore.whisperProviderId === "gemini",
+);
+
 const isPaidLlmProvider = computed(() => {
   const providerId = settingsStore.selectedLlmProviderId;
   // groq / gemini 提供免費額度；openai / anthropic / azure 為計費方案
@@ -73,7 +79,7 @@ const quotaDimensionList = computed(() => {
   const dimensionList: { remaining: number; label: string }[] = [];
 
   // 免費 Whisper（Groq）才顯示額度維度；limit 為 0 的維度略過避免誤導
-  if (!isPaidWhisperProvider.value) {
+  if (!isPaidWhisperProvider.value && !isQuotaHiddenWhisperProvider.value) {
     const wConfig = findWhisperModelConfig(settingsStore.selectedWhisperModelId);
     const wRpdLimit = wConfig?.freeQuotaRpd ?? 2000;
     const wAudioLimitMs =
@@ -116,11 +122,12 @@ const quotaDimensionList = computed(() => {
 
 const hasFreeQuota = computed(() => quotaDimensionList.value.length > 0);
 
-// 計費方案（Azure/OpenAI/Anthropic）無免費額度，改顯示今日實際用量
+// 計費方案（Azure/OpenAI/Anthropic）無免費額度，改顯示今日實際用量；
+// 額度不公開的 provider（Gemini）同樣改顯示用量，否則轉錄用量會完全不可見。
 const paidUsageList = computed(() => {
   const usage = historyStore.dashboardStats.dailyQuotaUsage;
   const list: { label: string }[] = [];
-  if (isPaidWhisperProvider.value) {
+  if (isPaidWhisperProvider.value || isQuotaHiddenWhisperProvider.value) {
     list.push({
       label: t("dashboard.usageWhisper", {
         requests: formatNumber(usage.whisperRequestCount),

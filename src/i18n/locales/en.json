@@ -94,6 +94,7 @@
       "whisperLabel": "Speech Transcription Model (Whisper)",
       "llmLabel": "Text Enhancement Model (LLM)",
       "whisperUpdated": "Speech transcription model updated",
+      "geminiTranscriptionHint": "Transcribe speech with Gemini (model: {model}). Usually handles Chinese-English code-switching better than Whisper. Requires a Gemini API key.",
       "llmUpdated": "Text enhancement model updated",
       "default": "Default",
       "costPerHour": "${cost}/hour"

@@ -1,6 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import { enhanceText, EnhancerApiError } from "./enhancer";
-import type { LlmProviderId, WhisperModelId } from "./modelRegistry";
+import type {
+  LlmProviderId,
+  TranscriptionProviderId,
+} from "./modelRegistry";
 import type { AzureRequestOptions } from "./llmProvider";
 
 /**
@@ -57,10 +60,10 @@ export async function testLlmConnection(
 }
 
 export async function testWhisperConnection(
-  modelId: WhisperModelId,
+  modelId: string,
   apiKey: string,
   extras?: {
-    provider?: "groq" | "azure";
+    provider?: TranscriptionProviderId;
     endpoint?: string;
     deployment?: string;
     apiVersion?: string;

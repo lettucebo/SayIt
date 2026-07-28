@@ -94,6 +94,7 @@
       "whisperLabel": "语音转录模型（Whisper）",
       "llmLabel": "文字整理模型（LLM）",
       "whisperUpdated": "语音转录模型已更新",
+      "geminiTranscriptionHint": "使用 Gemini 进行语音转录（模型：{model}）。对中英夹杂的识别通常优于 Whisper，需要 Gemini API Key。",
       "llmUpdated": "文字整理模型已更新",
       "default": "默认",
       "costPerHour": "每小时 ${cost}"

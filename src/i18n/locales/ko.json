@@ -94,6 +94,7 @@
       "whisperLabel": "음성 전사 모델 (Whisper)",
       "llmLabel": "텍스트 정리 모델 (LLM)",
       "whisperUpdated": "음성 전사 모델이 업데이트되었습니다",
+      "geminiTranscriptionHint": "Gemini로 음성을 전사합니다(모델: {model}). 중국어-영어 혼용 음성에서 Whisper보다 정확한 경우가 많으며 Gemini API 키가 필요합니다.",
       "llmUpdated": "텍스트 정리 모델이 업데이트되었습니다",
       "default": "기본",
       "costPerHour": "시간당 ${cost}"

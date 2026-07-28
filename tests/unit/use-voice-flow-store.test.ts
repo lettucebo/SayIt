@@ -212,12 +212,17 @@ vi.mock("../../src/stores/useSettingsStore", () => ({
         modelId: mockSettingsState.selectedLlmModelId,
       }),
     getWhisperRequestConfig: () =>
-      Promise.resolve({ apiKey: mockSettingsState.apiKey, provider: "groq" }),
+      Promise.resolve({
+        apiKey: mockSettingsState.apiKey,
+        provider: "groq",
+        modelId: mockSettingsState.selectedWhisperModelId,
+      }),
     getEffectiveChatModel: () => mockSettingsState.selectedLlmModelId,
     whisperProviderId: "groq",
     hasWhisperConfig: true,
     getAiPrompt: () => mockSettingsState.aiPrompt,
     refreshApiKey: vi.fn().mockResolvedValue(undefined),
+    refreshTranscriptionApiKey: vi.fn().mockResolvedValue(undefined),
     refreshLlmApiKey: vi.fn().mockResolvedValue(undefined),
     hasLlmApiKey: true,
     refreshEnhancementThreshold: vi.fn().mockResolvedValue(undefined),

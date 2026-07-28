@@ -689,11 +689,9 @@ export const useHistoryStore = defineStore("history", () => {
     const settingsStore = useSettingsStore();
     const vocabularyStore = useVocabularyStore();
 
-    if (
-      settingsStore.whisperProviderId === "groq" &&
-      !settingsStore.getApiKey()
-    ) {
-      await settingsStore.refreshApiKey();
+    // 跨視窗：HUD/Dashboard 可能持有過期或空的金鑰，依轉錄 provider 補刷一次
+    if (!settingsStore.hasWhisperConfig) {
+      await settingsStore.refreshTranscriptionApiKey();
     }
 
     const whisperCfg = await settingsStore.getWhisperRequestConfig();
@@ -702,7 +700,7 @@ export const useHistoryStore = defineStore("history", () => {
     }
 
     const whisperTermList = await vocabularyStore.getTopTermListByWeight(50);
-    const model = settingsStore.selectedWhisperModelId;
+    const model = whisperCfg.modelId;
 
     let result: TranscriptionResult;
     try {

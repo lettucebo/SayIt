@@ -21,6 +21,20 @@ export type LlmModelId =
 
 export type WhisperModelId = "whisper-large-v3" | "whisper-large-v3-turbo";
 
+// ── 轉錄 Provider ─────────────────────────────────────────
+
+/** 語音轉錄 provider。Gemini 走 generateContent（非 Whisper multipart 協定）。 */
+export type TranscriptionProviderId = "groq" | "azure" | "gemini";
+
+export const DEFAULT_TRANSCRIPTION_PROVIDER_ID: TranscriptionProviderId = "groq";
+
+/**
+ * Gemini 轉錄固定模型（Rust `GEMINI_TRANSCRIPTION_MODEL` 需一致）。
+ * 刻意與 LLM chat 模型解耦：轉錄若沿用 WhisperModelId 會打到不存在的
+ * `/models/whisper-large-v3:generateContent`。
+ */
+export const GEMINI_TRANSCRIPTION_MODEL = "gemini-3.6-flash";
+
 interface BaseModelConfig {
   displayName: string;
   badgeKey: string;
@@ -277,4 +291,16 @@ export function getEffectiveWhisperModelId(
   if (savedId && findWhisperModelConfig(savedId))
     return savedId as WhisperModelId;
   return DEFAULT_WHISPER_MODEL_ID;
+}
+
+/**
+ * 安全取得轉錄 provider：未知值（壞掉的匯入檔／舊版殘留）一律退回預設，
+ * 避免把金鑰送到非預期的服務（Rust 端亦 fail-closed 拒絕未知 provider）。
+ */
+export function getEffectiveTranscriptionProviderId(
+  savedId: string | null | undefined,
+): TranscriptionProviderId {
+  return savedId === "azure" || savedId === "gemini" || savedId === "groq"
+    ? savedId
+    : DEFAULT_TRANSCRIPTION_PROVIDER_ID;
 }

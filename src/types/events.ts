@@ -21,6 +21,7 @@ export type TranscriptionCompletedPayload = Pick<
 export type SettingsKey =
   | "hotkey"
   | "apiKey"
+  | "geminiApiKey"
   | "aiPrompt"
   | "enhancementThreshold"
   | "llmModel"

@@ -4,7 +4,38 @@ import {
   DEFAULT_LLM_MODEL_ID,
   getEffectiveLlmModelId,
   findLlmModelConfig,
+  getEffectiveTranscriptionProviderId,
+  GEMINI_TRANSCRIPTION_MODEL,
+  DEFAULT_TRANSCRIPTION_PROVIDER_ID,
 } from "../../src/lib/modelRegistry";
+
+describe("modelRegistry — 轉錄 provider", () => {
+  it("[P0] 已知 provider 原樣回傳", () => {
+    expect(getEffectiveTranscriptionProviderId("groq")).toBe("groq");
+    expect(getEffectiveTranscriptionProviderId("azure")).toBe("azure");
+    expect(getEffectiveTranscriptionProviderId("gemini")).toBe("gemini");
+  });
+
+  it("[P0] 未知/空值 fail-closed 退回預設（避免金鑰送到非預期服務）", () => {
+    expect(getEffectiveTranscriptionProviderId("openai")).toBe(
+      DEFAULT_TRANSCRIPTION_PROVIDER_ID,
+    );
+    expect(getEffectiveTranscriptionProviderId("")).toBe(
+      DEFAULT_TRANSCRIPTION_PROVIDER_ID,
+    );
+    expect(getEffectiveTranscriptionProviderId(null)).toBe(
+      DEFAULT_TRANSCRIPTION_PROVIDER_ID,
+    );
+    expect(getEffectiveTranscriptionProviderId(undefined)).toBe(
+      DEFAULT_TRANSCRIPTION_PROVIDER_ID,
+    );
+  });
+
+  it("[P0] Gemini 轉錄模型不得是 Whisper 模型 id（會打到不存在的端點）", () => {
+    expect(GEMINI_TRANSCRIPTION_MODEL).toMatch(/^gemini-/);
+    expect(GEMINI_TRANSCRIPTION_MODEL).not.toMatch(/whisper/);
+  });
+});
 
 describe("modelRegistry — 模型遷移", () => {
   describe("DECOMMISSIONED_MODEL_MAP 不變量", () => {
