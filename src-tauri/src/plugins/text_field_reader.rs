@@ -817,7 +817,8 @@ mod windows_impl {
     fn read_excerpt(automation: &IUIAutomation) -> Option<String> {
         let element = unsafe { automation.GetFocusedElement() }.ok()?;
 
-        // 隱私保護：聚焦在密碼 / 受保護欄位時不讀取，避免把密碼 / token / API key 送 LLM。
+        // 隱私保護：聚焦在密碼 / 受保護欄位、或無法判定時皆不讀取，
+        // 避免把密碼 / token / API key 送 LLM。
         if is_password_element(&element) {
             return None;
         }
@@ -841,11 +842,13 @@ mod windows_impl {
         None
     }
 
-    /// 聚焦元素是否為密碼 / 受保護欄位（讀不到屬性時保守視為「否」以免誤關功能）。
+    /// 聚焦元素是否為密碼 / 受保護欄位。
+    /// **fail-closed**：讀不到 IsPassword 屬性時保守視為「是」（回 true），
+    /// 寧可不讀（情境注入在該欄失效）也不冒把密碼送雲端 LLM 的風險。
     fn is_password_element(element: &IUIAutomationElement) -> bool {
         unsafe { element.CurrentIsPassword() }
             .map(|b| b.as_bool())
-            .unwrap_or(false)
+            .unwrap_or(true)
     }
 
     fn read_via_text_pattern(element: &IUIAutomationElement) -> Option<String> {
