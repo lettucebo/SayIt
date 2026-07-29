@@ -232,6 +232,22 @@ export const useReplacementStore = defineStore("replacement", () => {
     return result.valid;
   }
 
+  /** 匯出目前規則（備份用）。 */
+  async function exportRules(): Promise<ReplacementRule[]> {
+    await ensureLoaded();
+    return [...rules.value];
+  }
+
+  /**
+   * 以匯入的規則整批取代（備份還原用）。
+   * 沿用 sanitizeRuleList 丟棄不合法規則，並套用筆數上限，
+   * 避免壞掉的備份檔寫入無法在 UI 修復的規則或超量資料。
+   */
+  async function importRules(value: unknown): Promise<RuleValidationResult> {
+    const sanitized = sanitizeRuleList(value).slice(0, MAX_REPLACEMENT_RULES);
+    return commitRules(sanitized, "import");
+  }
+
   return {
     rules,
     ruleCount,
@@ -241,5 +257,7 @@ export const useReplacementStore = defineStore("replacement", () => {
     updateRule,
     removeRule,
     validateRuleInput,
+    exportRules,
+    importRules,
   };
 });

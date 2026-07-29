@@ -1483,10 +1483,15 @@ async function handleBackupExport() {
     const dictionary = exportDictionarySelected.value
       ? buildExportFile(await vocabularyStore.exportEntries(), iso)
       : null;
+    // 文字取代規則屬設定類（存於 replacements.json）→ 隨「設定」一起備份
+    const replacements = exportSettingsSelected.value
+      ? await replacementStore.exportRules()
+      : null;
 
     let file = buildBackupFile({
       settings,
       dictionary,
+      replacements,
       appVersion: __APP_VERSION__,
       exportedAt: iso,
     });
@@ -1620,6 +1625,10 @@ async function applyBackupImport() {
       await settingsStore.importSettings(cleanSettings);
       resyncLocalInputsFromStore();
       settingsApplied = true;
+      // 取代規則隨設定一起還原（舊備份沒有此區塊 → 維持現有規則不動）
+      if (payload.replacements) {
+        await replacementStore.importRules(payload.replacements);
+      }
       // 音訊裝置若有變更，重啟預覽以對齊新裝置
       if (
         settingsStore.selectedAudioInputDeviceName !== deviceBeforeImport

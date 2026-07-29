@@ -2185,15 +2185,22 @@ export const useSettingsStore = defineStore("settings", () => {
     if (!excludeSecrets) return result;
 
     const stripped = stripSensitiveKeys(result);
-    // 排除金鑰時，避免在目標機產生「已啟用但缺憑證」的壞掉 Azure 狀態：
-    // 同步停用 Azure，並把使用 Azure 的 provider 退回預設（groq）。
+    // 排除金鑰時，避免在目標機產生「已啟用但缺憑證」的壞掉狀態：
+    // Azure 同步停用，並把使用 Azure／Gemini 的 provider 退回預設（groq）——
+    // geminiApiKey 也是敏感 key，被剔除後留著 gemini provider 同樣無法運作。
     if (stripped.azureEnabled === true) {
       stripped.azureEnabled = false;
     }
-    if (stripped.whisperProviderId === "azure") {
+    if (
+      stripped.whisperProviderId === "azure" ||
+      stripped.whisperProviderId === "gemini"
+    ) {
       stripped.whisperProviderId = "groq";
     }
-    if (stripped.llmProviderId === "azure") {
+    if (
+      stripped.llmProviderId === "azure" ||
+      stripped.llmProviderId === "gemini"
+    ) {
       stripped.llmProviderId = "groq";
       delete stripped.llmModelId; // 讓目標機依 provider 套用預設模型
     }

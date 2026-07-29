@@ -20,6 +20,40 @@ import {
 } from "../../src/lib/settingsTransfer";
 import { buildExportFile } from "../../src/lib/vocabularyTransfer";
 import type { VocabularyExportFile } from "../../src/types/vocabulary";
+import type { ReplacementRule } from "../../src/types/replacement";
+import {
+  EXPORTABLE_SETTING_KEYS,
+  sanitizeSettingsPayload as _sanitizeCheck,
+} from "../../src/lib/settingsTransfer";
+
+describe("EXPORTABLE_SETTING_KEYS 完整性", () => {
+  it("[P0] 新增的轉錄設定必須納入備份（否則還原後會遺失）", () => {
+    const required = [
+      "whisperProviderId",
+      "geminiTranscriptionModelId",
+      "geminiFreeQuotaRequests",
+      "geminiFreeQuotaPeriod",
+    ];
+    for (const key of required) {
+      expect(
+        (EXPORTABLE_SETTING_KEYS as readonly string[]).includes(key),
+        `${key} 不在備份白名單`,
+      ).toBe(true);
+    }
+  });
+
+  it("[P0] 白名單內的 key 都要能通過型別清洗（否則匯入時被靜默丟棄）", () => {
+    const sample: Record<string, unknown> = {
+      geminiTranscriptionModelId: "gemini-3.5-flash-lite",
+      geminiFreeQuotaRequests: 500,
+      geminiFreeQuotaPeriod: "daily",
+    };
+    const cleaned = _sanitizeCheck(sample);
+    expect(cleaned.geminiTranscriptionModelId).toBe("gemini-3.5-flash-lite");
+    expect(cleaned.geminiFreeQuotaRequests).toBe(500);
+    expect(cleaned.geminiFreeQuotaPeriod).toBe("daily");
+  });
+});
 
 const sampleSettings: SettingsPayload = {
   hotkeyTriggerKey: "fn",
@@ -38,10 +72,12 @@ const sampleDictionary: VocabularyExportFile = buildExportFile(
 function buildPlainBackup(
   settings: SettingsPayload | null,
   dictionary: VocabularyExportFile | null,
+  replacements: ReplacementRule[] | null = null,
 ): BackupFile {
   return buildBackupFile({
     settings,
     dictionary,
+    replacements,
     appVersion: "0.10.0",
     exportedAt: "2026-06-23T00:00:00.000Z",
   });
@@ -53,14 +89,51 @@ describe("buildBackupFile / serializeBackup", () => {
     expect(file.format).toBe(BACKUP_FORMAT);
     expect(file.version).toBe(BACKUP_VERSION);
     expect(file.encryption).toBeNull();
-    expect(file.contents).toEqual({ settings: true, dictionary: true });
+    expect(file.contents).toEqual({
+      settings: true,
+      dictionary: true,
+      replacements: false,
+    });
     expect(file.payload?.settings).toEqual(sampleSettings);
   });
 
   it("未選區塊時 contents 對應為 false、payload 為 null", () => {
     const file = buildPlainBackup(sampleSettings, null);
-    expect(file.contents).toEqual({ settings: true, dictionary: false });
+    expect(file.contents).toEqual({
+      settings: true,
+      dictionary: false,
+      replacements: false,
+    });
     expect(file.payload?.dictionary).toBeNull();
+  });
+
+  it("[P0] 取代規則納入備份並可完整還原", () => {
+    const rules: ReplacementRule[] = [
+      {
+        id: "r1",
+        patterns: ["雷特西", "來特西"],
+        replacement: "latency",
+        isRegex: false,
+        timing: "afterAI",
+        enabled: true,
+      },
+    ];
+    const file = buildPlainBackup(sampleSettings, null, rules);
+    expect(file.contents.replacements).toBe(true);
+    const parsed = parseBackup(serializeBackup(file));
+    expect(parsed.payload?.replacements).toEqual(rules);
+  });
+
+  it("[P0] 舊版備份（無 replacements 欄位）仍可解析", () => {
+    const file = buildPlainBackup(sampleSettings, null);
+    const raw = JSON.parse(serializeBackup(file)) as Record<string, unknown>;
+    // 模擬 v1 備份：移除 replacements 欄位
+    delete (raw.contents as Record<string, unknown>).replacements;
+    delete (raw.payload as Record<string, unknown>).replacements;
+
+    const parsed = parseBackup(JSON.stringify(raw));
+    expect(parsed.contents.settings).toBe(true);
+    expect(parsed.payload?.replacements ?? null).toBeNull();
   });
 
   it("serializeBackup 產生可解析的 JSON", () => {
@@ -163,7 +236,11 @@ describe("parseBackup（明文）", () => {
 
   it("partial（只含字典）合法", () => {
     const parsed = parseBackup(serializeBackup(buildPlainBackup(null, sampleDictionary)));
-    expect(parsed.contents).toEqual({ settings: false, dictionary: true });
+    expect(parsed.contents).toEqual({
+      settings: false,
+      dictionary: true,
+      replacements: false,
+    });
     expect(parsed.payload?.settings).toBeNull();
     expect(parsed.payload?.dictionary).not.toBeNull();
   });
