@@ -22,6 +22,7 @@ export type SettingsKey =
   | "hotkey"
   | "apiKey"
   | "geminiApiKey"
+  | "geminiFreeQuota"
   | "aiPrompt"
   | "enhancementThreshold"
   | "llmModel"

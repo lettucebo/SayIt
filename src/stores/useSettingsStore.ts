@@ -62,6 +62,8 @@ import {
   type LlmProviderId,
   type WhisperModelId,
   type TranscriptionProviderId,
+  type QuotaPeriod,
+  DEFAULT_QUOTA_PERIOD,
   GEMINI_TRANSCRIPTION_MODEL,
   getEffectiveTranscriptionProviderId,
 } from "../lib/modelRegistry";
@@ -207,6 +209,9 @@ export const useSettingsStore = defineStore("settings", () => {
   const azureChatDeployment = ref<string>("");
   const azureWhisperDeployment = ref<string>("");
   const whisperProviderId = ref<TranscriptionProviderId>("groq");
+  /** Gemini 轉錄免費額度（0 = 未設定）；Google 不公開 Free tier 數字，只能由使用者填入。 */
+  const geminiFreeQuotaRequests = ref<number>(0);
+  const geminiFreeQuotaPeriod = ref<QuotaPeriod>(DEFAULT_QUOTA_PERIOD);
   const hasWhisperConfig = computed(() => {
     if (whisperProviderId.value === "gemini") return geminiApiKey.value !== "";
     if (whisperProviderId.value !== "azure") return apiKey.value !== "";
@@ -545,6 +550,11 @@ export const useSettingsStore = defineStore("settings", () => {
       whisperProviderId.value = getEffectiveTranscriptionProviderId(
         await store.get<string>("whisperProviderId"),
       );
+      geminiFreeQuotaRequests.value =
+        (await store.get<number>("geminiFreeQuotaRequests")) ?? 0;
+      geminiFreeQuotaPeriod.value =
+        (await store.get<QuotaPeriod>("geminiFreeQuotaPeriod")) ??
+        DEFAULT_QUOTA_PERIOD;
 
       // LLM Model ID（含 Kimi K2 遷移）
       const savedLlmModelId = await store.get<string>("llmModelId");
@@ -1032,8 +1042,37 @@ export const useSettingsStore = defineStore("settings", () => {
     }
   }
 
-  async function saveLlmModel(id: LlmModelId) {
+  /**
+   * 儲存 Gemini 轉錄的免費額度（使用者自 AI Studio 查得後填入）。
+   * Google 不公開 Free tier 的 RPD/TPD 數字（依帳號浮動），因此無法內建預設值；
+   * 未填（0）時 Dashboard 只顯示實際用量、不顯示額度條，避免捏造分母。
+   */
+  async function saveGeminiFreeQuota(requests: number, period: QuotaPeriod) {
+    const validatedRequests =
+      !Number.isFinite(requests) || requests < 0 ? 0 : Math.floor(requests);
     try {
+      const store = await load(STORE_NAME);
+      await store.set("geminiFreeQuotaRequests", validatedRequests);
+      await store.set("geminiFreeQuotaPeriod", period);
+      await store.save();
+      geminiFreeQuotaRequests.value = validatedRequests;
+      geminiFreeQuotaPeriod.value = period;
+
+      const payload: SettingsUpdatedPayload = {
+        key: "geminiFreeQuota",
+        value: { requests: validatedRequests, period },
+      };
+      await emitEvent(SETTINGS_UPDATED, payload);
+    } catch (err) {
+      console.error(
+        "[useSettingsStore] saveGeminiFreeQuota failed:",
+        extractErrorMessage(err),
+      );
+      throw err;
+    }
+  }
+
+  async function saveLlmModel(id: LlmModelId) {    try {
       const store = await load(STORE_NAME);
       await store.set("llmModelId", id);
       await store.save();
@@ -2035,6 +2074,11 @@ export const useSettingsStore = defineStore("settings", () => {
       whisperProviderId.value = getEffectiveTranscriptionProviderId(
         await store.get<string>("whisperProviderId"),
       );
+      geminiFreeQuotaRequests.value =
+        (await store.get<number>("geminiFreeQuotaRequests")) ?? 0;
+      geminiFreeQuotaPeriod.value =
+        (await store.get<QuotaPeriod>("geminiFreeQuotaPeriod")) ??
+        DEFAULT_QUOTA_PERIOD;
     } catch (err) {
       console.error(
         "[useSettingsStore] refreshCrossWindowSettings failed:",
@@ -2237,6 +2281,9 @@ export const useSettingsStore = defineStore("settings", () => {
     azureChatDeployment,
     azureWhisperDeployment,
     whisperProviderId,
+    geminiFreeQuotaRequests,
+    geminiFreeQuotaPeriod,
+    saveGeminiFreeQuota,
     saveAzureConnection,
     deleteAzureConnection,
     saveAzureChatDeployment,

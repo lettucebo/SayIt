@@ -887,11 +887,20 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
     })();
   }
 
+  /** 轉錄請求當下的用量快照——避免事後重讀 settings（使用者可能已切換 provider）。 */
+  interface TranscriptionUsageSnapshot {
+    model: string;
+    promptTokens: number | null;
+    completionTokens: number | null;
+    totalTokens: number | null;
+  }
+
   async function completePasteFlow(params: {
     text: string;
     successMessage: string;
     record: TranscriptionRecord;
     chatUsage: ChatUsageData | null;
+    transcriptionUsage?: TranscriptionUsageSnapshot | null;
     skipRecordSaving?: boolean;
   }): Promise<string | null> {
     try {
@@ -925,7 +934,11 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
       // retry 路徑使用 updateTranscriptionOnRetrySuccess，不走 INSERT
       if (!params.skipRecordSaving) {
         void saveTranscriptionRecord(params.record).then(() => {
-          saveApiUsageRecordList(params.record, params.chatUsage);
+          saveApiUsageRecordList(
+            params.record,
+            params.chatUsage,
+            params.transcriptionUsage,
+          );
         });
       }
 
@@ -950,16 +963,18 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
   function saveApiUsageRecordList(
     record: TranscriptionRecord,
     chatUsage: ChatUsageData | null,
+    transcriptionUsage?: TranscriptionUsageSnapshot | null,
   ) {
     const historyStore = useHistoryStore();
     const settingsStore = useSettingsStore();
     const roundedAudioMs = record.recordingDurationMs;
-    // 記錄實際使用的轉錄 provider/model（Gemini 有自己的固定模型，不可記成 Whisper 模型）
-    const transcriptionProvider = settingsStore.whisperProviderId;
-    const isGeminiTranscription = transcriptionProvider === "gemini";
-    const transcriptionModel = isGeminiTranscription
-      ? GEMINI_TRANSCRIPTION_MODEL
-      : settingsStore.selectedWhisperModelId;
+    // 優先用請求當下的快照；沒有快照才回退讀設定（例如舊路徑）。
+    // Gemini 有自己的固定模型，不可記成 Whisper 模型。
+    const transcriptionModel =
+      transcriptionUsage?.model ??
+      (settingsStore.whisperProviderId === "gemini"
+        ? GEMINI_TRANSCRIPTION_MODEL
+        : settingsStore.selectedWhisperModelId);
 
     function fireAndForget(usageRecord: ApiUsageRecord) {
       historyStore
@@ -976,16 +991,16 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
       transcriptionId: record.id,
       apiType: "whisper",
       model: transcriptionModel,
-      promptTokens: null,
-      completionTokens: null,
-      totalTokens: null,
+      // Gemini 依 token 計量並回報 usageMetadata；Whisper 系為 null
+      promptTokens: transcriptionUsage?.promptTokens ?? null,
+      completionTokens: transcriptionUsage?.completionTokens ?? null,
+      totalTokens: transcriptionUsage?.totalTokens ?? null,
       promptTimeMs: null,
       completionTimeMs: null,
       totalTimeMs: null,
       audioDurationMs: roundedAudioMs,
-      // Gemini 走 audio-token 計價（非 Groq 每小時費率）且尚未追蹤 usageMetadata；
       // calculateWhisperCostCeiling 對非 Whisper 系模型一律回 0（單一真相來源，
-      // 與歷史重新辨識路徑一致）。
+      // 與歷史重新辨識路徑一致）——Gemini 走 token 計價，套每小時費率會顯示錯誤金額。
       estimatedCostCeiling: calculateWhisperCostCeiling(
         roundedAudioMs,
         transcriptionModel,
@@ -1410,6 +1425,15 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
       });
       if (isAborted.value) return;
 
+      // 用量快照：綁請求當下實際使用的 provider/model 與回報 token，
+      // 避免事後重讀 settings（使用者可能在轉錄途中切換 provider）。
+      const transcriptionUsage: TranscriptionUsageSnapshot = {
+        model: whisperCfg.modelId,
+        promptTokens: result.promptTokens,
+        completionTokens: result.completionTokens,
+        totalTokens: result.totalTokens,
+      };
+
       // 轉錄 API 呼叫期間，錄音檔應已在背景寫入完成；在此 await 只是取得結果，
       // 不會額外拖慢流程（perf 稽核 F4）。之後所有分支都需要 audioFilePath。
       audioFilePath = await saveRecordingFilePromise;
@@ -1637,6 +1661,7 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
             successMessage: t("voiceFlow.pasteSuccess"),
             record,
             chatUsage: enhanceResult.usage,
+            transcriptionUsage,
           });
 
           writeInfoLog(
@@ -1676,6 +1701,7 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
             successMessage: t("voiceFlow.pasteSuccessUnenhanced"),
             record: fallbackRecord,
             chatUsage: null,
+            transcriptionUsage,
           });
         }
       } else {
@@ -1696,6 +1722,7 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
           successMessage: t("voiceFlow.pasteSuccess"),
           record,
           chatUsage: null,
+          transcriptionUsage,
         });
 
         writeInfoLog(
@@ -1876,6 +1903,14 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
       );
       if (isAborted.value) return;
 
+      // 重送路徑同樣以請求當下的 provider/model + 回報 token 作為用量快照
+      const retryTranscriptionUsage: TranscriptionUsageSnapshot = {
+        model: whisperCfg.modelId,
+        promptTokens: result.promptTokens,
+        completionTokens: result.completionTokens,
+        totalTokens: result.totalTokens,
+      };
+
       const retryWhisperRawText = result.rawText;
       writeInfoLog(`重送轉錄原文: "${retryWhisperRawText}"`);
 
@@ -2003,7 +2038,11 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
               charCount: result.rawText.length,
             })
             .then(() => {
-              saveApiUsageRecordList(record, enhanceResult.usage);
+              saveApiUsageRecordList(
+                record,
+                enhanceResult.usage,
+                retryTranscriptionUsage,
+              );
             })
             .catch((err) =>
               writeErrorLog(
@@ -2057,7 +2096,11 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
               charCount: pasteText.length,
             })
             .then(() => {
-              saveApiUsageRecordList(fallbackRecord, null);
+              saveApiUsageRecordList(
+                fallbackRecord,
+                null,
+                retryTranscriptionUsage,
+              );
             })
             .catch((err) =>
               writeErrorLog(
@@ -2100,7 +2143,7 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
             charCount: pasteText.length,
           })
           .then(() => {
-            saveApiUsageRecordList(record, null);
+            saveApiUsageRecordList(record, null, retryTranscriptionUsage);
           })
           .catch((err) =>
             writeErrorLog(

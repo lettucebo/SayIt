@@ -57,6 +57,7 @@ import {
   type LlmProviderId,
   type WhisperModelId,
   type TranscriptionProviderId,
+  type QuotaPeriod,
   GEMINI_TRANSCRIPTION_MODEL,
 } from "../lib/modelRegistry";
 import { LLM_PROVIDER_LIST, findProviderConfig } from "../lib/llmProvider";
@@ -787,6 +788,12 @@ function loadAzureInputsFromStore() {
   azureApiVersionInput.value = settingsStore.azureApiVersion;
   azureChatDeploymentInput.value = settingsStore.azureChatDeployment;
   azureWhisperDeploymentInput.value = settingsStore.azureWhisperDeployment;
+  // Gemini 免費額度：0 視為「未設定」，輸入框留空而非顯示 0
+  geminiFreeQuotaInput.value =
+    settingsStore.geminiFreeQuotaRequests > 0
+      ? String(settingsStore.geminiFreeQuotaRequests)
+      : "";
+  geminiFreeQuotaPeriodInput.value = settingsStore.geminiFreeQuotaPeriod;
 }
 
 async function handleSaveAzureConnection() {
@@ -890,8 +897,23 @@ async function handleWhisperProviderChange(id: TranscriptionProviderId) {
   }
 }
 
-async function testGeminiWhisperConnection() {
+const geminiFreeQuotaInput = ref("");
+const geminiFreeQuotaPeriodInput = ref<QuotaPeriod>("daily");
+
+async function handleSaveGeminiFreeQuota() {
   try {
+    const parsed = Number(geminiFreeQuotaInput.value);
+    await settingsStore.saveGeminiFreeQuota(
+      Number.isFinite(parsed) ? parsed : 0,
+      geminiFreeQuotaPeriodInput.value,
+    );
+    modelFeedback.show("success", t("settings.model.geminiQuotaSaved"));
+  } catch (err) {
+    modelFeedback.show("error", extractErrorMessage(err));
+  }
+}
+
+async function testGeminiWhisperConnection() {  try {
     const cfg = await settingsStore.getWhisperRequestConfig();
     return await testWhisperConnection(cfg.modelId, cfg.apiKey, {
       provider: cfg.provider,
@@ -2219,6 +2241,39 @@ onBeforeUnmount(() => {
               :on-test="testGeminiWhisperConnection"
               :disabled="!settingsStore.hasWhisperConfig"
             />
+
+            <!-- 免費額度（Google 未公開，只能由使用者自 AI Studio 查得後填入） -->
+            <Label for="gemini-free-quota">{{ $t("settings.model.geminiQuotaLabel") }}</Label>
+            <div class="flex gap-2">
+              <Input
+                id="gemini-free-quota"
+                v-model="geminiFreeQuotaInput"
+                type="number"
+                min="0"
+                :placeholder="$t('settings.model.geminiQuotaPlaceholder')"
+                class="flex-1"
+              />
+              <Select
+                :model-value="geminiFreeQuotaPeriodInput"
+                @update:model-value="geminiFreeQuotaPeriodInput = $event as QuotaPeriod"
+              >
+                <SelectTrigger class="w-32">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="daily">{{ $t("settings.model.quotaPeriodDaily") }}</SelectItem>
+                  <SelectItem value="monthly">{{ $t("settings.model.quotaPeriodMonthly") }}</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button size="sm" @click="handleSaveGeminiFreeQuota">
+                {{ $t('common.save') }}
+              </Button>
+            </div>
+            <p class="text-xs text-muted-foreground">
+              {{ $t("settings.model.geminiQuotaHint") }}
+              ·
+              <a href="https://aistudio.google.com/rate-limit" target="_blank" rel="noopener noreferrer" class="underline">{{ $t("settings.model.geminiQuotaLink") }}</a>
+            </p>
           </template>
 
           <!-- Azure Whisper 部署 -->

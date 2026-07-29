@@ -100,6 +100,26 @@ pub struct TranscriptionResult {
     // recorder's StopRecordingResult instead).
     pub peak_energy_level: f32,
     pub rms_energy_level: f32,
+    /// Gemini 依 token 計量（音訊約 32 tokens/秒）並回報 usageMetadata；
+    /// Whisper（Groq/Azure）以音訊時長計費、不回報 token，故為 None。
+    pub prompt_tokens: Option<u32>,
+    pub completion_tokens: Option<u32>,
+    pub total_tokens: Option<u32>,
+}
+
+/// provider 回報的 token 用量（目前只有 Gemini 提供）。
+#[derive(Clone, Copy)]
+struct TokenUsage {
+    prompt_tokens: u32,
+    completion_tokens: u32,
+    total_tokens: u32,
+}
+
+/// 單次 API 嘗試的成功結果。
+struct AttemptOutcome {
+    raw_text: String,
+    no_speech_probability: Option<f64>,
+    token_usage: Option<TokenUsage>,
 }
 
 // ========== Groq API Response ==========
@@ -175,6 +195,8 @@ struct GeminiResponse {
     candidates: Option<Vec<GeminiCandidate>>,
     #[serde(rename = "promptFeedback")]
     prompt_feedback: Option<GeminiPromptFeedback>,
+    #[serde(rename = "usageMetadata")]
+    usage_metadata: Option<GeminiUsageMetadata>,
 }
 
 #[derive(serde::Deserialize)]
@@ -201,6 +223,33 @@ struct GeminiPart {
 struct GeminiPromptFeedback {
     #[serde(rename = "blockReason")]
     block_reason: Option<String>,
+}
+
+/// Gemini 回報的 token 用量。音訊約 32 tokens/秒（官方 audio 文件），
+/// 是 Gemini 免費層真正的計量單位（RPM/TPM/RPD），與音訊時長無關。
+#[derive(serde::Deserialize)]
+struct GeminiUsageMetadata {
+    #[serde(rename = "promptTokenCount")]
+    prompt_token_count: Option<u32>,
+    #[serde(rename = "candidatesTokenCount")]
+    candidates_token_count: Option<u32>,
+    #[serde(rename = "totalTokenCount")]
+    total_token_count: Option<u32>,
+}
+
+/// 由 Gemini 回應取出 token 用量；缺欄位時以 0 補（total 缺則以 prompt+candidates 推算）。
+fn extract_gemini_token_usage(resp: &GeminiResponse) -> Option<TokenUsage> {
+    let meta = resp.usage_metadata.as_ref()?;
+    let prompt_tokens = meta.prompt_token_count.unwrap_or(0);
+    let completion_tokens = meta.candidates_token_count.unwrap_or(0);
+    let total_tokens = meta
+        .total_token_count
+        .unwrap_or_else(|| prompt_tokens.saturating_add(completion_tokens));
+    Some(TokenUsage {
+        prompt_tokens,
+        completion_tokens,
+        total_tokens,
+    })
 }
 
 /// structured output 內層 schema：`{ "transcript": "..." }`
@@ -564,7 +613,7 @@ async fn attempt_whisper_request(
     url: &str,
     use_bearer: bool,
     include_model: bool,
-) -> Result<(String, Option<f64>), AttemptFailure> {
+) -> Result<AttemptOutcome, AttemptFailure> {
     let no_retry = |error: TranscriptionError| AttemptFailure {
         error,
         kind: FailureKind::NoRetry,
@@ -663,7 +712,12 @@ async fn attempt_whisper_request(
         no_speech_probability
     };
 
-    Ok((raw_text, Some(no_speech_probability)))
+    Ok(AttemptOutcome {
+        raw_text,
+        no_speech_probability: Some(no_speech_probability),
+        // Groq/Azure Whisper 依音訊時長計費，不回報 token
+        token_usage: None,
+    })
 }
 
 /// 單次 Gemini API 嘗試：送 JSON body → 解析 candidates。Gemini 無 no-speech 信號，回 None。
@@ -672,7 +726,7 @@ async fn attempt_gemini_request(
     transcription_state: &TranscriptionState,
     api_key: &str,
     url: &str,
-) -> Result<(String, Option<f64>), AttemptFailure> {
+) -> Result<AttemptOutcome, AttemptFailure> {
     let no_retry = |error: TranscriptionError| AttemptFailure {
         error,
         kind: FailureKind::NoRetry,
@@ -727,7 +781,12 @@ async fn attempt_gemini_request(
         .await
         .map_err(|e| no_retry(TranscriptionError::ParseError(e.to_string())))?;
     let raw_text = parse_gemini_response(&json).map_err(no_retry)?;
-    Ok((raw_text, None))
+    Ok(AttemptOutcome {
+        raw_text,
+        // Gemini 不提供 no-speech 機率
+        no_speech_probability: None,
+        token_usage: extract_gemini_token_usage(&json),
+    })
 }
 
 /// Gemini 連線測試：只驗 2xx + 未被 block（不要求 transcript 非空，靜音也算成功）。
@@ -869,10 +928,16 @@ async fn send_transcription_request(
         };
 
         match result {
-            Ok((raw_text, no_speech_probability)) => {
+            Ok(outcome) => {
                 let transcription_duration_ms = start_time.elapsed().as_secs_f64() * 1000.0;
+                let AttemptOutcome {
+                    raw_text,
+                    no_speech_probability,
+                    token_usage,
+                } = outcome;
                 log::info!(
-                    "[transcription] Response in {transcription_duration_ms:.0}ms (attempt {attempt}): \"{raw_text}\" (noSpeechProb={no_speech_probability:?})"
+                    "[transcription] Response in {transcription_duration_ms:.0}ms (attempt {attempt}): \"{raw_text}\" (noSpeechProb={no_speech_probability:?}, totalTokens={:?})",
+                    token_usage.map(|u| u.total_tokens)
                 );
                 return Ok(TranscriptionResult {
                     raw_text,
@@ -881,6 +946,9 @@ async fn send_transcription_request(
                     // Live path doesn't compute energy here; retranscribe_from_file fills these in.
                     peak_energy_level: 0.0,
                     rms_energy_level: 0.0,
+                    prompt_tokens: token_usage.map(|u| u.prompt_tokens),
+                    completion_tokens: token_usage.map(|u| u.completion_tokens),
+                    total_tokens: token_usage.map(|u| u.total_tokens),
                 });
             }
             Err(failure) => {
@@ -1328,6 +1396,9 @@ mod tests {
             no_speech_probability: Some(0.01),
             peak_energy_level: 0.5,
             rms_energy_level: 0.1,
+            prompt_tokens: None,
+            completion_tokens: None,
+            total_tokens: None,
         };
         let json = serde_json::to_string(&result).unwrap();
         assert!(json.contains("\"rawText\""));
@@ -1335,6 +1406,7 @@ mod tests {
         assert!(json.contains("\"noSpeechProbability\""));
         assert!(json.contains("\"peakEnergyLevel\""));
         assert!(json.contains("\"rmsEnergyLevel\""));
+        assert!(json.contains("\"totalTokens\""));
     }
 
     #[test]
@@ -1347,9 +1419,41 @@ mod tests {
             no_speech_probability: None,
             peak_energy_level: 0.0,
             rms_energy_level: 0.0,
+            prompt_tokens: None,
+            completion_tokens: None,
+            total_tokens: None,
         };
         let json = serde_json::to_string(&result).unwrap();
         assert!(json.contains("\"noSpeechProbability\":null"));
+    }
+
+    #[test]
+    fn test_extract_gemini_token_usage() {
+        let full: GeminiResponse = serde_json::from_str(
+            r#"{"candidates":[],"usageMetadata":{"promptTokenCount":1920,"candidatesTokenCount":30,"totalTokenCount":1950}}"#,
+        )
+        .unwrap();
+        let usage = extract_gemini_token_usage(&full).expect("usage present");
+        assert_eq!(usage.prompt_tokens, 1920);
+        assert_eq!(usage.completion_tokens, 30);
+        assert_eq!(usage.total_tokens, 1950);
+    }
+
+    #[test]
+    fn test_extract_gemini_token_usage_infers_total() {
+        // total 缺失時以 prompt + candidates 推算，避免記錄成 0
+        let partial: GeminiResponse = serde_json::from_str(
+            r#"{"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":5}}"#,
+        )
+        .unwrap();
+        let usage = extract_gemini_token_usage(&partial).expect("usage present");
+        assert_eq!(usage.total_tokens, 105);
+    }
+
+    #[test]
+    fn test_extract_gemini_token_usage_absent_is_none() {
+        let none: GeminiResponse = serde_json::from_str(r#"{"candidates":[]}"#).unwrap();
+        assert!(extract_gemini_token_usage(&none).is_none());
     }
 
     /// Build a minimal mono 16-bit PCM WAV around the given samples.

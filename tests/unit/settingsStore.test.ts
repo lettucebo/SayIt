@@ -92,6 +92,7 @@ vi.mock("../../src/lib/modelRegistry", () => ({
   getEffectiveTranscriptionProviderId: (id: string | null | undefined) =>
     id === "azure" || id === "gemini" || id === "groq" ? id : "groq",
   GEMINI_TRANSCRIPTION_MODEL: "gemini-3.6-flash",
+  DEFAULT_QUOTA_PERIOD: "daily",
   getModelListByProvider: () => [],
   getDefaultModelIdForProvider: () => "test-llm",
 }));

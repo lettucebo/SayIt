@@ -22,8 +22,13 @@ export interface TranscriptionRecord {
 }
 
 export interface DailyQuotaUsage {
+  /** Whisper 系轉錄（Groq/Azure，依音訊時長計費）——不含 Gemini */
   whisperRequestCount: number;
   whisperBilledAudioMs: number;
+  /** Gemini 轉錄（依 token 計量，音訊約 32 tokens/秒）——與 Whisper 分開統計，
+   *  否則同一天混用會讓 Groq 的免費額度條計入 Gemini 的請求數。 */
+  geminiTranscriptionRequestCount: number;
+  geminiTranscriptionTotalTokens: number;
   llmRequestCount: number;
   llmTotalTokens: number;
   vocabularyAnalysisRequestCount: number;
@@ -36,6 +41,8 @@ export interface DashboardStats {
   totalRecordingDurationMs: number;
   estimatedTimeSavedMs: number;
   dailyQuotaUsage: DailyQuotaUsage;
+  /** 本月累計用量——供「每月免費額度」的 provider 計算剩餘量。 */
+  monthlyQuotaUsage: DailyQuotaUsage;
 }
 
 export type ApiType = "whisper" | "chat" | "vocabulary_analysis";

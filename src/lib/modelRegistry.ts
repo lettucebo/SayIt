@@ -26,6 +26,15 @@ export type WhisperModelId = "whisper-large-v3" | "whisper-large-v3-turbo";
 /** 語音轉錄 provider。Gemini 走 generateContent（非 Whisper multipart 協定）。 */
 export type TranscriptionProviderId = "groq" | "azure" | "gemini";
 
+/**
+ * 免費額度的計算週期。多數 provider 是每日（如 Gemini 的 RPD、Groq 的 RPD），
+ * 但也有「每月 N 次免費」的方案（例：Gemini 的 Google Search grounding 每月 5,000 次），
+ * 因此額度模型必須同時支援兩種週期。
+ */
+export type QuotaPeriod = "daily" | "monthly";
+
+export const DEFAULT_QUOTA_PERIOD: QuotaPeriod = "daily";
+
 export const DEFAULT_TRANSCRIPTION_PROVIDER_ID: TranscriptionProviderId = "groq";
 
 /**

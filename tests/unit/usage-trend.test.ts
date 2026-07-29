@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildDailyUsageSeries,
   getLocalDayUtcRangeForSqlite,
+  getLocalMonthUtcRangeForSqlite,
 } from "../../src/lib/usageTrend";
 import type { DailyUsageTrend } from "../../src/types/transcription";
 
@@ -120,6 +121,56 @@ describe("buildDailyUsageSeries", () => {
     expect(series).toHaveLength(14);
     expect(series[series.length - 1].date).toBe(toLocalKey(new Date()));
     expect(series[series.length - 1].count).toBe(2);
+  });
+});
+
+describe("getLocalMonthUtcRangeForSqlite", () => {
+  const SQLITE_UTC_PATTERN = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
+  const sqliteUtcToEpoch = (s: string) =>
+    new Date(`${s.replace(" ", "T")}Z`).getTime();
+
+  it("[P1] 回傳格式與日視窗一致（SQLite UTC 字串）", () => {
+    const [start, end] = getLocalMonthUtcRangeForSqlite(
+      new Date(2026, 5, 15, 13, 42, 7),
+    );
+    expect(start).toMatch(SQLITE_UTC_PATTERN);
+    expect(end).toMatch(SQLITE_UTC_PATTERN);
+  });
+
+  it("[P0] start/end 對應本月 1 號與下月 1 號的本地午夜", () => {
+    const now = new Date(2026, 5, 15, 13, 42, 7);
+    const [start, end] = getLocalMonthUtcRangeForSqlite(now);
+
+    expect(sqliteUtcToEpoch(start)).toBe(
+      new Date(2026, 5, 1, 0, 0, 0, 0).getTime(),
+    );
+    expect(sqliteUtcToEpoch(end)).toBe(
+      new Date(2026, 6, 1, 0, 0, 0, 0).getTime(),
+    );
+  });
+
+  it("[P0] 12 月要正確跨年到隔年 1 月", () => {
+    const [start, end] = getLocalMonthUtcRangeForSqlite(
+      new Date(2026, 11, 20, 8, 0, 0),
+    );
+    expect(sqliteUtcToEpoch(start)).toBe(
+      new Date(2026, 11, 1, 0, 0, 0, 0).getTime(),
+    );
+    expect(sqliteUtcToEpoch(end)).toBe(
+      new Date(2027, 0, 1, 0, 0, 0, 0).getTime(),
+    );
+  });
+
+  it("[P1] 月視窗必須涵蓋同月的日視窗（月額度不可小於當日用量）", () => {
+    const now = new Date(2026, 5, 15, 13, 42, 7);
+    const [dayStart, dayEnd] = getLocalDayUtcRangeForSqlite(now);
+    const [monthStart, monthEnd] = getLocalMonthUtcRangeForSqlite(now);
+    expect(sqliteUtcToEpoch(monthStart)).toBeLessThanOrEqual(
+      sqliteUtcToEpoch(dayStart),
+    );
+    expect(sqliteUtcToEpoch(monthEnd)).toBeGreaterThanOrEqual(
+      sqliteUtcToEpoch(dayEnd),
+    );
   });
 });
 

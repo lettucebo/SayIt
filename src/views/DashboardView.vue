@@ -49,10 +49,26 @@ const isPaidWhisperProvider = computed(
   () => settingsStore.whisperProviderId === "azure",
 );
 
-// Gemini 轉錄的免費額度依帳號浮動且不公開（同 Gemini LLM）：不套用 Groq 的
-// RPD/音訊秒數上限，否則額度條會顯示與實際無關的數字。
+// Gemini 轉錄的免費額度依帳號浮動、Google 未公開（只能在 AI Studio 查），
+// 因此不套用內建分母：使用者填了額度才顯示額度條，否則只顯示實際用量。
 const isQuotaHiddenWhisperProvider = computed(
-  () => settingsStore.whisperProviderId === "gemini",
+  () =>
+    settingsStore.whisperProviderId === "gemini" &&
+    settingsStore.geminiFreeQuotaRequests <= 0,
+);
+
+/** 使用者已為 Gemini 轉錄設定免費額度 → 可顯示真正的額度條 */
+const hasGeminiTranscriptionQuota = computed(
+  () =>
+    settingsStore.whisperProviderId === "gemini" &&
+    settingsStore.geminiFreeQuotaRequests > 0,
+);
+
+/** 依設定的額度週期取對應統計視窗（每月免費額度不能用單日用量計算） */
+const geminiQuotaUsage = computed(() =>
+  settingsStore.geminiFreeQuotaPeriod === "monthly"
+    ? historyStore.dashboardStats.monthlyQuotaUsage
+    : historyStore.dashboardStats.dailyQuotaUsage,
 );
 
 const isPaidLlmProvider = computed(() => {
@@ -80,21 +96,38 @@ const quotaDimensionList = computed(() => {
 
   // 免費 Whisper（Groq）才顯示額度維度；limit 為 0 的維度略過避免誤導
   if (!isPaidWhisperProvider.value && !isQuotaHiddenWhisperProvider.value) {
-    const wConfig = findWhisperModelConfig(settingsStore.selectedWhisperModelId);
-    const wRpdLimit = wConfig?.freeQuotaRpd ?? 2000;
-    const wAudioLimitMs =
-      (wConfig?.freeQuotaAudioSecondsPerDay ?? 28800) * 1000;
-    if (wRpdLimit > 0) {
+    if (hasGeminiTranscriptionQuota.value) {
+      // Gemini：使用者自填的額度，依其週期（每日／每月）比對對應視窗的請求數
+      const limit = settingsStore.geminiFreeQuotaRequests;
+      const used = geminiQuotaUsage.value.geminiTranscriptionRequestCount;
       dimensionList.push({
-        remaining: 1 - usage.whisperRequestCount / wRpdLimit,
-        label: t("dashboard.quotaWhisperRequests", { used: usage.whisperRequestCount, limit: formatNumber(wRpdLimit) }),
+        remaining: 1 - used / limit,
+        label: t(
+          settingsStore.geminiFreeQuotaPeriod === "monthly"
+            ? "dashboard.quotaGeminiRequestsMonthly"
+            : "dashboard.quotaGeminiRequests",
+          { used, limit: formatNumber(limit) },
+        ),
       });
-    }
-    if (wAudioLimitMs > 0) {
-      dimensionList.push({
-        remaining: 1 - usage.whisperBilledAudioMs / wAudioLimitMs,
-        label: t("dashboard.quotaAudio", { used: formatDurationFromMs(usage.whisperBilledAudioMs), limit: formatDurationFromMs(wAudioLimitMs) }),
-      });
+    } else {
+      const wConfig = findWhisperModelConfig(
+        settingsStore.selectedWhisperModelId,
+      );
+      const wRpdLimit = wConfig?.freeQuotaRpd ?? 2000;
+      const wAudioLimitMs =
+        (wConfig?.freeQuotaAudioSecondsPerDay ?? 28800) * 1000;
+      if (wRpdLimit > 0) {
+        dimensionList.push({
+          remaining: 1 - usage.whisperRequestCount / wRpdLimit,
+          label: t("dashboard.quotaWhisperRequests", { used: usage.whisperRequestCount, limit: formatNumber(wRpdLimit) }),
+        });
+      }
+      if (wAudioLimitMs > 0) {
+        dimensionList.push({
+          remaining: 1 - usage.whisperBilledAudioMs / wAudioLimitMs,
+          label: t("dashboard.quotaAudio", { used: formatDurationFromMs(usage.whisperBilledAudioMs), limit: formatDurationFromMs(wAudioLimitMs) }),
+        });
+      }
     }
   }
 
@@ -127,7 +160,15 @@ const hasFreeQuota = computed(() => quotaDimensionList.value.length > 0);
 const paidUsageList = computed(() => {
   const usage = historyStore.dashboardStats.dailyQuotaUsage;
   const list: { label: string }[] = [];
-  if (isPaidWhisperProvider.value || isQuotaHiddenWhisperProvider.value) {
+  // Gemini 轉錄依 token 計量：顯示請求數 + token，而非 Groq 的音訊時長
+  if (isQuotaHiddenWhisperProvider.value) {
+    list.push({
+      label: t("dashboard.usageGeminiTranscription", {
+        requests: formatNumber(usage.geminiTranscriptionRequestCount),
+        tokens: formatNumber(usage.geminiTranscriptionTotalTokens),
+      }),
+    });
+  } else if (isPaidWhisperProvider.value) {
     list.push({
       label: t("dashboard.usageWhisper", {
         requests: formatNumber(usage.whisperRequestCount),
