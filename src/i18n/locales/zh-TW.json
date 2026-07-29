@@ -99,6 +99,19 @@
         "flashLite": "免費額度最高（約 500 次/日、15 次/分），官方文件明列「語音轉錄」為建議用途。日常聽寫建議用這個",
         "flash": "最新旗艦、多模態理解最強，但免費額度極少（約 20 次/日、5 次/分），適合少量但要求最準的場合"
       },
+      "llmDescription": {
+        "qwen": "速度與品質均衡的預設選擇；Groq preview 模型，可能無預警下架",
+        "oss120b": "開源大模型，輸出較穩定；比 20B 慢但品質更好",
+        "oss20b": "最快、最省，適合短句與簡單整理",
+        "gemini36Flash": "最新旗艦 Flash，複雜語句理解最強；免費層約 20 次/日",
+        "gemini35Flash": "上一代旗艦 Flash，品質高；免費層約 20 次/日",
+        "gemini35FlashLite": "官方稱最具成本效益的正式版；免費層約 500 次/日（額度最高），適合高頻使用",
+        "gemini31FlashLite": "額度同樣約 500 次/日，但官方已公告 2027-05-07 停用，建議改用 3.5 Flash-Lite",
+        "gemini31Pro": "Pro 級品質最高，但免費層不含此模型，需開啟計費才能使用",
+        "gptLuna": "OpenAI 旗艦，長句與複雜指令表現佳；付費服務",
+        "gptNano": "OpenAI 輕量版，快且便宜；付費服務",
+        "claudeHaiku": "Claude 輕量旗艦，速度與品質兼顧；付費服務"
+      },
       "geminiQuotaLabel": "免費額度（可覆寫）",
       "geminiQuotaPlaceholder": "內建預設 {count}",
       "geminiQuotaHint": "已依模型內建免費額度預設值，數字依帳號可能不同。要調整就直接填入，留空即使用內建值",

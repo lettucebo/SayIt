@@ -13,7 +13,9 @@ export type LlmModelId =
   | "gpt-5.6-luna"
   | "gpt-5.4-nano"
   | "claude-haiku-4-5-20251001"
+  | "gemini-3.6-flash"
   | "gemini-3.5-flash"
+  | "gemini-3.5-flash-lite"
   | "gemini-3.1-flash-lite"
   | "gemini-3.1-pro-preview";
 
@@ -126,6 +128,8 @@ interface BaseModelConfig {
 export interface LlmModelConfig extends BaseModelConfig {
   id: LlmModelId;
   providerId: LlmProviderId;
+  /** 選中後顯示的特性說明 i18n key（強項／取捨／免費額度） */
+  descriptionKey: string;
 }
 
 export interface WhisperModelConfig {
@@ -182,6 +186,7 @@ export const LLM_MODEL_LIST: LlmModelConfig[] = [
     providerId: "groq",
     displayName: "Qwen3.6 27B (Preview)",
     badgeKey: "settings.modelBadge.balanced",
+    descriptionKey: "settings.model.llmDescription.qwen",
     speedTps: 500,
     inputCostPerMillion: 0.6,
     outputCostPerMillion: 3.0,
@@ -194,6 +199,7 @@ export const LLM_MODEL_LIST: LlmModelConfig[] = [
     providerId: "groq",
     displayName: "GPT OSS 120B",
     badgeKey: "settings.modelBadge.stableCostly",
+    descriptionKey: "settings.model.llmDescription.oss120b",
     speedTps: 500,
     inputCostPerMillion: 0.15,
     outputCostPerMillion: 0.6,
@@ -206,6 +212,7 @@ export const LLM_MODEL_LIST: LlmModelConfig[] = [
     providerId: "groq",
     displayName: "GPT OSS 20B",
     badgeKey: "settings.modelBadge.fastCheap",
+    descriptionKey: "settings.model.llmDescription.oss20b",
     speedTps: 1_000,
     inputCostPerMillion: 0.075,
     outputCostPerMillion: 0.3,
@@ -216,11 +223,27 @@ export const LLM_MODEL_LIST: LlmModelConfig[] = [
   // ── Google Gemini（免費額度依帳號浮動、Google 未公開，故不設內建分母）──
   // 轉錄模型另有可覆寫的內建額度（見 GEMINI_TRANSCRIPTION_MODEL_LIST）；
   // LLM 側目前沒有覆寫入口，維持「不顯示額度條、只顯示今日用量」的既有行為。
+  // 各模型的免費額度僅寫在說明文字中供參考，不作為計算分母。
+  {
+    // 最新旗艦 Flash（2026-07-21 發布，無停用日期）
+    id: "gemini-3.6-flash",
+    providerId: "gemini",
+    displayName: "Gemini 3.6 Flash",
+    badgeKey: "settings.modelBadge.premium",
+    descriptionKey: "settings.model.llmDescription.gemini36Flash",
+    speedTps: 0,
+    inputCostPerMillion: 1.5,
+    outputCostPerMillion: 7.5,
+    freeQuotaRpd: 0,
+    freeQuotaTpd: 0,
+    isDefault: false,
+  },
   {
     id: "gemini-3.5-flash",
     providerId: "gemini",
     displayName: "Gemini 3.5 Flash",
     badgeKey: "settings.modelBadge.premium",
+    descriptionKey: "settings.model.llmDescription.gemini35Flash",
     speedTps: 0,
     inputCostPerMillion: 1.5,
     outputCostPerMillion: 9.0,
@@ -229,10 +252,26 @@ export const LLM_MODEL_LIST: LlmModelConfig[] = [
     isDefault: true,
   },
   {
+    // 官方稱「最具成本效益的正式版」；免費層 RPD 為 Flash 的 25 倍
+    id: "gemini-3.5-flash-lite",
+    providerId: "gemini",
+    displayName: "Gemini 3.5 Flash-Lite",
+    badgeKey: "settings.modelBadge.highQuota",
+    descriptionKey: "settings.model.llmDescription.gemini35FlashLite",
+    speedTps: 0,
+    inputCostPerMillion: 0.3,
+    outputCostPerMillion: 2.5,
+    freeQuotaRpd: 0,
+    freeQuotaTpd: 0,
+    isDefault: false,
+  },
+  {
+    // 官方公告 2027-05-07 停用，接替者為 gemini-3.5-flash-lite
     id: "gemini-3.1-flash-lite",
     providerId: "gemini",
     displayName: "Gemini 3.1 Flash-Lite",
     badgeKey: "settings.modelBadge.fastCheap",
+    descriptionKey: "settings.model.llmDescription.gemini31FlashLite",
     speedTps: 0,
     inputCostPerMillion: 0.25,
     outputCostPerMillion: 1.5,
@@ -248,6 +287,7 @@ export const LLM_MODEL_LIST: LlmModelConfig[] = [
     providerId: "gemini",
     displayName: "Gemini 3.1 Pro (Preview)",
     badgeKey: "settings.modelBadge.smartestSlow",
+    descriptionKey: "settings.model.llmDescription.gemini31Pro",
     speedTps: 0,
     inputCostPerMillion: 2.0,
     outputCostPerMillion: 12.0,
@@ -261,6 +301,7 @@ export const LLM_MODEL_LIST: LlmModelConfig[] = [
     providerId: "openai",
     displayName: "GPT-5.6 Luna",
     badgeKey: "settings.modelBadge.premium",
+    descriptionKey: "settings.model.llmDescription.gptLuna",
     speedTps: 0,
     inputCostPerMillion: 1.0,
     outputCostPerMillion: 6.0,
@@ -273,6 +314,7 @@ export const LLM_MODEL_LIST: LlmModelConfig[] = [
     providerId: "openai",
     displayName: "GPT-5.4 Nano",
     badgeKey: "settings.modelBadge.fastCheap",
+    descriptionKey: "settings.model.llmDescription.gptNano",
     speedTps: 0,
     inputCostPerMillion: 0.2,
     outputCostPerMillion: 1.25,
@@ -286,6 +328,7 @@ export const LLM_MODEL_LIST: LlmModelConfig[] = [
     providerId: "anthropic",
     displayName: "Claude Haiku 4.5",
     badgeKey: "settings.modelBadge.premium",
+    descriptionKey: "settings.model.llmDescription.claudeHaiku",
     speedTps: 0,
     inputCostPerMillion: 1.0,
     outputCostPerMillion: 5.0,

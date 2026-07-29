@@ -99,6 +99,19 @@
         "flashLite": "Highest free quota (~500/day, 15/min); Google's docs list transcription as a recommended use. Best for everyday dictation",
         "flash": "Latest flagship with the strongest multimodal understanding, but a very small free quota (~20/day, 5/min). Use it sparingly when accuracy matters most"
       },
+      "llmDescription": {
+        "qwen": "Balanced speed and quality; a Groq preview model that can be withdrawn without notice",
+        "oss120b": "Open-weight large model with steadier output; slower than 20B but better quality",
+        "oss20b": "Fastest and cheapest, good for short sentences and light clean-up",
+        "gemini36Flash": "Latest flagship Flash with the strongest understanding of complex sentences; free tier ~20/day",
+        "gemini35Flash": "Previous flagship Flash, high quality; free tier ~20/day",
+        "gemini35FlashLite": "Google's most cost-efficient GA model; free tier ~500/day (highest quota), good for frequent use",
+        "gemini31FlashLite": "Same ~500/day quota, but Google has announced shutdown on 2027-05-07 — prefer 3.5 Flash-Lite",
+        "gemini31Pro": "Highest Pro-tier quality, but not included in the free tier — billing must be enabled",
+        "gptLuna": "OpenAI flagship, strong on long text and complex instructions; paid service",
+        "gptNano": "OpenAI lightweight tier, fast and cheap; paid service",
+        "claudeHaiku": "Claude's lightweight flagship balancing speed and quality; paid service"
+      },
       "geminiQuotaLabel": "Free quota (override)",
       "geminiQuotaPlaceholder": "Built-in default {count}",
       "geminiQuotaHint": "Defaults to each model's built-in free quota; the actual number can differ per account. Enter a value to override, or leave empty to use the built-in one",

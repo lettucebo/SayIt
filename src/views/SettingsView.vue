@@ -720,7 +720,8 @@ const llmModelDescription = computed(() => {
   const config = findLlmModelConfig(settingsStore.selectedLlmModelId);
   if (!config) return "";
   const tpsInfo = config.speedTps > 0 ? `${config.speedTps} TPS · ` : "";
-  return `${tpsInfo}$${config.inputCostPerMillion}/$${config.outputCostPerMillion} per M tokens`;
+  const cost = `${tpsInfo}$${config.inputCostPerMillion}/$${config.outputCostPerMillion} per M tokens`;
+  return `${t(config.descriptionKey)} · ${cost}`;
 });
 
 const providerModelList = computed(() =>

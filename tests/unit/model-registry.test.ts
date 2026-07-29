@@ -8,6 +8,7 @@ import {
   GEMINI_TRANSCRIPTION_MODEL,
   DEFAULT_TRANSCRIPTION_PROVIDER_ID,
   WHISPER_MODEL_LIST,
+  LLM_MODEL_LIST,
   GEMINI_TRANSCRIPTION_MODEL_LIST,
   getEffectiveGeminiTranscriptionModelId,
   getEffectiveGeminiTranscriptionRpd,
@@ -108,6 +109,22 @@ describe("modelRegistry — Gemini 轉錄模型", () => {
 });
 
 describe("modelRegistry — 轉錄模型說明文案", () => {
+  it("[P0] 每個 LLM 模型都有 badgeKey 與 descriptionKey，且五語系齊全", () => {
+    for (const model of LLM_MODEL_LIST) {
+      expect(model.badgeKey, `${model.id} 缺 badgeKey`).toBeTruthy();
+      expect(model.descriptionKey, `${model.id} 缺 descriptionKey`).toBeTruthy();
+      for (const key of [model.badgeKey, model.descriptionKey]) {
+        for (const [localeName, messages] of LOCALE_ENTRIES) {
+          const value = resolveKey(messages, key);
+          expect(
+            typeof value === "string" && value.length > 0,
+            `${localeName} 缺少 ${key}（模型 ${model.id}）`,
+          ).toBe(true);
+        }
+      }
+    }
+  });
+
   it("[P0] 每個 Whisper 模型都有 badgeKey 與 descriptionKey", () => {
     for (const model of WHISPER_MODEL_LIST) {
       expect(model.badgeKey, `${model.id} 缺 badgeKey`).toBeTruthy();
