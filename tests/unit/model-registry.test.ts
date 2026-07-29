@@ -4,7 +4,176 @@ import {
   DEFAULT_LLM_MODEL_ID,
   getEffectiveLlmModelId,
   findLlmModelConfig,
+  getEffectiveTranscriptionProviderId,
+  GEMINI_TRANSCRIPTION_MODEL,
+  DEFAULT_TRANSCRIPTION_PROVIDER_ID,
+  WHISPER_MODEL_LIST,
+  LLM_MODEL_LIST,
+  GEMINI_TRANSCRIPTION_MODEL_LIST,
+  getEffectiveGeminiTranscriptionModelId,
+  getEffectiveGeminiTranscriptionRpd,
 } from "../../src/lib/modelRegistry";
+import zhTW from "../../src/i18n/locales/zh-TW.json";
+import zhCN from "../../src/i18n/locales/zh-CN.json";
+import en from "../../src/i18n/locales/en.json";
+import ja from "../../src/i18n/locales/ja.json";
+import ko from "../../src/i18n/locales/ko.json";
+
+/** 依 "a.b.c" 路徑取值，缺任一層回 undefined */
+function resolveKey(obj: unknown, path: string): unknown {
+  return path
+    .split(".")
+    .reduce<unknown>(
+      (acc, part) =>
+        acc && typeof acc === "object"
+          ? (acc as Record<string, unknown>)[part]
+          : undefined,
+      obj,
+    );
+}
+
+const LOCALE_ENTRIES: [string, unknown][] = [
+  ["zh-TW", zhTW],
+  ["zh-CN", zhCN],
+  ["en", en],
+  ["ja", ja],
+  ["ko", ko],
+];
+
+describe("modelRegistry — Gemini 轉錄模型", () => {
+  it("[P0] 預設模型必須在清單內且被標為 isDefault", () => {
+    const def = GEMINI_TRANSCRIPTION_MODEL_LIST.find((m) => m.isDefault);
+    expect(def).toBeDefined();
+    expect(GEMINI_TRANSCRIPTION_MODEL).toBe(def?.id);
+  });
+
+  it("[P0] 未知/舊值一律退回預設（避免打到不存在的模型端點）", () => {
+    expect(getEffectiveGeminiTranscriptionModelId("whisper-large-v3")).toBe(
+      GEMINI_TRANSCRIPTION_MODEL,
+    );
+    // 官方公告 2027-05-07 停用，刻意不提供
+    expect(getEffectiveGeminiTranscriptionModelId("gemini-3.1-flash-lite")).toBe(
+      GEMINI_TRANSCRIPTION_MODEL,
+    );
+    expect(getEffectiveGeminiTranscriptionModelId(null)).toBe(
+      GEMINI_TRANSCRIPTION_MODEL,
+    );
+  });
+
+  it("[P0] 清單內的模型原樣保留", () => {
+    for (const model of GEMINI_TRANSCRIPTION_MODEL_LIST) {
+      expect(getEffectiveGeminiTranscriptionModelId(model.id)).toBe(model.id);
+    }
+  });
+
+  it("[P0] 每個模型的 badgeKey / descriptionKey 在五語系都要有字串", () => {
+    for (const model of GEMINI_TRANSCRIPTION_MODEL_LIST) {
+      for (const key of [model.badgeKey, model.descriptionKey]) {
+        for (const [localeName, messages] of LOCALE_ENTRIES) {
+          const value = resolveKey(messages, key);
+          expect(
+            typeof value === "string" && value.length > 0,
+            `${localeName} 缺少 ${key}（模型 ${model.id}）`,
+          ).toBe(true);
+        }
+      }
+    }
+  });
+
+  it("[P0] 每個模型都要有內建免費額度預設值（選模型時就有分母可用）", () => {
+    for (const model of GEMINI_TRANSCRIPTION_MODEL_LIST) {
+      expect(
+        model.typicalFreeRpd,
+        `${model.id} 缺少 typicalFreeRpd`,
+      ).toBeGreaterThan(0);
+    }
+  });
+
+  it("[P0] 未覆寫時採用該模型的內建額度", () => {
+    for (const model of GEMINI_TRANSCRIPTION_MODEL_LIST) {
+      expect(getEffectiveGeminiTranscriptionRpd(0, model.id)).toBe(
+        model.typicalFreeRpd,
+      );
+    }
+  });
+
+  it("[P0] 使用者覆寫優先於內建預設", () => {
+    expect(getEffectiveGeminiTranscriptionRpd(1234, "gemini-3.6-flash")).toBe(
+      1234,
+    );
+  });
+
+  it("[P1] 未知模型且未覆寫 → 0（呼叫端據此隱藏額度條，不捏造分母）", () => {
+    expect(getEffectiveGeminiTranscriptionRpd(0, "not-a-model")).toBe(0);
+  });
+});
+
+describe("modelRegistry — 轉錄模型說明文案", () => {
+  it("[P0] 每個 LLM 模型都有 badgeKey 與 descriptionKey，且五語系齊全", () => {
+    for (const model of LLM_MODEL_LIST) {
+      expect(model.badgeKey, `${model.id} 缺 badgeKey`).toBeTruthy();
+      expect(model.descriptionKey, `${model.id} 缺 descriptionKey`).toBeTruthy();
+      for (const key of [model.badgeKey, model.descriptionKey]) {
+        for (const [localeName, messages] of LOCALE_ENTRIES) {
+          const value = resolveKey(messages, key);
+          expect(
+            typeof value === "string" && value.length > 0,
+            `${localeName} 缺少 ${key}（模型 ${model.id}）`,
+          ).toBe(true);
+        }
+      }
+    }
+  });
+
+  it("[P0] 每個 Whisper 模型都有 badgeKey 與 descriptionKey", () => {
+    for (const model of WHISPER_MODEL_LIST) {
+      expect(model.badgeKey, `${model.id} 缺 badgeKey`).toBeTruthy();
+      expect(model.descriptionKey, `${model.id} 缺 descriptionKey`).toBeTruthy();
+    }
+  });
+
+  it("[P0] badgeKey / descriptionKey 在五個語系都要有對應字串", () => {
+    for (const model of WHISPER_MODEL_LIST) {
+      for (const key of [model.badgeKey, model.descriptionKey]) {
+        for (const [localeName, messages] of LOCALE_ENTRIES) {
+          const value = resolveKey(messages, key);
+          expect(
+            typeof value === "string" && value.length > 0,
+            `${localeName} 缺少 ${key}（模型 ${model.id}）`,
+          ).toBe(true);
+        }
+      }
+    }
+  });
+});
+
+describe("modelRegistry — 轉錄 provider", () => {
+  it("[P0] 已知 provider 原樣回傳", () => {
+    expect(getEffectiveTranscriptionProviderId("groq")).toBe("groq");
+    expect(getEffectiveTranscriptionProviderId("azure")).toBe("azure");
+    expect(getEffectiveTranscriptionProviderId("gemini")).toBe("gemini");
+  });
+
+  it("[P0] 未知/空值 fail-closed 退回預設（避免金鑰送到非預期服務）", () => {
+    expect(getEffectiveTranscriptionProviderId("openai")).toBe(
+      DEFAULT_TRANSCRIPTION_PROVIDER_ID,
+    );
+    expect(getEffectiveTranscriptionProviderId("")).toBe(
+      DEFAULT_TRANSCRIPTION_PROVIDER_ID,
+    );
+    expect(getEffectiveTranscriptionProviderId(null)).toBe(
+      DEFAULT_TRANSCRIPTION_PROVIDER_ID,
+    );
+    expect(getEffectiveTranscriptionProviderId(undefined)).toBe(
+      DEFAULT_TRANSCRIPTION_PROVIDER_ID,
+    );
+  });
+
+  it("[P0] Gemini 轉錄模型不得是 Whisper 模型 id（會打到不存在的端點）", () => {
+    expect(GEMINI_TRANSCRIPTION_MODEL).toMatch(/^gemini-/);
+    expect(GEMINI_TRANSCRIPTION_MODEL).not.toMatch(/whisper/);
+  });
+});
 
 describe("modelRegistry — 模型遷移", () => {
   describe("DECOMMISSIONED_MODEL_MAP 不變量", () => {

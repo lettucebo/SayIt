@@ -19,6 +19,7 @@ import {
 import {
   findLlmModelConfig,
   findWhisperModelConfig,
+  getEffectiveGeminiTranscriptionRpd,
 } from "../lib/modelRegistry";
 import DashboardUsageChart from "../components/DashboardUsageChart.vue";
 import {
@@ -49,6 +50,43 @@ const isPaidWhisperProvider = computed(
   () => settingsStore.whisperProviderId === "azure",
 );
 
+/** 目前 Gemini 轉錄模型實際採用的每日額度（使用者覆寫 > 內建預設） */
+const geminiTranscriptionRpd = computed(() =>
+  getEffectiveGeminiTranscriptionRpd(
+    settingsStore.geminiFreeQuotaRequests,
+    settingsStore.geminiTranscriptionModelId,
+  ),
+);
+
+// Gemini 轉錄有內建預設額度，仍算不出分母時（模型無免費額度）才隱藏額度條。
+const isQuotaHiddenWhisperProvider = computed(
+  () =>
+    settingsStore.whisperProviderId === "gemini" &&
+    geminiTranscriptionRpd.value <= 0,
+);
+
+/** Gemini 轉錄有可用額度（內建或使用者自填）→ 顯示額度條 */
+const hasGeminiTranscriptionQuota = computed(
+  () =>
+    settingsStore.whisperProviderId === "gemini" &&
+    geminiTranscriptionRpd.value > 0,
+);
+
+/**
+ * 正在使用「免費方案但額度未知」的 provider（Gemini 未填額度、或免費額度不公開的
+ * Gemini LLM）。這與「付費方案」是兩回事：不能因為算不出剩餘百分比就宣告使用者在付費。
+ */
+const hasFreeProviderWithUnknownQuota = computed(
+  () => isQuotaHiddenWhisperProvider.value || isQuotaHiddenLlmProvider.value,
+);
+
+/** 依設定的額度週期取對應統計視窗（每月免費額度不能用單日用量計算） */
+const geminiQuotaUsage = computed(() =>
+  settingsStore.geminiFreeQuotaPeriod === "monthly"
+    ? historyStore.dashboardStats.monthlyQuotaUsage
+    : historyStore.dashboardStats.dailyQuotaUsage,
+);
+
 const isPaidLlmProvider = computed(() => {
   const providerId = settingsStore.selectedLlmProviderId;
   // groq / gemini 提供免費額度；openai / anthropic / azure 為計費方案
@@ -73,22 +111,39 @@ const quotaDimensionList = computed(() => {
   const dimensionList: { remaining: number; label: string }[] = [];
 
   // 免費 Whisper（Groq）才顯示額度維度；limit 為 0 的維度略過避免誤導
-  if (!isPaidWhisperProvider.value) {
-    const wConfig = findWhisperModelConfig(settingsStore.selectedWhisperModelId);
-    const wRpdLimit = wConfig?.freeQuotaRpd ?? 2000;
-    const wAudioLimitMs =
-      (wConfig?.freeQuotaAudioSecondsPerDay ?? 28800) * 1000;
-    if (wRpdLimit > 0) {
+  if (!isPaidWhisperProvider.value && !isQuotaHiddenWhisperProvider.value) {
+    if (hasGeminiTranscriptionQuota.value) {
+      // Gemini：內建預設或使用者自填的額度，依其週期（每日／每月）比對對應視窗
+      const limit = geminiTranscriptionRpd.value;
+      const used = geminiQuotaUsage.value.geminiTranscriptionRequestCount;
       dimensionList.push({
-        remaining: 1 - usage.whisperRequestCount / wRpdLimit,
-        label: t("dashboard.quotaWhisperRequests", { used: usage.whisperRequestCount, limit: formatNumber(wRpdLimit) }),
+        remaining: 1 - used / limit,
+        label: t(
+          settingsStore.geminiFreeQuotaPeriod === "monthly"
+            ? "dashboard.quotaGeminiRequestsMonthly"
+            : "dashboard.quotaGeminiRequests",
+          { used, limit: formatNumber(limit) },
+        ),
       });
-    }
-    if (wAudioLimitMs > 0) {
-      dimensionList.push({
-        remaining: 1 - usage.whisperBilledAudioMs / wAudioLimitMs,
-        label: t("dashboard.quotaAudio", { used: formatDurationFromMs(usage.whisperBilledAudioMs), limit: formatDurationFromMs(wAudioLimitMs) }),
-      });
+    } else {
+      const wConfig = findWhisperModelConfig(
+        settingsStore.selectedWhisperModelId,
+      );
+      const wRpdLimit = wConfig?.freeQuotaRpd ?? 2000;
+      const wAudioLimitMs =
+        (wConfig?.freeQuotaAudioSecondsPerDay ?? 28800) * 1000;
+      if (wRpdLimit > 0) {
+        dimensionList.push({
+          remaining: 1 - usage.whisperRequestCount / wRpdLimit,
+          label: t("dashboard.quotaWhisperRequests", { used: usage.whisperRequestCount, limit: formatNumber(wRpdLimit) }),
+        });
+      }
+      if (wAudioLimitMs > 0) {
+        dimensionList.push({
+          remaining: 1 - usage.whisperBilledAudioMs / wAudioLimitMs,
+          label: t("dashboard.quotaAudio", { used: formatDurationFromMs(usage.whisperBilledAudioMs), limit: formatDurationFromMs(wAudioLimitMs) }),
+        });
+      }
     }
   }
 
@@ -116,11 +171,20 @@ const quotaDimensionList = computed(() => {
 
 const hasFreeQuota = computed(() => quotaDimensionList.value.length > 0);
 
-// 計費方案（Azure/OpenAI/Anthropic）無免費額度，改顯示今日實際用量
+// 計費方案（Azure/OpenAI/Anthropic）無免費額度，改顯示今日實際用量；
+// 額度不公開的 provider（Gemini）同樣改顯示用量，否則轉錄用量會完全不可見。
 const paidUsageList = computed(() => {
   const usage = historyStore.dashboardStats.dailyQuotaUsage;
   const list: { label: string }[] = [];
-  if (isPaidWhisperProvider.value) {
+  // Gemini 轉錄依 token 計量：顯示請求數 + token，而非 Groq 的音訊時長
+  if (isQuotaHiddenWhisperProvider.value) {
+    list.push({
+      label: t("dashboard.usageGeminiTranscription", {
+        requests: formatNumber(usage.geminiTranscriptionRequestCount),
+        tokens: formatNumber(usage.geminiTranscriptionTotalTokens),
+      }),
+    });
+  } else if (isPaidWhisperProvider.value) {
     list.push({
       label: t("dashboard.usageWhisper", {
         requests: formatNumber(usage.whisperRequestCount),
@@ -294,12 +358,19 @@ onBeforeUnmount(() => {
                   </p>
                 </div>
 
-                <!-- 全付費提示（混用不顯示，避免與免費額度 % 矛盾）-->
+                <!-- 付費提示：僅在真的有付費 provider 時顯示 -->
                 <p
-                  v-if="!hasFreeQuota && paidUsageList.length > 0"
+                  v-if="!hasFreeQuota && hasAnyPaidProvider"
                   class="text-xs text-muted-foreground mt-1.5"
                 >
                   {{ $t("dashboard.billedNoFreeQuota") }}
+                </p>
+                <!-- 免費但額度未知：不可誤標成付費方案 -->
+                <p
+                  v-if="!hasFreeQuota && hasFreeProviderWithUnknownQuota"
+                  class="text-xs text-muted-foreground mt-1.5"
+                >
+                  {{ $t("dashboard.freeTierQuotaUnknown") }}
                 </p>
               </CardContent>
             </Card>
@@ -342,6 +413,7 @@ onBeforeUnmount(() => {
                 {{ item.label }}
               </div>
               <p v-if="hasAnyPaidProvider" class="text-xs text-muted-foreground">{{ $t("dashboard.billedNoFreeQuota") }}</p>
+              <p v-if="hasFreeProviderWithUnknownQuota" class="text-xs text-muted-foreground">{{ $t("dashboard.freeTierQuotaUnknown") }}</p>
             </div>
             <div
               v-if="historyStore.dashboardStats.dailyQuotaUsage.vocabularyAnalysisRequestCount > 0"

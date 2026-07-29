@@ -21,6 +21,9 @@ export type TranscriptionCompletedPayload = Pick<
 export type SettingsKey =
   | "hotkey"
   | "apiKey"
+  | "geminiApiKey"
+  | "geminiFreeQuota"
+  | "geminiTranscriptionModel"
   | "aiPrompt"
   | "enhancementThreshold"
   | "llmModel"
@@ -28,6 +31,7 @@ export type SettingsKey =
   | "whisperModel"
   | "muteOnRecording"
   | "smartDictionaryEnabled"
+  | "contextInjectionEnabled"
   | "locale"
   | "transcriptionLocale"
   | "soundEffectsEnabled"
@@ -52,6 +56,8 @@ export interface VocabularyChangedPayload {
   action: "added" | "removed";
   term: string;
 }
+
+export type ReplacementsChangedPayload = void;
 
 export interface HotkeyEventPayload {
   mode: TriggerMode;

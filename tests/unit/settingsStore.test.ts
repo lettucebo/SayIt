@@ -89,6 +89,12 @@ vi.mock("../../src/lib/modelRegistry", () => ({
   DEFAULT_WHISPER_MODEL_ID: "test-whisper",
   getEffectiveLlmModelId: (id: string | null) => id ?? "test-llm",
   getEffectiveWhisperModelId: (id: string | null) => id ?? "test-whisper",
+  getEffectiveTranscriptionProviderId: (id: string | null | undefined) =>
+    id === "azure" || id === "gemini" || id === "groq" ? id : "groq",
+  getEffectiveGeminiTranscriptionModelId: (id: string | null | undefined) =>
+    id === "gemini-3.6-flash" ? id : "gemini-3.5-flash-lite",
+  GEMINI_TRANSCRIPTION_MODEL: "gemini-3.5-flash-lite",
+  DEFAULT_QUOTA_PERIOD: "daily",
   getModelListByProvider: () => [],
   getDefaultModelIdForProvider: () => "test-llm",
 }));

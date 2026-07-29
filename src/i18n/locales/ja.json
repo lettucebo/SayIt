@@ -94,11 +94,42 @@
       "whisperLabel": "音声文字起こしモデル（Whisper）",
       "llmLabel": "テキスト整理モデル（LLM）",
       "whisperUpdated": "音声文字起こしモデルが更新されました",
+      "geminiTranscriptionHint": "Gemini は中国語と英語の混在音声で Whisper より高精度な場合が多く、Gemini API キーが必要です。",
+      "geminiModelDescription": {
+        "flashLite": "無料枠が最大（約 500 回/日、15 回/分）。公式ドキュメントが文字起こしを推奨用途として明記。日常の音声入力に最適",
+        "flash": "最新フラッグシップでマルチモーダル理解は最強だが、無料枠が非常に少ない（約 20 回/日、5 回/分）。精度重視の少量利用向け"
+      },
+      "llmDescription": {
+        "qwen": "速度と品質のバランス型（既定）。Groq のプレビューモデルで予告なく終了する場合あり",
+        "oss120b": "オープンウェイトの大規模モデル。20B より遅いが出力は安定",
+        "oss20b": "最速・最安。短文や簡単な整形向け",
+        "gemini36Flash": "最新フラッグシップ Flash。複雑な文の理解が最も強い。無料枠は約 20 回/日",
+        "gemini35Flash": "前世代のフラッグシップ Flash。品質は高い。無料枠は約 20 回/日",
+        "gemini35FlashLite": "公式が最もコスト効率が高いと位置づける正式版。無料枠は約 500 回/日（最大）で高頻度利用向け",
+        "gemini31FlashLite": "無料枠は同じく約 500 回/日だが 2027-05-07 に提供終了予定。3.5 Flash-Lite を推奨",
+        "gemini31Pro": "Pro 級で品質は最高だが無料枠の対象外。課金の有効化が必要",
+        "gptLuna": "OpenAI のフラッグシップ。長文や複雑な指示に強い。有料サービス",
+        "gptNano": "OpenAI の軽量版。高速かつ安価。有料サービス",
+        "claudeHaiku": "Claude の軽量フラッグシップ。速度と品質のバランス型。有料サービス"
+      },
+      "geminiQuotaLabel": "無料枠（上書き可）",
+      "geminiQuotaPlaceholder": "組み込み既定値 {count}",
+      "geminiQuotaHint": "各モデルの組み込み無料枠を既定値として使用します（実際の値はアカウントにより異なる場合があります）。変更する場合は入力、空欄なら既定値を使用",
+      "geminiQuotaLink": "AI Studio で自分の上限を確認",
+      "geminiQuotaSaved": "無料枠を更新しました",
+      "quotaPeriodDaily": "1日あたり",
+      "quotaPeriodMonthly": "1か月あたり",
       "llmUpdated": "テキスト整理モデルが更新されました",
       "default": "デフォルト",
-      "costPerHour": "1時間あたり ${cost}"
+      "costPerHour": "1時間あたり ${cost}",
+      "whisperDescription": {
+        "largeV3": "精度が高く（WER 10.3%）、中国語と英語の混在にはこちらを推奨。英訳にも対応",
+        "largeV3Turbo": "最速・最安だがエラー率は高め（WER 12%）。混在時に英語部分が翻訳されやすい"
+      }
     },
     "modelBadge": {
+      "accurate": "精度優先",
+      "highQuota": "無料枠が最大",
       "balanced": "バランス · デフォルト",
       "stableCostly": "安定 · 高コスト",
       "fastCheap": "最速 · 最安",
@@ -129,6 +160,57 @@
       "enabledFeedback": "短文しきい値を有効にしました",
       "disabledFeedback": "短文しきい値を無効にしました",
       "charCountSaved": "しきい値文字数を保存しました"
+    },
+    "replacements": {
+      "title": "置換ルール",
+      "description": "文字起こし後に固定ルールを適用し、よくある誤字、ブランド名、英語用語を正しい表記に直します。",
+      "ruleCount": "{count} 件のルール",
+      "addTitle": "ルールを追加",
+      "editTitle": "ルールを編集",
+      "patternsLabel": "元の表記",
+      "patternsPlaceholder": "例：\ncopilot\ncopy lot\ncode pilot",
+      "patternsHint": "入力元の表記は1行に1つずつ入力します。リテラルモードは大文字小文字を無視し、単語境界を考慮します。",
+      "replacementLabel": "置換後の表記",
+      "replacementPlaceholder": "例：Copilot",
+      "timingLabel": "適用タイミング",
+      "regexLabel": "正規表現モード（上級）",
+      "regexHint": "RegExp と $1 置換に対応",
+      "enabledLabel": "ルールを有効化",
+      "enabledHint": "内容を残したまま無効化できます",
+      "addButton": "ルールを追加",
+      "updateButton": "ルールを更新",
+      "emptyState": "置換ルールはまだありません。よくある認識ミスを追加すると SayIt が自動修正します。",
+      "patternsHeader": "元の表記",
+      "replacementHeader": "置換後",
+      "timingHeader": "タイミング",
+      "typeHeader": "種類",
+      "enabledHeader": "有効",
+      "actionsHeader": "操作",
+      "regexBadge": "正規表現",
+      "literalBadge": "リテラル",
+      "edit": "編集",
+      "added": "置換ルールを追加しました",
+      "updated": "置換ルールを更新しました",
+      "deleted": "置換ルールを削除しました",
+      "deleteConfirmTitle": "置換ルールを削除しますか？",
+      "deleteConfirmDescription": "この操作は元に戻せません。削除後、このルールは以後の文字起こしに適用されません。",
+      "timing": {
+        "beforeAI": "AI 整理前",
+        "afterAI": "AI 整理後",
+        "both": "AI 整理の前後"
+      },
+      "errors": {
+        "empty-patterns": "元の表記を少なくとも 1 つ入力してください",
+        "pattern-too-long": "元の表記が長すぎます",
+        "replacement-too-long": "置換後の表記が長すぎます",
+        "invalid-regex": "正規表現の構文が正しくありません",
+        "too-many-rules": "ルール数が上限に達しました",
+        "too-many-patterns": "1つのルール内の入力元表記が多すぎます",
+        "patterns-total-too-long": "入力元表記の合計文字数が長すぎます",
+        "persistence-failed": "置換ルールを保存できませんでした。もう一度お試しください。",
+        "not-found": "更新するルールが見つかりません",
+        "unknown": "置換ルールを保存できません"
+      }
     },
     "app": {
       "title": "アプリケーション",
@@ -256,6 +338,11 @@
       "privacyNote": "有効にすると、AI 分析のためにカーソル付近のテキストを読み取ります。原文は保存されません",
       "analysisModelUpdated": "辞書分析モデルを更新しました"
     },
+    "contextInjection": {
+      "title": "コンテキスト注入",
+      "description": "録音停止後、AI 整形の前にカーソル周辺のテキストと現在前面にある App 名を読み取り、専門用語や文体を文脈に合わせます。",
+      "privacyNote": "プライバシー：この機能は既定でオフです。有効にすると、カーソル周辺のテキストと前景 App 名が音声とともに、設定済みのクラウド AI サービス（Groq／OpenAI など）へ送信され整形されます。OS がパスワードと認識した欄のみスキップされ、一般的な文書や入力欄内のパスワード・API キー・個人情報の除外は保証されません。機密内容を扱う際は有効にしないでください。読み取り失敗時は静かに無効化されます。"
+    },
     "azure": {
       "title": "Azure / Microsoft Foundry",
       "description": "Azure のエンドポイントと資格情報を 1 組設定し、テキスト整形と文字起こしで共用します。",
@@ -320,7 +407,11 @@
     "dailyUsage": "本日の使用量",
     "billedPlan": "従量課金",
     "billedNoFreeQuota": "従量課金 — 無料枠なし",
+    "freeTierQuotaUnknown": "無料枠 — 上限は非公開です。設定に入力すると残量が表示されます",
     "usageWhisper": "Whisper：{requests} 回 · {audio}",
+    "usageGeminiTranscription": "Gemini 文字起こし：{requests} 回 · {tokens} tokens",
+    "quotaGeminiRequests": "Gemini 文字起こし 本日 {used} / {limit} 回",
+    "quotaGeminiRequestsMonthly": "Gemini 文字起こし 今月 {used} / {limit} 回",
     "usageLlm": "LLM：{requests} 回 · {tokens} tokens",
     "geminiQuotaHint": "Gemini の無料枠はアカウントにより変動し、Google AI Studio で確認できます"
   },
@@ -500,7 +591,9 @@
     },
     "upgradeNotice": {
       "title": "SayIt アップデート概要",
-      "item1": "毎日の使用トレンドで使用がない日も「0」と表示されるようになりました：これまでは使用量のない日にカーソルを合わせると「使用回数」ラベルだけが表示され、数値が空白でデータが欠けているように見えていました。使用がない日も正しく「0」と表示されます。",
+      "item1": "Gemini による音声文字起こしを追加しました：中国語に英語の専門用語を混ぜて話すと、Whisper は英語部分をそのまま書き起こさず翻訳してしまう傾向があります。設定で文字起こしを Gemini に切り替えられるようになり、モデルも選択できます。既定の Flash-Lite は 1 日あたり約 500 回で、Flash の 25 倍です。",
+      "item2": "文字置換ルールを追加しました：毎回聞き間違えられる人名・製品名・技術用語を手作業で直す必要がなくなります。複数の誤表記を 1 つの正しい語に対応付けられ（正規表現に対応）、AI 整形の前・後・両方のいずれで適用するかを選べます。",
+      "item3": "ダッシュボードで Gemini の使用量と無料枠の残りを確認できます：Gemini はトークン課金で無料枠を使い切りやすいため、本日の使用量と残量を直接確認できるようにしました。枠の数値はご自身のアカウントの値に変更できます。",
       "dismiss": "了解"
     }
   },

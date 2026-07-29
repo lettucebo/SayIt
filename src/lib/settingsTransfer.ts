@@ -3,6 +3,7 @@ import {
   EXPORT_VERSION as DICTIONARY_VERSION,
 } from "./vocabularyTransfer";
 import type { VocabularyExportFile } from "../types/vocabulary";
+import type { ReplacementRule } from "../types/replacement";
 
 export const BACKUP_FORMAT = "sayit-backup" as const;
 export const BACKUP_VERSION = 1 as const;
@@ -34,6 +35,9 @@ export const EXPORTABLE_SETTING_KEYS = [
   "llmModelId",
   "whisperProviderId",
   "whisperModelId",
+  "geminiTranscriptionModelId",
+  "geminiFreeQuotaRequests",
+  "geminiFreeQuotaPeriod",
   "selectedLocale",
   "selectedTranscriptionLocale",
   "themeMode",
@@ -41,6 +45,7 @@ export const EXPORTABLE_SETTING_KEYS = [
   "soundEffectsEnabled",
   "hideDockIcon",
   "smartDictionaryEnabled",
+  "contextInjectionEnabled",
   "enhancementThresholdEnabled",
   "enhancementThresholdCharCount",
   "recordingAutoCleanupEnabled",
@@ -85,11 +90,15 @@ export type SettingsPayload = Record<string, unknown>;
 export interface BackupContents {
   settings: boolean;
   dictionary: boolean;
+  /** v1 備份沒有此欄位 → 選填，缺少視為未包含（向後相容） */
+  replacements?: boolean;
 }
 
 export interface BackupPayload {
   settings: SettingsPayload | null;
   dictionary: VocabularyExportFile | null;
+  /** 文字取代規則；舊備份為 null */
+  replacements?: ReplacementRule[] | null;
 }
 
 export interface EncryptionMeta {
@@ -158,6 +167,7 @@ export function base64ToBytes(b64: string): Uint8Array {
 export interface BuildBackupOptions {
   settings: SettingsPayload | null;
   dictionary: VocabularyExportFile | null;
+  replacements: ReplacementRule[] | null;
   appVersion: string;
   exportedAt: string;
 }
@@ -172,11 +182,13 @@ export function buildBackupFile(opts: BuildBackupOptions): BackupFile {
     contents: {
       settings: opts.settings !== null,
       dictionary: opts.dictionary !== null,
+      replacements: opts.replacements !== null,
     },
     encryption: null,
     payload: {
       settings: opts.settings,
       dictionary: opts.dictionary,
+      replacements: opts.replacements,
     },
   };
 }
@@ -227,6 +239,9 @@ const SETTING_VALUE_TYPES: Record<string, ExpectedType> = {
   llmModelId: "string",
   whisperProviderId: "string",
   whisperModelId: "string",
+  geminiTranscriptionModelId: "string",
+  geminiFreeQuotaRequests: "number",
+  geminiFreeQuotaPeriod: "string",
   selectedLocale: "string",
   selectedTranscriptionLocale: "string",
   themeMode: "string",
@@ -234,6 +249,7 @@ const SETTING_VALUE_TYPES: Record<string, ExpectedType> = {
   soundEffectsEnabled: "boolean",
   hideDockIcon: "boolean",
   smartDictionaryEnabled: "boolean",
+  contextInjectionEnabled: "boolean",
   enhancementThresholdEnabled: "boolean",
   enhancementThresholdCharCount: "number",
   recordingAutoCleanupEnabled: "boolean",
@@ -399,6 +415,10 @@ function isValidEncryptionMeta(meta: unknown): meta is EncryptionMeta {
 function isValidContents(value: unknown): value is BackupContents {
   if (!value || typeof value !== "object") return false;
   const c = value as Partial<BackupContents>;
+  // replacements 為 v2 新增：舊備份沒有此欄位仍須視為合法
+  if (c.replacements !== undefined && typeof c.replacements !== "boolean") {
+    return false;
+  }
   return typeof c.settings === "boolean" && typeof c.dictionary === "boolean";
 }
 
@@ -480,7 +500,11 @@ function normalizePayload(raw: Partial<BackupPayload>): BackupPayload {
     raw.dictionary && typeof raw.dictionary === "object"
       ? (raw.dictionary as VocabularyExportFile)
       : null;
-  return { settings, dictionary };
+  // 只做形狀檢查，逐條規則的清洗交給 replacement store 的 sanitizeRuleList
+  const replacements = Array.isArray(raw.replacements)
+    ? (raw.replacements as ReplacementRule[])
+    : null;
+  return { settings, dictionary, replacements };
 }
 
 function assertPayloadMatchesContents(
@@ -491,6 +515,9 @@ function assertPayloadMatchesContents(
     throw new Error("CORRUPT_FILE");
   }
   if (contents.dictionary && payload.dictionary === null) {
+    throw new Error("CORRUPT_FILE");
+  }
+  if (contents.replacements && payload.replacements == null) {
     throw new Error("CORRUPT_FILE");
   }
 }

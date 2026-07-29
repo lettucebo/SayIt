@@ -128,6 +128,7 @@ CI（`.github/workflows/ci.yml`）：`vue-tsc --noEmit` → `eslint src` → `pn
 | `start_quality_monitor` | `plugins/keyboard_monitor.rs` | useVoiceFlowStore | `app: AppHandle` | `()` |
 | `start_correction_monitor` | `plugins/keyboard_monitor.rs` | useVoiceFlowStore | `app: AppHandle` | `()` |
 | `read_focused_text_field` | `plugins/text_field_reader.rs` | useVoiceFlowStore | — | `Result<Option<String>, String>` |
+| `get_foreground_app_name` | `plugins/text_field_reader.rs` | useVoiceFlowStore | — | `Option<String>` |
 | `read_selected_text` | `plugins/text_field_reader.rs` | useVoiceFlowStore | — | `Result<Option<String>, String>` |
 | `get_default_input_device_name` | `plugins/audio_recorder.rs` | SettingsView | — | `Option<String>` |
 | `list_audio_input_devices` | `plugins/audio_recorder.rs` | SettingsView | — | `Vec<AudioInputDeviceInfo>` |
@@ -139,9 +140,9 @@ CI（`.github/workflows/ci.yml`）：`vue-tsc --noEmit` → `eslint src` → `pn
 | `read_recording_file` | `plugins/audio_recorder.rs` | HistoryView | `id: String, app: AppHandle` | `Result<Response, String>` |
 | `delete_all_recordings` | `plugins/audio_recorder.rs` | SettingsView | `app: AppHandle` | `Result<u32, String>` |
 | `cleanup_old_recordings` | `plugins/audio_recorder.rs` | main-window.ts | `days: u32, app: AppHandle` | `Result<Vec<String>, String>` |
-| `transcribe_audio` | `plugins/transcription.rs` | useVoiceFlowStore | `state, transcription_state, api_key, vocabulary_term_list?, model_id?, language?, provider?, endpoint?, deployment?, api_version?, auth_mode?` | `Result<TranscriptionResult, TranscriptionError>` |
-| `retranscribe_from_file` | `plugins/transcription.rs` | useVoiceFlowStore | `file_path, api_key, vocabulary_term_list?, model_id?, language?, provider?, endpoint?, deployment?, api_version?, auth_mode?` | `Result<TranscriptionResult, TranscriptionError>` |
-| `test_whisper_connection` | `plugins/transcription.rs` | connectionTest.ts（SettingsView） | `transcription_state, api_key, model_id?, provider?, endpoint?, deployment?, api_version?, auth_mode?` | `Result<(), TranscriptionError>` |
+| `transcribe_audio` | `plugins/transcription.rs` | useVoiceFlowStore | `state, transcription_state, api_key, vocabulary_term_list?, model_id?, language?, provider?（`"groq"`(預設)/`"azure"`/`"gemini"`；未知值 fail-closed 報錯）, endpoint?, deployment?, api_version?, auth_mode?` | `Result<TranscriptionResult, TranscriptionError>`（`noSpeechProbability: number \| null` — Gemini 無此信號回 `null`） |
+| `retranscribe_from_file` | `plugins/transcription.rs` | useVoiceFlowStore、useHistoryStore（retranscribeRecord） | `file_path, api_key, vocabulary_term_list?, model_id?, language?, provider?（同上）, endpoint?, deployment?, api_version?, auth_mode?` | `Result<TranscriptionResult, TranscriptionError>`（同上） |
+| `test_whisper_connection` | `plugins/transcription.rs` | connectionTest.ts（SettingsView） | `transcription_state, api_key, model_id?, provider?（同上）, endpoint?, deployment?, api_version?, auth_mode?` | `Result<(), TranscriptionError>` |
 | `get_azure_entra_token` | `plugins/azure_auth.rs` | azureAuth.ts（getAzureAccessToken） | `tenant_id, client_id, client_secret, scope` | `Result<AzureTokenResult, String>`（`{ accessToken, expiresIn }`） |
 | `save_text_file` | `plugins/file_transfer.rs` | SettingsView（備份匯出） | `path: String, content: String` | `Result<(), String>` |
 | `read_text_file` | `plugins/file_transfer.rs` | SettingsView（備份匯入） | `path: String` | `Result<String, String>`（過大回符號錯誤字串 `"FILE_TOO_LARGE"`） |
@@ -199,6 +200,7 @@ CI（`.github/workflows/ci.yml`）：`vue-tsc --noEmit` → `eslint src` → `pn
 
 - **Chat（LLM 整理）** — provider `"azure"`，走 Azure OpenAI v1 端點 `{endpoint}/openai/v1/chat/completions`（OpenAI 線相容，同路徑也能接 Foundry 上的 Grok/DeepSeek）。`buildFetchParams("azure", …, azureOptions)` 在 `llmProvider.ts`。
 - **Whisper（轉錄）** — `whisperProviderId = "azure"` 時走 Rust `transcription.rs`：`{endpoint}/openai/deployments/{deployment}/audio/transcriptions?api-version=…`，保留 `verbose_json`/`no_speech_prob`。
+- **Gemini（轉錄）** — `whisperProviderId = "gemini"` 時走 Rust `transcription.rs`（reqwest，**非** Whisper multipart 協定）：`https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent`，`x-goog-api-key` header + inline base64 WAV + structured output `{ transcript }`。模型**固定**（Rust `GEMINI_TRANSCRIPTION_MODEL` 與 TS `modelRegistry.ts` 兩端必須一致），**不吃 `WhisperModelId`**（沿用會打到不存在的 `/models/whisper-large-v3:generateContent`）。無 `no_speech_prob` → `noSpeechProbability` 回 `null`，前端幻覺偵測 Layer 2b 跳過（Layer 1/2a 不受影響）。inline 上限 20MB request（raw WAV 上限 14 MiB，約 7 分 39 秒）。金鑰與 Gemini LLM 共用 `geminiApiKey`。
 - **驗證** — API Key（`api-key` header）或 **Entra ID（client credentials）**（`Authorization: Bearer`）。token 由 **Rust** `plugins/azure_auth.rs` 的 `get_azure_entra_token` 取得（reqwest，不帶 browser `Origin`，避免 `AADSTS9002326`），快取在 `src/lib/azureAuth.ts`。
 - **scope 依 API 路徑（非 host）選**（`getAzureScopeForApiKind`，`src/lib/azureAuth.ts`）：v1 `/openai/v1/` chat → `ai.azure.com/.default`；deployments/Whisper 路徑 → `cognitiveservices.azure.com/.default`。
 - **設定解析** — `useSettingsStore` 的 `getLlmRequestConfig()` / `getWhisperRequestConfig()`（皆 async，Entra 需換 token）。設定（endpoint/authMode/key 或 tenant+client+secret/部署名）存 `tauri-plugin-store`，**不進 SQLite**。

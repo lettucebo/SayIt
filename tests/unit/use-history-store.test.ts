@@ -442,6 +442,8 @@ describe("useHistoryStore", () => {
       ]);
       // DAILY_QUOTA_USAGE_SQL — 無當日記錄
       mockDbSelect.mockResolvedValueOnce([]);
+      // 月視窗查詢 — 同樣無記錄
+      mockDbSelect.mockResolvedValueOnce([]);
 
       const { useHistoryStore } = await import(
         "../../src/stores/useHistoryStore"
@@ -457,6 +459,8 @@ describe("useHistoryStore", () => {
       expect(stats.dailyQuotaUsage).toEqual({
         whisperRequestCount: 0,
         whisperBilledAudioMs: 0,
+        geminiTranscriptionRequestCount: 0,
+        geminiTranscriptionTotalTokens: 0,
         llmRequestCount: 0,
         llmTotalTokens: 0,
         vocabularyAnalysisRequestCount: 0,
@@ -500,17 +504,28 @@ describe("useHistoryStore", () => {
       mockDbSelect.mockResolvedValueOnce([
         {
           api_type: "whisper",
+          is_gemini: 0,
           request_count: 5,
           total_tokens: 0,
           billed_audio_ms: 50000,
         },
         {
+          api_type: "whisper",
+          is_gemini: 1,
+          request_count: 2,
+          total_tokens: 3840,
+          billed_audio_ms: 20000,
+        },
+        {
           api_type: "chat",
+          is_gemini: 0,
           request_count: 3,
           total_tokens: 1500,
           billed_audio_ms: 30000,
         },
       ]);
+      // 月視窗查詢
+      mockDbSelect.mockResolvedValueOnce([]);
 
       const { useHistoryStore } = await import(
         "../../src/stores/useHistoryStore"
@@ -523,9 +538,12 @@ describe("useHistoryStore", () => {
       expect(stats.totalCharacters).toBe(600);
       expect(stats.totalRecordingDurationMs).toBe(120000);
       expect(stats.estimatedTimeSavedMs).toBe(780000);
+      // Gemini 轉錄與 Whisper 分桶：Groq 的額度不應被 Gemini 請求汙染
       expect(stats.dailyQuotaUsage).toEqual({
         whisperRequestCount: 5,
         whisperBilledAudioMs: 50000,
+        geminiTranscriptionRequestCount: 2,
+        geminiTranscriptionTotalTokens: 3840,
         llmRequestCount: 3,
         llmTotalTokens: 1500,
         vocabularyAnalysisRequestCount: 0,
@@ -605,11 +623,14 @@ describe("useHistoryStore", () => {
       mockDbSelect.mockResolvedValueOnce([
         {
           api_type: "whisper",
+          is_gemini: 0,
           request_count: 2,
           total_tokens: 0,
           billed_audio_ms: 20000,
         },
       ]);
+      // fetchDashboardStats → 月視窗查詢
+      mockDbSelect.mockResolvedValueOnce([]);
       // fetchRecentTranscriptionList
       mockDbSelect.mockResolvedValueOnce([
         createRawRow({ id: "recent-1" }),
@@ -663,6 +684,8 @@ describe("useHistoryStore", () => {
       expect(store.dashboardStats.dailyQuotaUsage).toEqual({
         whisperRequestCount: 0,
         whisperBilledAudioMs: 0,
+        geminiTranscriptionRequestCount: 0,
+        geminiTranscriptionTotalTokens: 0,
         llmRequestCount: 0,
         llmTotalTokens: 0,
         vocabularyAnalysisRequestCount: 0,
@@ -1018,7 +1041,9 @@ describe("useHistoryStore", () => {
       mockDbSelect.mockResolvedValueOnce([
         { total_count: 0, total_characters: 0, total_recording_duration_ms: 0 },
       ]);
-      // fetchDashboardStats → DAILY_QUOTA_USAGE_SQL
+      // fetchDashboardStats → DAILY_QUOTA_USAGE_SQL（日視窗）
+      mockDbSelect.mockResolvedValueOnce([]);
+      // fetchDashboardStats → 月視窗查詢
       mockDbSelect.mockResolvedValueOnce([]);
       // fetchRecentTranscriptionList
       mockDbSelect.mockResolvedValueOnce([]);
@@ -1056,7 +1081,9 @@ describe("useHistoryStore", () => {
       mockDbSelect.mockResolvedValueOnce([
         { total_count: 0, total_characters: 0, total_recording_duration_ms: 0 },
       ]);
-      // fetchDashboardStats → DAILY_QUOTA_USAGE_SQL
+      // fetchDashboardStats → DAILY_QUOTA_USAGE_SQL（日視窗）
+      mockDbSelect.mockResolvedValueOnce([]);
+      // fetchDashboardStats → 月視窗查詢
       mockDbSelect.mockResolvedValueOnce([]);
       // fetchRecentTranscriptionList
       mockDbSelect.mockResolvedValueOnce([]);
@@ -1070,8 +1097,8 @@ describe("useHistoryStore", () => {
 
       await store.refreshDashboard();
 
-      // fetchDailyUsageTrend 是第 4 次 select 呼叫
-      const trendCall = mockDbSelect.mock.calls[3];
+      // fetchDailyUsageTrend 是第 5 次 select 呼叫（日視窗 + 月視窗各一次）
+      const trendCall = mockDbSelect.mock.calls[4];
       const sql = trendCall[0] as string;
       expect(sql).toContain("WHERE timestamp >=");
       expect(sql).toContain("GROUP BY date");

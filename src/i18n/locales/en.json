@@ -94,11 +94,42 @@
       "whisperLabel": "Speech Transcription Model (Whisper)",
       "llmLabel": "Text Enhancement Model (LLM)",
       "whisperUpdated": "Speech transcription model updated",
+      "geminiTranscriptionHint": "Gemini usually handles Chinese-English code-switching better than Whisper. Requires a Gemini API key.",
+      "geminiModelDescription": {
+        "flashLite": "Highest free quota (~500/day, 15/min); Google's docs list transcription as a recommended use. Best for everyday dictation",
+        "flash": "Latest flagship with the strongest multimodal understanding, but a very small free quota (~20/day, 5/min). Use it sparingly when accuracy matters most"
+      },
+      "llmDescription": {
+        "qwen": "Balanced speed and quality; a Groq preview model that can be withdrawn without notice",
+        "oss120b": "Open-weight large model with steadier output; slower than 20B but better quality",
+        "oss20b": "Fastest and cheapest, good for short sentences and light clean-up",
+        "gemini36Flash": "Latest flagship Flash with the strongest understanding of complex sentences; free tier ~20/day",
+        "gemini35Flash": "Previous flagship Flash, high quality; free tier ~20/day",
+        "gemini35FlashLite": "Google's most cost-efficient GA model; free tier ~500/day (highest quota), good for frequent use",
+        "gemini31FlashLite": "Same ~500/day quota, but Google has announced shutdown on 2027-05-07 — prefer 3.5 Flash-Lite",
+        "gemini31Pro": "Highest Pro-tier quality, but not included in the free tier — billing must be enabled",
+        "gptLuna": "OpenAI flagship, strong on long text and complex instructions; paid service",
+        "gptNano": "OpenAI lightweight tier, fast and cheap; paid service",
+        "claudeHaiku": "Claude's lightweight flagship balancing speed and quality; paid service"
+      },
+      "geminiQuotaLabel": "Free quota (override)",
+      "geminiQuotaPlaceholder": "Built-in default {count}",
+      "geminiQuotaHint": "Defaults to each model's built-in free quota; the actual number can differ per account. Enter a value to override, or leave empty to use the built-in one",
+      "geminiQuotaLink": "Check my limits in AI Studio",
+      "geminiQuotaSaved": "Free quota updated",
+      "quotaPeriodDaily": "Per day",
+      "quotaPeriodMonthly": "Per month",
       "llmUpdated": "Text enhancement model updated",
       "default": "Default",
-      "costPerHour": "${cost}/hour"
+      "costPerHour": "${cost}/hour",
+      "whisperDescription": {
+        "largeV3": "Higher accuracy (10.3% WER); recommended for Chinese-English mixing. Also supports translation to English",
+        "largeV3Turbo": "Fastest and cheapest, but higher error rate (12% WER) and more likely to translate away embedded English"
+      }
     },
     "modelBadge": {
+      "accurate": "Accuracy first",
+      "highQuota": "Highest free quota",
       "balanced": "Balanced · Default",
       "stableCostly": "Stable · Costly",
       "fastCheap": "Fastest · Cheapest",
@@ -129,6 +160,57 @@
       "enabledFeedback": "Short text threshold enabled",
       "disabledFeedback": "Short text threshold disabled",
       "charCountSaved": "Threshold character count saved"
+    },
+    "replacements": {
+      "title": "Word Replacements",
+      "description": "Apply deterministic rules after transcription to fix recurring typos, brand names, or English terms.",
+      "ruleCount": "{count} rules",
+      "addTitle": "Add rule",
+      "editTitle": "Edit rule",
+      "patternsLabel": "Source patterns",
+      "patternsPlaceholder": "e.g.\ncopilot\ncopy lot\ncode pilot",
+      "patternsHint": "Enter one source pattern per line. Literal mode is case-insensitive and word-boundary aware.",
+      "replacementLabel": "Replacement",
+      "replacementPlaceholder": "e.g. Copilot",
+      "timingLabel": "Apply timing",
+      "regexLabel": "Regex mode (advanced)",
+      "regexHint": "Supports RegExp and $1 replacement",
+      "enabledLabel": "Enable rule",
+      "enabledHint": "Keep content while disabling it",
+      "addButton": "Add rule",
+      "updateButton": "Update rule",
+      "emptyState": "No replacement rules yet. Add recurring recognition mistakes and SayIt will fix them automatically.",
+      "patternsHeader": "Patterns",
+      "replacementHeader": "Replacement",
+      "timingHeader": "Timing",
+      "typeHeader": "Type",
+      "enabledHeader": "Enabled",
+      "actionsHeader": "Actions",
+      "regexBadge": "Regex",
+      "literalBadge": "Literal",
+      "edit": "Edit",
+      "added": "Replacement rule added",
+      "updated": "Replacement rule updated",
+      "deleted": "Replacement rule deleted",
+      "deleteConfirmTitle": "Delete replacement rule?",
+      "deleteConfirmDescription": "This cannot be undone. The rule will no longer apply to future transcriptions.",
+      "timing": {
+        "beforeAI": "Before AI enhancement",
+        "afterAI": "After AI enhancement",
+        "both": "Before and after AI"
+      },
+      "errors": {
+        "empty-patterns": "Enter at least one source pattern",
+        "pattern-too-long": "A source pattern is too long",
+        "replacement-too-long": "The replacement is too long",
+        "invalid-regex": "Invalid regular expression",
+        "too-many-rules": "Rule limit reached",
+        "too-many-patterns": "Too many source patterns in one rule",
+        "patterns-total-too-long": "Source patterns are too long in total",
+        "persistence-failed": "Failed to save replacement rule. Please try again.",
+        "not-found": "Rule not found",
+        "unknown": "Unable to save replacement rule"
+      }
     },
     "app": {
       "title": "Application",
@@ -256,6 +338,11 @@
       "privacyNote": "When enabled, the system reads text near the cursor for AI analysis. No original text is stored",
       "analysisModelUpdated": "Dictionary analysis model updated"
     },
+    "contextInjection": {
+      "title": "Context Injection",
+      "description": "After recording stops and before AI enhancement, read text near the cursor and the current foreground app name to align terminology and tone with your context.",
+      "privacyNote": "Privacy note: off by default. When enabled, nearby cursor text and the foreground app name are sent together with your speech to your configured cloud AI service (e.g. Groq/OpenAI) for cleanup. Only fields the OS explicitly marks as password are skipped; passwords, API keys, or personal data inside ordinary documents or text boxes are not guaranteed to be excluded. Do not enable while handling confidential content. Read failures degrade silently."
+    },
     "azure": {
       "title": "Azure / Microsoft Foundry",
       "description": "Configure one Azure endpoint and credential shared by text enhancement and transcription.",
@@ -320,7 +407,11 @@
     "dailyUsage": "Today's Usage",
     "billedPlan": "Billed",
     "billedNoFreeQuota": "Pay-as-you-go — no free quota limit",
+    "freeTierQuotaUnknown": "Free tier — limit not published; enter yours in Settings to see remaining",
     "usageWhisper": "Whisper: {requests} req · {audio}",
+    "usageGeminiTranscription": "Gemini transcription: {requests} req · {tokens} tokens",
+    "quotaGeminiRequests": "Gemini transcription today {used} / {limit}",
+    "quotaGeminiRequestsMonthly": "Gemini transcription this month {used} / {limit}",
     "usageLlm": "LLM: {requests} req · {tokens} tokens",
     "geminiQuotaHint": "Gemini free quota varies by account; check it in Google AI Studio"
   },
@@ -500,7 +591,9 @@
     },
     "upgradeNotice": {
       "title": "SayIt Update Summary",
-      "item1": "Days with no usage now show a 0 in the daily usage trend chart — hovering over a day with no usage previously showed the usage-count label but a blank value beside it, making it look like data was missing. Zero-usage days now correctly display 0.",
+      "item1": "Gemini speech transcription added — when you mix English terms into Chinese speech, Whisper tends to translate the English away instead of transcribing it as spoken. Transcription can now be switched to Gemini in Settings, with a model picker: the default Flash-Lite allows around 500 requests a day, 25x what Flash allows.",
+      "item2": "Word replacements added — names, product names and technical terms that are consistently misheard no longer need fixing by hand every time. Map several wrong spellings to one correct term (regex supported) and choose whether they apply before AI cleanup, after it, or both.",
+      "item3": "Gemini usage and remaining free quota on the dashboard — Gemini bills by token and its free quota runs out quickly. You can now see how much you have used today and how much is left, and replace the quota figure with the one from your own account.",
       "dismiss": "Got it"
     }
   },

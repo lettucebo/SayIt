@@ -17,6 +17,7 @@ const {
   mockLoadSettings,
   mockSettingsState,
   mockVocabularyState,
+  mockReplacementState,
   mockAddTranscription,
   mockUpdateTranscriptionOnRetrySuccess,
   mockAddApiUsage,
@@ -96,6 +97,7 @@ const {
       isMuteOnRecordingEnabled: false,
       isSoundEffectsEnabled: true,
       isSmartDictionaryEnabled: false,
+      contextInjectionEnabled: false,
       isCopyTranscriptionToClipboardEnabled: true,
       whisperLanguageCode: "zh" as string | null,
       selectedTranscriptionLocale: "auto" as string,
@@ -111,6 +113,17 @@ const {
       }>,
       getTopTermListByWeight: vi.fn().mockResolvedValue([]),
       batchIncrementWeights: vi.fn().mockResolvedValue(undefined),
+    },
+    mockReplacementState: {
+      rules: [] as Array<{
+        id: string;
+        patterns: string[];
+        replacement: string;
+        isRegex: boolean;
+        timing: "beforeAI" | "afterAI" | "both";
+        enabled: boolean;
+      }>,
+      ensureLoaded: vi.fn().mockResolvedValue(undefined),
     },
     mockAddTranscription: vi.fn().mockResolvedValue(undefined),
     mockUpdateTranscriptionOnRetrySuccess: vi.fn().mockResolvedValue(undefined),
@@ -199,12 +212,17 @@ vi.mock("../../src/stores/useSettingsStore", () => ({
         modelId: mockSettingsState.selectedLlmModelId,
       }),
     getWhisperRequestConfig: () =>
-      Promise.resolve({ apiKey: mockSettingsState.apiKey, provider: "groq" }),
+      Promise.resolve({
+        apiKey: mockSettingsState.apiKey,
+        provider: "groq",
+        modelId: mockSettingsState.selectedWhisperModelId,
+      }),
     getEffectiveChatModel: () => mockSettingsState.selectedLlmModelId,
     whisperProviderId: "groq",
     hasWhisperConfig: true,
     getAiPrompt: () => mockSettingsState.aiPrompt,
     refreshApiKey: vi.fn().mockResolvedValue(undefined),
+    refreshTranscriptionApiKey: vi.fn().mockResolvedValue(undefined),
     refreshLlmApiKey: vi.fn().mockResolvedValue(undefined),
     hasLlmApiKey: true,
     refreshEnhancementThreshold: vi.fn().mockResolvedValue(undefined),
@@ -236,11 +254,21 @@ vi.mock("../../src/stores/useSettingsStore", () => ({
     get isSmartDictionaryEnabled() {
       return mockSettingsState.isSmartDictionaryEnabled;
     },
+    get contextInjectionEnabled() {
+      return mockSettingsState.contextInjectionEnabled;
+    },
     get isCopyTranscriptionToClipboardEnabled() {
       return mockSettingsState.isCopyTranscriptionToClipboardEnabled;
     },
     getWhisperLanguageCode: () => mockSettingsState.whisperLanguageCode,
     selectedAudioInputDeviceName: "",
+  }),
+}));
+
+vi.mock("../../src/stores/useReplacementStore", () => ({
+  useReplacementStore: () => ({
+    rules: mockReplacementState.rules,
+    ensureLoaded: mockReplacementState.ensureLoaded,
   }),
 }));
 
@@ -362,6 +390,7 @@ describe("useVoiceFlowStore", () => {
     mockSettingsState.isMuteOnRecordingEnabled = false;
     mockSettingsState.isSoundEffectsEnabled = true;
     mockSettingsState.isSmartDictionaryEnabled = false;
+    mockSettingsState.contextInjectionEnabled = false;
     mockSettingsState.whisperLanguageCode = "zh";
     mockSettingsState.selectedTranscriptionLocale = "auto";
     mockSettingsState.selectedLocale = "en";
@@ -372,6 +401,8 @@ describe("useVoiceFlowStore", () => {
     mockVocabularyState.batchIncrementWeights
       .mockClear()
       .mockResolvedValue(undefined);
+    mockReplacementState.rules = [];
+    mockReplacementState.ensureLoaded.mockClear().mockResolvedValue(undefined);
     mockAddTranscription.mockClear().mockResolvedValue(undefined);
     mockUpdateTranscriptionOnRetrySuccess
       .mockClear()
@@ -864,6 +895,49 @@ describe("useVoiceFlowStore", () => {
     );
   });
 
+  it("[P1] 空轉錄偵測使用 Whisper 原始結果，不被 beforeAI 規則繞過", async () => {
+    mockReplacementState.rules = [
+      {
+        id: "before-empty",
+        patterns: ["^\\s*$"],
+        replacement: "被規則補出的文字",
+        isRegex: true,
+        timing: "beforeAI",
+        enabled: true,
+      },
+    ];
+    mockInvoke.mockImplementation(
+      createMockInvokeHandler({
+        transcribeResult: {
+          rawText: "   ",
+          transcriptionDurationMs: 280,
+          noSpeechProbability: 1.0,
+        },
+      }),
+    );
+
+    const store = useVoiceFlowStore();
+    await store.initialize();
+
+    triggerHotkeyEvent("hotkey:pressed");
+    await vi.waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("start_recording", {
+        deviceName: "",
+      });
+    });
+
+    triggerHotkeyEvent("hotkey:released");
+    await vi.waitFor(() => {
+      expect(store.status).toBe("error");
+    });
+
+    expect(store.message).toBe("voiceFlow.noSpeechDetected");
+    expect(mockInvoke).not.toHaveBeenCalledWith(
+      "paste_text",
+      expect.anything(),
+    );
+  });
+
   it("[P0] 高 noSpeechProbability 但有文字時應正常貼上（不攔截幻聽）", async () => {
     mockInvoke.mockImplementation(
       createMockInvokeHandler({
@@ -1204,6 +1278,171 @@ describe("useVoiceFlowStore", () => {
       });
     });
 
+    it("[P0] 情境注入關閉時不應讀取游標文字或前景 App", async () => {
+      const longText = "這是一段超過十個字的測試轉錄文字內容";
+      mockSettingsState.contextInjectionEnabled = false;
+      mockInvoke.mockImplementation(
+        createMockInvokeHandler({
+          transcribeResult: {
+            rawText: longText,
+            transcriptionDurationMs: 400,
+            noSpeechProbability: 0.01,
+          },
+        }),
+      );
+
+      const store = useVoiceFlowStore();
+      await store.initialize();
+      triggerHotkeyEvent("hotkey:pressed");
+      await vi.waitFor(() => {
+        expect(mockInvoke).toHaveBeenCalledWith("start_recording", {
+          deviceName: "",
+        });
+      });
+      triggerHotkeyEvent("hotkey:released");
+
+      await vi.waitFor(() => {
+        expect(mockEnhanceText).toHaveBeenCalled();
+      });
+
+      expect(mockInvoke).not.toHaveBeenCalledWith("read_focused_text_field");
+      expect(mockInvoke).not.toHaveBeenCalledWith("get_foreground_app_name");
+      expect(mockEnhanceText).toHaveBeenCalledWith(
+        longText,
+        "test-api-key-123",
+        expect.not.objectContaining({
+          contextText: expect.any(String),
+          appName: expect.any(String),
+        }),
+      );
+    });
+
+    it("[P0] 情境注入開啟時應讀取游標文字與前景 App 並傳給 enhancer", async () => {
+      const longText = "這是一段超過十個字的測試轉錄文字內容";
+      mockSettingsState.contextInjectionEnabled = true;
+      const baseHandler = createMockInvokeHandler({
+        transcribeResult: {
+          rawText: longText,
+          transcriptionDurationMs: 400,
+          noSpeechProbability: 0.01,
+        },
+      });
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === "read_focused_text_field") return "Kubernetes Deployment";
+        if (cmd === "get_foreground_app_name") return "Code";
+        return baseHandler(cmd);
+      });
+
+      const store = useVoiceFlowStore();
+      await store.initialize();
+      triggerHotkeyEvent("hotkey:pressed");
+      await vi.waitFor(() => {
+        expect(mockInvoke).toHaveBeenCalledWith("start_recording", {
+          deviceName: "",
+        });
+      });
+      triggerHotkeyEvent("hotkey:released");
+
+      await vi.waitFor(() => {
+        expect(mockEnhanceText).toHaveBeenCalledWith(
+          longText,
+          "test-api-key-123",
+          expect.objectContaining({
+            contextText: "Kubernetes Deployment",
+            appName: "Code",
+          }),
+        );
+      });
+    });
+
+    it("[P1] 情境讀取失敗時應靜默降級並仍送出 enhancer", async () => {
+      const longText = "這是一段超過十個字的測試轉錄文字內容";
+      mockSettingsState.contextInjectionEnabled = true;
+      const baseHandler = createMockInvokeHandler({
+        transcribeResult: {
+          rawText: longText,
+          transcriptionDurationMs: 400,
+          noSpeechProbability: 0.01,
+        },
+      });
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === "read_focused_text_field") throw new Error("AX timeout");
+        if (cmd === "get_foreground_app_name") throw new Error("no window");
+        return baseHandler(cmd);
+      });
+
+      const store = useVoiceFlowStore();
+      await store.initialize();
+      triggerHotkeyEvent("hotkey:pressed");
+      await vi.waitFor(() => {
+        expect(mockInvoke).toHaveBeenCalledWith("start_recording", {
+          deviceName: "",
+        });
+      });
+      triggerHotkeyEvent("hotkey:released");
+
+      await vi.waitFor(() => {
+        expect(mockEnhanceText).toHaveBeenCalledWith(
+          longText,
+          "test-api-key-123",
+          expect.not.objectContaining({
+            contextText: expect.any(String),
+            appName: expect.any(String),
+          }),
+        );
+      });
+      expect(store.status).toBe("success");
+    });
+
+    it("[P1] main AI 成功路徑套用 afterAI 並回寫 processedText", async () => {
+      mockReplacementState.rules = [
+        {
+          id: "after-main-ai",
+          patterns: ["整理後的書面語文字"],
+          replacement: "整理後的最終文字",
+          isRegex: false,
+          timing: "afterAI",
+          enabled: true,
+        },
+      ];
+      const longText = "這是一段超過十個字的測試轉錄文字內容";
+      mockInvoke.mockImplementation(
+        createMockInvokeHandler({
+          transcribeResult: {
+            rawText: longText,
+            transcriptionDurationMs: 400,
+            noSpeechProbability: 0.01,
+          },
+        }),
+      );
+      mockEnhanceText.mockResolvedValueOnce({
+        text: "整理後的書面語文字",
+        usage: null,
+      });
+
+      const store = useVoiceFlowStore();
+      await store.initialize();
+      triggerHotkeyEvent("hotkey:pressed");
+      await vi.waitFor(() => {
+        expect(mockInvoke).toHaveBeenCalledWith("start_recording", {
+          deviceName: "",
+        });
+      });
+      triggerHotkeyEvent("hotkey:released");
+
+      await vi.waitFor(() => {
+        expect(mockInvoke).toHaveBeenCalledWith("paste_text", {
+          text: "整理後的最終文字",
+          restoreClipboard: false,
+        });
+      });
+      await vi.waitFor(() => {
+        expect(mockAddTranscription).toHaveBeenCalled();
+      });
+      const saved = mockAddTranscription.mock.calls.at(-1)?.[0];
+      expect(saved.processedText).toBe("整理後的最終文字");
+    });
+
     it("[P0] < 10 字應跳過 AI 整理，直接貼上原始文字", async () => {
       mockInvoke.mockImplementation(
         createMockInvokeHandler({
@@ -1243,6 +1482,51 @@ describe("useVoiceFlowStore", () => {
           (call[1] as { status: string }).status === "enhancing",
       );
       expect(enhancingCalls).toHaveLength(0);
+    });
+
+    it("[P1] main skip-AI 路徑套用 afterAI 並維持 rawText/charCount 一致", async () => {
+      mockReplacementState.rules = [
+        {
+          id: "after-main-skip",
+          patterns: ["短文字"],
+          replacement: "短文",
+          isRegex: false,
+          timing: "afterAI",
+          enabled: true,
+        },
+      ];
+      mockInvoke.mockImplementation(
+        createMockInvokeHandler({
+          transcribeResult: {
+            rawText: "短文字",
+            transcriptionDurationMs: 200,
+            noSpeechProbability: 0.01,
+          },
+        }),
+      );
+
+      const store = useVoiceFlowStore();
+      await store.initialize();
+      triggerHotkeyEvent("hotkey:pressed");
+      await vi.waitFor(() => {
+        expect(mockInvoke).toHaveBeenCalledWith("start_recording", {
+          deviceName: "",
+        });
+      });
+      triggerHotkeyEvent("hotkey:released");
+
+      await vi.waitFor(() => {
+        expect(mockInvoke).toHaveBeenCalledWith("paste_text", {
+          text: "短文",
+          restoreClipboard: false,
+        });
+      });
+      await vi.waitFor(() => {
+        expect(mockAddTranscription).toHaveBeenCalled();
+      });
+      const saved = mockAddTranscription.mock.calls.at(-1)?.[0];
+      expect(saved.rawText).toBe("短文");
+      expect(saved.charCount).toBe("短文".length);
     });
 
     it("[P0] AI 整理 timeout 應 fallback 貼原始文字並顯示「已貼上（未整理）」", async () => {
@@ -1317,6 +1601,54 @@ describe("useVoiceFlowStore", () => {
         status: "success",
         message: "voiceFlow.pasteSuccessUnenhanced",
       });
+    });
+
+    it("[P1] main fallback 路徑套用 afterAI 並維持 rawText/charCount 一致", async () => {
+      const longText = "這是一段超過十個字的測試轉錄文字內容";
+      const replaced = "這是一段超過十個字的測試轉錄最終內容";
+      mockReplacementState.rules = [
+        {
+          id: "after-main-fallback",
+          patterns: ["文字內容"],
+          replacement: "最終內容",
+          isRegex: false,
+          timing: "afterAI",
+          enabled: true,
+        },
+      ];
+      mockInvoke.mockImplementation(
+        createMockInvokeHandler({
+          transcribeResult: {
+            rawText: longText,
+            transcriptionDurationMs: 400,
+            noSpeechProbability: 0.01,
+          },
+        }),
+      );
+      mockEnhanceText.mockRejectedValueOnce(new Error("AI 整理失敗：500"));
+
+      const store = useVoiceFlowStore();
+      await store.initialize();
+      triggerHotkeyEvent("hotkey:pressed");
+      await vi.waitFor(() => {
+        expect(mockInvoke).toHaveBeenCalledWith("start_recording", {
+          deviceName: "",
+        });
+      });
+      triggerHotkeyEvent("hotkey:released");
+
+      await vi.waitFor(() => {
+        expect(mockInvoke).toHaveBeenCalledWith("paste_text", {
+          text: replaced,
+          restoreClipboard: false,
+        });
+      });
+      await vi.waitFor(() => {
+        expect(mockAddTranscription).toHaveBeenCalled();
+      });
+      const saved = mockAddTranscription.mock.calls.at(-1)?.[0];
+      expect(saved.rawText).toBe(replaced);
+      expect(saved.charCount).toBe(replaced.length);
     });
 
     it("[P0] 恰好 10 字應走 AI 整理流程", async () => {
@@ -2357,6 +2689,16 @@ describe("useVoiceFlowStore", () => {
 
       await setupFailedTranscription(store);
       expect(store.canRetry).toBe(true);
+      mockReplacementState.rules = [
+        {
+          id: "after-retry-skip",
+          patterns: ["重送成功的文字"],
+          replacement: "重送成功的最終文字",
+          isRegex: false,
+          timing: "afterAI",
+          enabled: true,
+        },
+      ];
 
       // 重新設定 mock 讓重送成功
       mockInvoke.mockImplementation(
@@ -2381,7 +2723,7 @@ describe("useVoiceFlowStore", () => {
 
       await vi.waitFor(() => {
         expect(mockInvoke).toHaveBeenCalledWith("paste_text", {
-          text: "重送成功的文字",
+          text: "重送成功的最終文字",
           restoreClipboard: false,
         });
       });
@@ -2395,8 +2737,9 @@ describe("useVoiceFlowStore", () => {
       });
       const updateParams =
         mockUpdateTranscriptionOnRetrySuccess.mock.calls[0][0];
-      expect(updateParams.rawText).toBe("重送成功的文字");
+      expect(updateParams.rawText).toBe("重送成功的最終文字");
       expect(updateParams.processedText).toBeNull();
+      expect(updateParams.charCount).toBe("重送成功的最終文字".length);
     });
 
     it("[P1] 重送時原文達整理門檻應走 enhanceWithAnomalyGuard、貼整理後文字、wasEnhanced=true（a5 piece B）", async () => {
@@ -2405,6 +2748,16 @@ describe("useVoiceFlowStore", () => {
 
       await setupFailedTranscription(store);
       expect(store.canRetry).toBe(true);
+      mockReplacementState.rules = [
+        {
+          id: "after-retry-ai",
+          patterns: ["AI 整理後的書面語文字"],
+          replacement: "AI 整理後的最終文字",
+          isRegex: false,
+          timing: "afterAI",
+          enabled: true,
+        },
+      ];
 
       // 原文 >= enhancementThresholdCharCount(10) → 重送走 AI 整理（含長度守衛）
       mockInvoke.mockImplementation(
@@ -2422,7 +2775,7 @@ describe("useVoiceFlowStore", () => {
       // 非異常 → enhanceWithAnomalyGuard 回整理後文字，貼上該文字
       await vi.waitFor(() => {
         expect(mockInvoke).toHaveBeenCalledWith("paste_text", {
-          text: "AI 整理後的書面語文字",
+          text: "AI 整理後的最終文字",
           restoreClipboard: false,
         });
       });
@@ -2432,8 +2785,91 @@ describe("useVoiceFlowStore", () => {
       });
       const updateParams =
         mockUpdateTranscriptionOnRetrySuccess.mock.calls[0][0];
-      expect(updateParams.processedText).toBe("AI 整理後的書面語文字");
+      expect(updateParams.processedText).toBe("AI 整理後的最終文字");
       expect(updateParams.wasEnhanced).toBe(true);
+    });
+
+    it("[P1] 重送 AI 整理前若情境注入開啟，應傳入 contextText 與 appName", async () => {
+      const store = useVoiceFlowStore();
+      await store.initialize();
+
+      await setupFailedTranscription(store);
+      expect(store.canRetry).toBe(true);
+
+      mockSettingsState.contextInjectionEnabled = true;
+      const retryText = "這是一段夠長需要整理的重送逐字稿內容";
+      const baseHandler = createMockInvokeHandler({
+        retranscribeResult: {
+          rawText: retryText,
+          transcriptionDurationMs: 350,
+          noSpeechProbability: 0.02,
+        },
+      });
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === "read_focused_text_field") return "Kubernetes Service";
+        if (cmd === "get_foreground_app_name") return "Terminal";
+        return baseHandler(cmd);
+      });
+
+      await store.handleRetryTranscription();
+
+      await vi.waitFor(() => {
+        expect(mockEnhanceText).toHaveBeenCalledWith(
+          retryText,
+          "test-api-key-123",
+          expect.objectContaining({
+            contextText: "Kubernetes Service",
+            appName: "Terminal",
+          }),
+        );
+      });
+    });
+
+    it("[P1] 重送 fallback 路徑套用 afterAI 並用最終文字更新 rawText/charCount", async () => {
+      const store = useVoiceFlowStore();
+      await store.initialize();
+
+      await setupFailedTranscription(store);
+      expect(store.canRetry).toBe(true);
+      const rawText = "這是一段夠長需要整理的重送逐字稿內容";
+      const replaced = "這是一段夠長需要整理的重送最終稿內容";
+      mockReplacementState.rules = [
+        {
+          id: "after-retry-fallback",
+          patterns: ["逐字稿"],
+          replacement: "最終稿",
+          isRegex: false,
+          timing: "afterAI",
+          enabled: true,
+        },
+      ];
+      mockInvoke.mockImplementation(
+        createMockInvokeHandler({
+          retranscribeResult: {
+            rawText,
+            transcriptionDurationMs: 350,
+            noSpeechProbability: 0.02,
+          },
+        }),
+      );
+      mockEnhanceText.mockRejectedValueOnce(new Error("AI 整理失敗"));
+
+      await store.handleRetryTranscription();
+
+      await vi.waitFor(() => {
+        expect(mockInvoke).toHaveBeenCalledWith("paste_text", {
+          text: replaced,
+          restoreClipboard: false,
+        });
+      });
+      await vi.waitFor(() => {
+        expect(mockUpdateTranscriptionOnRetrySuccess).toHaveBeenCalledTimes(1);
+      });
+      const updateParams =
+        mockUpdateTranscriptionOnRetrySuccess.mock.calls[0][0];
+      expect(updateParams.rawText).toBe(replaced);
+      expect(updateParams.processedText).toBeNull();
+      expect(updateParams.charCount).toBe(replaced.length);
     });
 
     it("[P0] 重送失敗（空轉錄）不再提供重送按鈕", async () => {

@@ -13,6 +13,7 @@ import { extractErrorMessage } from "../lib/errorUtils";
 import { useFeedbackMessage } from "../composables/useFeedbackMessage";
 import { useHistoryStore } from "../stores/useHistoryStore";
 import { useVocabularyStore } from "../stores/useVocabularyStore";
+import { useReplacementStore } from "../stores/useReplacementStore";
 import {
   buildBackupFile,
   buildBackupFilename,
@@ -42,6 +43,7 @@ import type {
   RecordingRejectedPayload,
 } from "../types/events";
 import type { TriggerMode } from "../types";
+import type { ReplacementRule, ReplacementTiming } from "../types/replacement";
 import {
   getDomCodeByKeycode,
   getKeyDisplayNameByKeycode,
@@ -54,6 +56,11 @@ import {
   type LlmModelId,
   type LlmProviderId,
   type WhisperModelId,
+  type TranscriptionProviderId,
+  type QuotaPeriod,
+  type GeminiTranscriptionModelId,
+  GEMINI_TRANSCRIPTION_MODEL_LIST,
+  findGeminiTranscriptionModelConfig,
 } from "../lib/modelRegistry";
 import { LLM_PROVIDER_LIST, findProviderConfig } from "../lib/llmProvider";
 import {
@@ -98,6 +105,14 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
   AtSign,
   Bug,
   CircleAlert,
@@ -110,8 +125,11 @@ import {
   Linkedin,
   Lock,
   Mic,
+  Pencil,
+  Plus,
   RefreshCw,
   Trash2,
+  X,
   Upload,
 } from "lucide-vue-next";
 import { openLogFolder } from "../lib/logger";
@@ -126,6 +144,7 @@ import {
 const settingsStore = useSettingsStore();
 const historyStore = useHistoryStore();
 const vocabularyStore = useVocabularyStore();
+const replacementStore = useReplacementStore();
 const { t } = useI18n();
 
 declare const __APP_VERSION__: string;
@@ -534,20 +553,175 @@ async function handleSaveThresholdCharCount() {
   }
 }
 
+// ── 取代規則 ──────────────────────────────────────────────
+type ReplacementFormState = {
+  patternsText: string;
+  replacement: string;
+  isRegex: boolean;
+  timing: ReplacementTiming;
+  enabled: boolean;
+};
+
+const REPLACEMENT_TIMINGS: readonly ReplacementTiming[] = [
+  "beforeAI",
+  "afterAI",
+  "both",
+];
+
+const replacementFeedback = useFeedbackMessage();
+const isSavingReplacementRule = ref(false);
+const editingReplacementRuleId = ref<string | null>(null);
+const replacementForm = ref<ReplacementFormState>({
+  patternsText: "",
+  replacement: "",
+  isRegex: false,
+  timing: "beforeAI",
+  enabled: true,
+});
+
+const isEditingReplacementRule = computed(
+  () => editingReplacementRuleId.value !== null,
+);
+
+const replacementTimingOptions = computed(() =>
+  REPLACEMENT_TIMINGS.map((value) => ({
+    value,
+    label: t(`settings.replacements.timing.${value}`),
+  })),
+);
+
+function isReplacementTiming(value: unknown): value is ReplacementTiming {
+  return (
+    typeof value === "string" &&
+    REPLACEMENT_TIMINGS.includes(value as ReplacementTiming)
+  );
+}
+
+function parseReplacementPatterns(input: string): string[] {
+  return input
+    .split(/\r?\n/u)
+    .map((pattern) => pattern.trim())
+    .filter((pattern) => pattern.length > 0);
+}
+
+function replacementErrorMessage(code?: string): string {
+  if (!code) return t("settings.replacements.errors.unknown");
+  const key = `settings.replacements.errors.${code}`;
+  const message = t(key);
+  return message === key ? t("settings.replacements.errors.unknown") : message;
+}
+
+function resetReplacementForm() {
+  editingReplacementRuleId.value = null;
+  replacementForm.value = {
+    patternsText: "",
+    replacement: "",
+    isRegex: false,
+    timing: "beforeAI",
+    enabled: true,
+  };
+}
+
+function startEditingReplacementRule(rule: ReplacementRule) {
+  editingReplacementRuleId.value = rule.id;
+  replacementForm.value = {
+    patternsText: rule.patterns.join("\n"),
+    replacement: rule.replacement,
+    isRegex: rule.isRegex,
+    timing: rule.timing,
+    enabled: rule.enabled,
+  };
+}
+
+function handleReplacementTimingChange(value: unknown) {
+  if (!isReplacementTiming(value)) return;
+  replacementForm.value.timing = value;
+}
+
+async function handleSubmitReplacementRule() {
+  const patterns = parseReplacementPatterns(replacementForm.value.patternsText);
+  const validation = replacementStore.validateRuleInput(
+    patterns,
+    replacementForm.value.replacement,
+    replacementForm.value.isRegex,
+  );
+  if (!validation.valid) {
+    replacementFeedback.show("error", replacementErrorMessage(validation.error));
+    return;
+  }
+
+  try {
+    isSavingReplacementRule.value = true;
+    const input = {
+      patterns,
+      replacement: replacementForm.value.replacement,
+      isRegex: replacementForm.value.isRegex,
+      timing: replacementForm.value.timing,
+      enabled: replacementForm.value.enabled,
+    };
+    const result = editingReplacementRuleId.value
+      ? await replacementStore.updateRule(editingReplacementRuleId.value, input)
+      : await replacementStore.addRule(input);
+
+    if (!result.valid) {
+      replacementFeedback.show("error", replacementErrorMessage(result.error));
+      return;
+    }
+
+    replacementFeedback.show(
+      "success",
+      editingReplacementRuleId.value
+        ? t("settings.replacements.updated")
+        : t("settings.replacements.added"),
+    );
+    resetReplacementForm();
+  } catch (err) {
+    replacementFeedback.show("error", extractErrorMessage(err));
+  } finally {
+    isSavingReplacementRule.value = false;
+  }
+}
+
+async function handleToggleReplacementRule(rule: ReplacementRule, enabled: boolean) {
+  const result = await replacementStore.updateRule(rule.id, { enabled });
+  if (!result.valid) {
+    replacementFeedback.show("error", replacementErrorMessage(result.error));
+  }
+}
+
+async function handleDeleteReplacementRule(rule: ReplacementRule) {
+  try {
+    const removed = await replacementStore.removeRule(rule.id);
+    if (!removed) {
+      replacementFeedback.show(
+        "error",
+        replacementErrorMessage("persistence-failed"),
+      );
+      return;
+    }
+    if (editingReplacementRuleId.value === rule.id) resetReplacementForm();
+    replacementFeedback.show("success", t("settings.replacements.deleted"));
+  } catch (err) {
+    replacementFeedback.show("error", extractErrorMessage(err));
+  }
+}
+
 // ── 模型選擇 ──────────────────────────────────────────────
 const modelFeedback = useFeedbackMessage();
 
 const whisperModelDescription = computed(() => {
   const config = findWhisperModelConfig(settingsStore.selectedWhisperModelId);
   if (!config) return "";
-  return t("settings.model.costPerHour", { cost: config.costPerHour });
+  const cost = t("settings.model.costPerHour", { cost: config.costPerHour });
+  return `${t(config.descriptionKey)} · ${cost}`;
 });
 
 const llmModelDescription = computed(() => {
   const config = findLlmModelConfig(settingsStore.selectedLlmModelId);
   if (!config) return "";
   const tpsInfo = config.speedTps > 0 ? `${config.speedTps} TPS · ` : "";
-  return `${tpsInfo}$${config.inputCostPerMillion}/$${config.outputCostPerMillion} per M tokens`;
+  const cost = `${tpsInfo}$${config.inputCostPerMillion}/$${config.outputCostPerMillion} per M tokens`;
+  return `${t(config.descriptionKey)} · ${cost}`;
 });
 
 const providerModelList = computed(() =>
@@ -617,6 +791,12 @@ function loadAzureInputsFromStore() {
   azureApiVersionInput.value = settingsStore.azureApiVersion;
   azureChatDeploymentInput.value = settingsStore.azureChatDeployment;
   azureWhisperDeploymentInput.value = settingsStore.azureWhisperDeployment;
+  // Gemini 免費額度：0 視為「未設定」，輸入框留空而非顯示 0
+  geminiFreeQuotaInput.value =
+    settingsStore.geminiFreeQuotaRequests > 0
+      ? String(settingsStore.geminiFreeQuotaRequests)
+      : "";
+  geminiFreeQuotaPeriodInput.value = settingsStore.geminiFreeQuotaPeriod;
 }
 
 async function handleSaveAzureConnection() {
@@ -711,12 +891,71 @@ function azureConnectionIssue(deployment: string): string {
   return "";
 }
 
-async function handleWhisperProviderChange(id: "groq" | "azure") {
+async function handleWhisperProviderChange(id: TranscriptionProviderId) {
   try {
     await settingsStore.saveWhisperProvider(id);
     modelFeedback.show("success", t("settings.model.whisperUpdated"));
   } catch (err) {
     modelFeedback.show("error", extractErrorMessage(err));
+  }
+}
+
+const geminiTranscriptionModelDescription = computed(() => {
+  const config = findGeminiTranscriptionModelConfig(
+    settingsStore.geminiTranscriptionModelId,
+  );
+  if (!config) return "";
+  return t(config.descriptionKey);
+});
+
+async function handleGeminiTranscriptionModelChange(
+  id: GeminiTranscriptionModelId,
+) {
+  try {
+    await settingsStore.saveGeminiTranscriptionModel(id);
+    modelFeedback.show("success", t("settings.model.whisperUpdated"));
+  } catch (err) {
+    modelFeedback.show("error", extractErrorMessage(err));
+  }
+}
+
+const geminiFreeQuotaInput = ref("");
+
+/** 未填時的提示：顯示目前模型的內建預設額度 */
+const geminiQuotaPlaceholder = computed(() => {
+  const config = findGeminiTranscriptionModelConfig(
+    settingsStore.geminiTranscriptionModelId,
+  );
+  return t("settings.model.geminiQuotaPlaceholder", {
+    count: config?.typicalFreeRpd ?? 0,
+  });
+});
+const geminiFreeQuotaPeriodInput = ref<QuotaPeriod>("daily");
+
+async function handleSaveGeminiFreeQuota() {
+  try {
+    const parsed = Number(geminiFreeQuotaInput.value);
+    await settingsStore.saveGeminiFreeQuota(
+      Number.isFinite(parsed) ? parsed : 0,
+      geminiFreeQuotaPeriodInput.value,
+    );
+    modelFeedback.show("success", t("settings.model.geminiQuotaSaved"));
+  } catch (err) {
+    modelFeedback.show("error", extractErrorMessage(err));
+  }
+}
+
+async function testGeminiWhisperConnection() {  try {
+    const cfg = await settingsStore.getWhisperRequestConfig();
+    return await testWhisperConnection(cfg.modelId, cfg.apiKey, {
+      provider: cfg.provider,
+    });
+  } catch (err) {
+    return {
+      ok: false as const,
+      durationMs: 0,
+      errorMessage: extractErrorMessage(err),
+    };
   }
 }
 
@@ -938,6 +1177,18 @@ async function handleToggleSmartDictionary(newValue: boolean) {
     smartDictionaryFeedback.show("success", t("common.save"));
   } catch (err) {
     smartDictionaryFeedback.show("error", extractErrorMessage(err));
+  }
+}
+
+// ── 情境注入 ────────────────────────────────────────────────
+const contextInjectionFeedback = useFeedbackMessage();
+
+async function handleToggleContextInjection(newValue: boolean) {
+  try {
+    await settingsStore.saveContextInjectionEnabled(newValue);
+    contextInjectionFeedback.show("success", t("common.save"));
+  } catch (err) {
+    contextInjectionFeedback.show("error", extractErrorMessage(err));
   }
 }
 
@@ -1232,10 +1483,15 @@ async function handleBackupExport() {
     const dictionary = exportDictionarySelected.value
       ? buildExportFile(await vocabularyStore.exportEntries(), iso)
       : null;
+    // 文字取代規則屬設定類（存於 replacements.json）→ 隨「設定」一起備份
+    const replacements = exportSettingsSelected.value
+      ? await replacementStore.exportRules()
+      : null;
 
     let file = buildBackupFile({
       settings,
       dictionary,
+      replacements,
       appVersion: __APP_VERSION__,
       exportedAt: iso,
     });
@@ -1369,6 +1625,10 @@ async function applyBackupImport() {
       await settingsStore.importSettings(cleanSettings);
       resyncLocalInputsFromStore();
       settingsApplied = true;
+      // 取代規則隨設定一起還原（舊備份沒有此區塊 → 維持現有規則不動）
+      if (payload.replacements) {
+        await replacementStore.importRules(payload.replacements);
+      }
       // 音訊裝置若有變更，重啟預覽以對齊新裝置
       if (
         settingsStore.selectedAudioInputDeviceName !== deviceBeforeImport
@@ -1413,6 +1673,7 @@ async function applyBackupImport() {
 }
 
 onMounted(async () => {
+  await replacementStore.ensureLoaded();
   // F5 fix: 先載入裝置列表，完成後再啟動預覽（避免 cpal 並行 host 查詢）
   void loadAudioInputDeviceList().then(() => {
     void startPreview(settingsStore.selectedAudioInputDeviceName);
@@ -1448,6 +1709,7 @@ onBeforeUnmount(() => {
   apiKeyFeedback.clearTimer();
   promptFeedback.clearTimer();
   enhancementThresholdFeedback.clearTimer();
+  replacementFeedback.clearTimer();
   modelFeedback.clearTimer();
   muteOnRecordingFeedback.clearTimer();
   soundFeedbackFeedback.clearTimer();
@@ -1458,6 +1720,7 @@ onBeforeUnmount(() => {
   transcriptionLocaleFeedback.clearTimer();
   autoStartFeedback.clearTimer();
   smartDictionaryFeedback.clearTimer();
+  contextInjectionFeedback.clearTimer();
   recordingCleanupFeedback.clearTimer();
   debugLogFeedback.clearTimer();
   providerFeedback.clearTimer();
@@ -1914,12 +2177,12 @@ onBeforeUnmount(() => {
         <div class="space-y-2">
           <Label for="whisper-model">{{ $t("settings.model.whisperLabel") }}</Label>
 
-          <!-- 轉錄 provider 切換（僅在 Azure 啟用時顯示） -->
+          <!-- 轉錄 provider 切換：Groq / Gemini 常駐，Azure 啟用時才出現 -->
           <RadioGroup
-            v-if="settingsStore.azureEnabled"
             :model-value="settingsStore.whisperProviderId"
-            class="grid grid-cols-2 gap-2"
-            @update:model-value="(v: unknown) => handleWhisperProviderChange(v as 'groq' | 'azure')"
+            class="grid gap-2"
+            :class="settingsStore.azureEnabled ? 'grid-cols-3' : 'grid-cols-2'"
+            @update:model-value="(v: unknown) => handleWhisperProviderChange(v as TranscriptionProviderId)"
           >
             <Label
               for="whisper-provider-groq"
@@ -1930,6 +2193,15 @@ onBeforeUnmount(() => {
               <span class="text-sm font-medium">Groq</span>
             </Label>
             <Label
+              for="whisper-provider-gemini"
+              class="flex cursor-pointer items-center gap-2.5 rounded-md border border-border p-3 transition-colors"
+              :class="settingsStore.whisperProviderId === 'gemini' ? 'border-primary bg-primary/5' : 'hover:bg-muted/50'"
+            >
+              <RadioGroupItem id="whisper-provider-gemini" value="gemini" class="!size-0 !border-0 !shadow-none overflow-hidden" />
+              <span class="text-sm font-medium">Gemini</span>
+            </Label>
+            <Label
+              v-if="settingsStore.azureEnabled"
               for="whisper-provider-azure"
               class="flex cursor-pointer items-center gap-2.5 rounded-md border border-border p-3 transition-colors"
               :class="settingsStore.whisperProviderId === 'azure' ? 'border-primary bg-primary/5' : 'hover:bg-muted/50'"
@@ -1955,8 +2227,9 @@ onBeforeUnmount(() => {
                   :value="model.id"
                 >
                   {{ model.displayName }}
-                  <template v-if="model.isDefault" #extra>
-                    <Badge variant="secondary" class="ml-2 text-xs">{{ $t("settings.model.default") }}</Badge>
+                  <template #extra>
+                    <Badge variant="secondary" class="ml-2 text-xs">{{ $t(model.badgeKey) }}</Badge>
+                    <Badge v-if="model.isDefault" variant="outline" class="ml-1 text-xs">{{ $t("settings.model.default") }}</Badge>
                   </template>
                 </SelectItem>
               </SelectContent>
@@ -1966,6 +2239,104 @@ onBeforeUnmount(() => {
               :on-test="() => testWhisperConnection(settingsStore.selectedWhisperModelId, settingsStore.getApiKey())"
               :disabled="!settingsStore.hasApiKey"
             />
+          </template>
+
+          <!-- Gemini 轉錄（模型固定，需 Gemini API Key；與 LLM 共用同一把 key） -->
+          <template v-else-if="settingsStore.whisperProviderId === 'gemini'">
+            <Select
+              :model-value="settingsStore.geminiTranscriptionModelId"
+              @update:model-value="handleGeminiTranscriptionModelChange($event as GeminiTranscriptionModelId)"
+            >
+              <SelectTrigger id="whisper-model" class="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem
+                  v-for="model in GEMINI_TRANSCRIPTION_MODEL_LIST"
+                  :key="model.id"
+                  :value="model.id"
+                >
+                  {{ model.displayName }}
+                  <template #extra>
+                    <Badge variant="secondary" class="ml-2 text-xs">{{ $t(model.badgeKey) }}</Badge>
+                    <Badge v-if="model.isDefault" variant="outline" class="ml-1 text-xs">{{ $t("settings.model.default") }}</Badge>
+                  </template>
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <p class="text-xs text-muted-foreground">{{ geminiTranscriptionModelDescription }}</p>
+            <p class="text-xs text-muted-foreground">
+              {{ $t("settings.model.geminiTranscriptionHint") }}
+            </p>
+            <Label for="gemini-whisper-api-key">{{ $t("settings.providerApiKey.geminiTitle") }}</Label>
+            <div v-if="settingsStore.geminiApiKey" class="flex items-center gap-2">
+              <Input
+                id="gemini-whisper-api-key"
+                :model-value="isGeminiApiKeyVisible ? settingsStore.geminiApiKey : '••••••••••'"
+                readonly
+                class="flex-1 font-mono text-xs"
+              />
+              <Button variant="ghost" size="sm" @click="isGeminiApiKeyVisible = !isGeminiApiKeyVisible">
+                {{ isGeminiApiKeyVisible ? $t('settings.apiKey.hide') : $t('settings.apiKey.show') }}
+              </Button>
+              <Button variant="ghost" size="sm" class="text-destructive" @click="handleDeleteGeminiApiKey">
+                {{ $t('settings.apiKey.delete') }}
+              </Button>
+            </div>
+            <div v-else class="flex gap-2">
+              <Input
+                id="gemini-whisper-api-key"
+                v-model="geminiApiKeyInput"
+                type="password"
+                :placeholder="findProviderConfig('gemini')?.apiKeyPrefix + '...'"
+                class="flex-1 font-mono text-xs"
+              />
+              <Button size="sm" :disabled="!geminiApiKeyInput.trim()" @click="handleSaveGeminiApiKey">
+                {{ $t('common.save') }}
+              </Button>
+            </div>
+            <p class="text-xs text-muted-foreground">
+              {{ $t("settings.providerApiKey.geminiInstruction") }}
+              ·
+              <a :href="findProviderConfig('gemini')?.consoleUrl" target="_blank" rel="noopener noreferrer" class="underline">{{ $t("settings.providerApiKey.goToGemini") }}</a>
+            </p>
+            <ConnectionTestButton
+              :on-test="testGeminiWhisperConnection"
+              :disabled="!settingsStore.hasWhisperConfig"
+            />
+
+            <!-- 免費額度（Google 未公開，只能由使用者自 AI Studio 查得後填入） -->
+            <Label for="gemini-free-quota">{{ $t("settings.model.geminiQuotaLabel") }}</Label>
+            <div class="flex gap-2">
+              <Input
+                id="gemini-free-quota"
+                v-model="geminiFreeQuotaInput"
+                type="number"
+                min="0"
+                :placeholder="geminiQuotaPlaceholder"
+                class="flex-1"
+              />
+              <Select
+                :model-value="geminiFreeQuotaPeriodInput"
+                @update:model-value="geminiFreeQuotaPeriodInput = $event as QuotaPeriod"
+              >
+                <SelectTrigger class="w-32">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="daily">{{ $t("settings.model.quotaPeriodDaily") }}</SelectItem>
+                  <SelectItem value="monthly">{{ $t("settings.model.quotaPeriodMonthly") }}</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button size="sm" @click="handleSaveGeminiFreeQuota">
+                {{ $t('common.save') }}
+              </Button>
+            </div>
+            <p class="text-xs text-muted-foreground">
+              {{ $t("settings.model.geminiQuotaHint") }}
+              ·
+              <a href="https://aistudio.google.com/rate-limit" target="_blank" rel="noopener noreferrer" class="underline">{{ $t("settings.model.geminiQuotaLink") }}</a>
+            </p>
           </template>
 
           <!-- Azure Whisper 部署 -->
@@ -2377,6 +2748,264 @@ onBeforeUnmount(() => {
       </CardContent>
     </Card>
 
+    <!-- 取代規則 -->
+    <Card>
+      <CardHeader class="flex-row items-center justify-between border-b border-border">
+        <div class="space-y-1">
+          <CardTitle class="text-base">{{ $t("settings.replacements.title") }}</CardTitle>
+          <p class="text-sm text-muted-foreground">
+            {{ $t("settings.replacements.description") }}
+          </p>
+        </div>
+        <Badge variant="secondary" data-testid="replacement-rule-count">
+          {{ $t("settings.replacements.ruleCount", { count: replacementStore.ruleCount }) }}
+        </Badge>
+      </CardHeader>
+      <CardContent class="space-y-5">
+        <div class="rounded-lg border border-border p-4 space-y-4">
+          <div class="flex items-center justify-between gap-3">
+            <h3 class="text-sm font-medium">
+              {{ isEditingReplacementRule ? $t("settings.replacements.editTitle") : $t("settings.replacements.addTitle") }}
+            </h3>
+            <Button
+              v-if="isEditingReplacementRule"
+              type="button"
+              variant="ghost"
+              size="sm"
+              data-testid="replacement-cancel-edit"
+              @click="resetReplacementForm"
+            >
+              <X class="mr-1 size-4" />
+              {{ $t("common.cancel") }}
+            </Button>
+          </div>
+
+          <div class="grid gap-4 md:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
+            <div class="space-y-2">
+              <Label for="replacement-patterns">
+                {{ $t("settings.replacements.patternsLabel") }}
+              </Label>
+              <Textarea
+                id="replacement-patterns"
+                v-model="replacementForm.patternsText"
+                class="min-h-[84px]"
+                :placeholder="$t('settings.replacements.patternsPlaceholder')"
+                data-testid="replacement-patterns-input"
+              />
+              <p class="text-xs text-muted-foreground">
+                {{ $t("settings.replacements.patternsHint") }}
+              </p>
+            </div>
+
+            <div class="space-y-2">
+              <Label for="replacement-target">
+                {{ $t("settings.replacements.replacementLabel") }}
+              </Label>
+              <Input
+                id="replacement-target"
+                v-model="replacementForm.replacement"
+                :placeholder="$t('settings.replacements.replacementPlaceholder')"
+                data-testid="replacement-target-input"
+              />
+            </div>
+          </div>
+
+          <div class="grid gap-4 md:grid-cols-3">
+            <div class="space-y-2">
+              <Label for="replacement-timing">
+                {{ $t("settings.replacements.timingLabel") }}
+              </Label>
+              <Select
+                :model-value="replacementForm.timing"
+                @update:model-value="handleReplacementTimingChange"
+              >
+                <SelectTrigger id="replacement-timing" data-testid="replacement-timing-select">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem
+                    v-for="option in replacementTimingOptions"
+                    :key="option.value"
+                    :value="option.value"
+                  >
+                    {{ option.label }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div class="flex items-center justify-between rounded-md border border-border px-3 py-2">
+              <div class="space-y-1">
+                <Label for="replacement-regex">
+                  {{ $t("settings.replacements.regexLabel") }}
+                </Label>
+                <p class="text-xs text-muted-foreground">
+                  {{ $t("settings.replacements.regexHint") }}
+                </p>
+              </div>
+              <Switch
+                id="replacement-regex"
+                :model-value="replacementForm.isRegex"
+                data-testid="replacement-regex-switch"
+                @update:model-value="replacementForm.isRegex = $event"
+              />
+            </div>
+
+            <div class="flex items-center justify-between rounded-md border border-border px-3 py-2">
+              <div class="space-y-1">
+                <Label for="replacement-enabled">
+                  {{ $t("settings.replacements.enabledLabel") }}
+                </Label>
+                <p class="text-xs text-muted-foreground">
+                  {{ $t("settings.replacements.enabledHint") }}
+                </p>
+              </div>
+              <Switch
+                id="replacement-enabled"
+                :model-value="replacementForm.enabled"
+                data-testid="replacement-enabled-switch"
+                @update:model-value="replacementForm.enabled = $event"
+              />
+            </div>
+          </div>
+
+          <div class="flex justify-end">
+            <Button
+              type="button"
+              :disabled="isSavingReplacementRule"
+              data-testid="replacement-save-button"
+              @click="handleSubmitReplacementRule"
+            >
+              <Pencil v-if="isEditingReplacementRule" class="mr-1 size-4" />
+              <Plus v-else class="mr-1 size-4" />
+              {{ isEditingReplacementRule ? $t("settings.replacements.updateButton") : $t("settings.replacements.addButton") }}
+            </Button>
+          </div>
+        </div>
+
+        <div v-if="replacementStore.rules.length === 0" class="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground" data-testid="replacement-empty-state">
+          {{ $t("settings.replacements.emptyState") }}
+        </div>
+
+        <div v-else class="rounded-lg border border-border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>{{ $t("settings.replacements.patternsHeader") }}</TableHead>
+                <TableHead>{{ $t("settings.replacements.replacementHeader") }}</TableHead>
+                <TableHead>{{ $t("settings.replacements.timingHeader") }}</TableHead>
+                <TableHead>{{ $t("settings.replacements.typeHeader") }}</TableHead>
+                <TableHead>{{ $t("settings.replacements.enabledHeader") }}</TableHead>
+                <TableHead class="text-right">{{ $t("settings.replacements.actionsHeader") }}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              <TableRow
+                v-for="rule in replacementStore.rules"
+                :key="rule.id"
+                data-testid="replacement-rule-row"
+              >
+                <TableCell class="max-w-[220px]">
+                  <div class="truncate font-medium" :title="rule.patterns.join(', ')">
+                    {{ rule.patterns.join(", ") }}
+                  </div>
+                </TableCell>
+                <TableCell class="max-w-[180px]">
+                  <div class="truncate" :title="rule.replacement">
+                    {{ rule.replacement }}
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <Badge variant="secondary">
+                    {{ $t(`settings.replacements.timing.${rule.timing}`) }}
+                  </Badge>
+                </TableCell>
+                <TableCell>
+                  <Badge :variant="rule.isRegex ? 'secondary' : 'outline'">
+                    {{ rule.isRegex ? $t("settings.replacements.regexBadge") : $t("settings.replacements.literalBadge") }}
+                  </Badge>
+                </TableCell>
+                <TableCell>
+                  <Label :for="`replacement-rule-enabled-${rule.id}`" class="sr-only">
+                    {{ $t("settings.replacements.enabledHeader") }}
+                  </Label>
+                  <Switch
+                    :id="`replacement-rule-enabled-${rule.id}`"
+                    :model-value="rule.enabled"
+                    data-testid="replacement-row-enabled-switch"
+                    @update:model-value="handleToggleReplacementRule(rule, $event)"
+                  />
+                </TableCell>
+                <TableCell>
+                  <div class="flex justify-end gap-2">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      data-testid="replacement-edit-button"
+                      @click="startEditingReplacementRule(rule)"
+                    >
+                      <Pencil class="mr-1 size-4" />
+                      {{ $t("settings.replacements.edit") }}
+                    </Button>
+                    <AlertDialog>
+                      <AlertDialogTrigger as-child>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          class="text-destructive hover:text-destructive"
+                          data-testid="replacement-delete-button"
+                        >
+                          <Trash2 class="mr-1 size-4" />
+                          {{ $t("common.delete") }}
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>
+                            {{ $t("settings.replacements.deleteConfirmTitle") }}
+                          </AlertDialogTitle>
+                          <AlertDialogDescription>
+                            {{ $t("settings.replacements.deleteConfirmDescription") }}
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>
+                            {{ $t("common.cancel") }}
+                          </AlertDialogCancel>
+                          <AlertDialogAction
+                            data-testid="replacement-delete-confirm"
+                            @click="handleDeleteReplacementRule(rule)"
+                          >
+                            {{ $t("common.delete") }}
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  </div>
+                </TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        </div>
+
+        <transition name="feedback-fade">
+          <p
+            v-if="replacementFeedback.message.value !== ''"
+            class="text-sm"
+            :class="
+              replacementFeedback.type.value === 'error'
+                ? 'text-destructive'
+                : 'text-muted-foreground'
+            "
+          >
+            {{ replacementFeedback.message.value }}
+          </p>
+        </transition>
+      </CardContent>
+    </Card>
+
     <!-- 智慧字典學習（macOS: AXUIElement；Windows: UI Automation） -->
     <Card>
       <CardHeader class="border-b border-border">
@@ -2411,6 +3040,46 @@ onBeforeUnmount(() => {
             "
           >
             {{ smartDictionaryFeedback.message.value }}
+          </p>
+        </transition>
+      </CardContent>
+    </Card>
+
+    <!-- 情境注入（opt-in 隱私功能） -->
+    <Card>
+      <CardHeader class="border-b border-border">
+        <CardTitle class="text-base">{{ $t("settings.contextInjection.title") }}</CardTitle>
+      </CardHeader>
+      <CardContent class="space-y-4">
+        <p class="text-sm text-muted-foreground leading-relaxed">
+          {{ $t("settings.contextInjection.description") }}
+        </p>
+
+        <div class="flex items-center justify-between gap-4">
+          <Label for="context-injection-toggle">{{ $t("settings.contextInjection.title") }}</Label>
+          <Switch
+            id="context-injection-toggle"
+            :model-value="settingsStore.contextInjectionEnabled"
+            data-testid="context-injection-switch"
+            @update:model-value="handleToggleContextInjection"
+          />
+        </div>
+
+        <p class="text-xs text-muted-foreground" data-testid="context-injection-privacy-note">
+          {{ $t("settings.contextInjection.privacyNote") }}
+        </p>
+
+        <transition name="feedback-fade">
+          <p
+            v-if="contextInjectionFeedback.message.value !== ''"
+            class="text-sm"
+            :class="
+              contextInjectionFeedback.type.value === 'success'
+                ? 'text-green-400'
+                : 'text-red-400'
+            "
+          >
+            {{ contextInjectionFeedback.message.value }}
           </p>
         </transition>
       </CardContent>

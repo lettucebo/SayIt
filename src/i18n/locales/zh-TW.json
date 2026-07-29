@@ -94,11 +94,42 @@
       "whisperLabel": "語音轉錄模型（Whisper）",
       "llmLabel": "文字整理模型（LLM）",
       "whisperUpdated": "語音轉錄模型已更新",
+      "geminiTranscriptionHint": "Gemini 對中英夾雜的辨識通常優於 Whisper，需要 Gemini API Key。",
+      "geminiModelDescription": {
+        "flashLite": "免費額度最高（約 500 次/日、15 次/分），官方文件明列「語音轉錄」為建議用途。日常聽寫建議用這個",
+        "flash": "最新旗艦、多模態理解最強，但免費額度極少（約 20 次/日、5 次/分），適合少量但要求最準的場合"
+      },
+      "llmDescription": {
+        "qwen": "速度與品質均衡的預設選擇；Groq preview 模型，可能無預警下架",
+        "oss120b": "開源大模型，輸出較穩定；比 20B 慢但品質更好",
+        "oss20b": "最快、最省，適合短句與簡單整理",
+        "gemini36Flash": "最新旗艦 Flash，複雜語句理解最強；免費層約 20 次/日",
+        "gemini35Flash": "上一代旗艦 Flash，品質高；免費層約 20 次/日",
+        "gemini35FlashLite": "官方稱最具成本效益的正式版；免費層約 500 次/日（額度最高），適合高頻使用",
+        "gemini31FlashLite": "額度同樣約 500 次/日，但官方已公告 2027-05-07 停用，建議改用 3.5 Flash-Lite",
+        "gemini31Pro": "Pro 級品質最高，但免費層不含此模型，需開啟計費才能使用",
+        "gptLuna": "OpenAI 旗艦，長句與複雜指令表現佳；付費服務",
+        "gptNano": "OpenAI 輕量版，快且便宜；付費服務",
+        "claudeHaiku": "Claude 輕量旗艦，速度與品質兼顧；付費服務"
+      },
+      "geminiQuotaLabel": "免費額度（可覆寫）",
+      "geminiQuotaPlaceholder": "內建預設 {count}",
+      "geminiQuotaHint": "已依模型內建免費額度預設值，數字依帳號可能不同。要調整就直接填入，留空即使用內建值",
+      "geminiQuotaLink": "到 AI Studio 查看我的額度",
+      "geminiQuotaSaved": "免費額度已更新",
+      "quotaPeriodDaily": "每日",
+      "quotaPeriodMonthly": "每月",
       "llmUpdated": "文字整理模型已更新",
       "default": "預設",
-      "costPerHour": "每小時 ${cost}"
+      "costPerHour": "每小時 ${cost}",
+      "whisperDescription": {
+        "largeV3": "準確度較高（WER 10.3%），中英夾雜建議選這個；另支援翻譯成英文",
+        "largeV3Turbo": "速度最快、成本最低，但錯誤率較高（WER 12%），中英夾雜時較易把英文整段翻掉"
+      }
     },
     "modelBadge": {
+      "accurate": "準確度優先",
+      "highQuota": "免費額度最高",
       "balanced": "平衡 · 預設",
       "stableCostly": "穩定可靠 · 成本高",
       "fastCheap": "最快 · 最便宜",
@@ -129,6 +160,57 @@
       "enabledFeedback": "已啟用短文字門檻",
       "disabledFeedback": "已停用短文字門檻",
       "charCountSaved": "門檻字數已儲存"
+    },
+    "replacements": {
+      "title": "取代規則",
+      "description": "在轉錄後用固定規則將常見錯字、品牌名或英文術語改成正確寫法。",
+      "ruleCount": "{count} 條規則",
+      "addTitle": "新增規則",
+      "editTitle": "編輯規則",
+      "patternsLabel": "來源寫法",
+      "patternsPlaceholder": "例如：\ncopilot\ncopy lot\ncode pilot",
+      "patternsHint": "每行一個來源寫法；字面模式會忽略大小寫並套用詞界。",
+      "replacementLabel": "正確寫法",
+      "replacementPlaceholder": "例如：Copilot",
+      "timingLabel": "套用時機",
+      "regexLabel": "正則模式（進階）",
+      "regexHint": "支援 RegExp 與 $1 取代",
+      "enabledLabel": "啟用規則",
+      "enabledHint": "可先停用但保留內容",
+      "addButton": "新增規則",
+      "updateButton": "更新規則",
+      "emptyState": "尚無取代規則。新增常見辨識錯誤，讓 SayIt 自動修正。",
+      "patternsHeader": "來源寫法",
+      "replacementHeader": "正確寫法",
+      "timingHeader": "時機",
+      "typeHeader": "類型",
+      "enabledHeader": "啟用",
+      "actionsHeader": "操作",
+      "regexBadge": "正則",
+      "literalBadge": "字面",
+      "edit": "編輯",
+      "added": "取代規則已新增",
+      "updated": "取代規則已更新",
+      "deleted": "取代規則已刪除",
+      "deleteConfirmTitle": "刪除取代規則？",
+      "deleteConfirmDescription": "此操作無法復原。規則刪除後將不再套用於後續轉錄。",
+      "timing": {
+        "beforeAI": "AI 整理前",
+        "afterAI": "AI 整理後",
+        "both": "前後都套用"
+      },
+      "errors": {
+        "empty-patterns": "請至少輸入一個來源寫法",
+        "pattern-too-long": "來源寫法太長",
+        "replacement-too-long": "正確寫法太長",
+        "invalid-regex": "正則語法不正確",
+        "too-many-rules": "規則已達上限",
+        "too-many-patterns": "單一規則的來源寫法太多",
+        "patterns-total-too-long": "來源寫法總長度太長",
+        "persistence-failed": "取代規則儲存失敗，請稍後再試",
+        "not-found": "找不到要更新的規則",
+        "unknown": "無法儲存取代規則"
+      }
     },
     "app": {
       "title": "應用程式",
@@ -256,6 +338,11 @@
       "privacyNote": "啟用後，系統會讀取游標附近的文字用於 AI 分析，不儲存原文",
       "analysisModelUpdated": "字典分析模型已更新"
     },
+    "contextInjection": {
+      "title": "情境注入",
+      "description": "錄音停止後、AI 整理前，讀取游標周圍文字與目前前景 App 名稱，幫助專有名詞與語氣對齊上下文。",
+      "privacyNote": "隱私提醒：此功能預設關閉。啟用後，游標周圍文字與前景 App 名稱會連同你的語音一起送到你設定的雲端 AI 服務（如 Groq／OpenAI）進行整理。目前僅能略過作業系統標記為密碼的欄位；一般文件或輸入框中的密碼、API 金鑰、個資等不保證被自動排除。請勿在處理機密內容時啟用。讀取失敗會靜默降級。"
+    },
     "azure": {
       "title": "Azure / Microsoft Foundry",
       "description": "設定一組 Azure 端點與憑證，文字整理與語音轉錄可共用。",
@@ -320,7 +407,11 @@
     "dailyUsage": "今日用量",
     "billedPlan": "計費",
     "billedNoFreeQuota": "付費方案 — 無免費額度限制",
+    "freeTierQuotaUnknown": "免費方案 — 額度未公開，可在設定填入以顯示剩餘量",
     "usageWhisper": "Whisper：{requests} 次 · {audio}",
+    "usageGeminiTranscription": "Gemini 轉錄：{requests} 次 · {tokens} tokens",
+    "quotaGeminiRequests": "Gemini 轉錄今日 {used} / {limit} 次",
+    "quotaGeminiRequestsMonthly": "Gemini 轉錄本月 {used} / {limit} 次",
     "usageLlm": "LLM：{requests} 次 · {tokens} tokens",
     "geminiQuotaHint": "Gemini 免費額度依帳號浮動，僅能於 Google AI Studio 查詢"
   },
@@ -500,7 +591,9 @@
     },
     "upgradeNotice": {
       "title": "SayIt 更新摘要",
-      "item1": "每日使用趨勢圖中沒有使用的日期現在會顯示「0」：先前把游標移到沒有使用量的日期時，提示框只有「使用次數」標籤、右邊數字卻空白，看起來像漏了資料。現在零使用量的日期會正常顯示「0」。",
+      "item1": "新增 Gemini 語音轉錄：講中文夾雜英文術語時，Whisper 常把英文整段翻譯掉而不是照著說的轉錄。現在可在設定把轉錄來源切換到 Gemini，並依免費額度挑選模型——預設的 Flash-Lite 每日約 500 次，是 Flash 的 25 倍。",
+      "item2": "新增文字取代規則：固定被聽錯的人名、產品名或英文術語不用每次手動改。可設定多種錯誤寫法對應同一個正確詞（支援正則），並選擇在 AI 整理之前、之後或兩者套用。",
+      "item3": "儀表板可看 Gemini 用量與剩餘免費額度：Gemini 依 token 計費、免費額度很容易用完。現在能直接看到今天用掉多少、還剩多少，額度數字也可改成自己帳號的值。",
       "dismiss": "了解"
     }
   },

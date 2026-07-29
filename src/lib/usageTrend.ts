@@ -41,8 +41,29 @@ export function getLocalDayUtcRangeForSqlite(
   ];
 }
 
-// 與 DAILY_USAGE_TREND_SQL 的 DATE(..., 'localtime') 對齊：用本地時間組 YYYY-MM-DD，
-// 不可用 toISOString()（UTC 會差一天，造成補零時對不到實際使用日）。
+/**
+ * 計算「本地這個月」的起訖時刻（同 `getLocalDayUtcRangeForSqlite` 的格式與語意）。
+ * 供「每月免費額度」的 provider 統計使用——月額度不能用日視窗累計。
+ * 月底以「下個月 1 號本地午夜」為界（`new Date(y, m+1, 1)` 會自動處理跨年）。
+ */
+export function getLocalMonthUtcRangeForSqlite(
+  now: Date = new Date(),
+): [string, string] {
+  const localStartOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const localStartOfNextMonth = new Date(
+    now.getFullYear(),
+    now.getMonth() + 1,
+    1,
+  );
+  const toSqliteUtcDatetime = (date: Date) =>
+    date.toISOString().slice(0, 19).replace("T", " ");
+  return [
+    toSqliteUtcDatetime(localStartOfMonth),
+    toSqliteUtcDatetime(localStartOfNextMonth),
+  ];
+}
+
+// 與 DAILY_USAGE_TREND_SQL 的 DATE(..., 'localtime') 對齊：用本地時間組 YYYY-MM-DD，// 不可用 toISOString()（UTC 會差一天，造成補零時對不到實際使用日）。
 function toLocalDateKey(date: Date): string {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");

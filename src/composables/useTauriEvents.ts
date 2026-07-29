@@ -10,6 +10,7 @@ export const VOICE_FLOW_STATE_CHANGED = "voice-flow:state-changed" as const;
 export const TRANSCRIPTION_COMPLETED = "transcription:completed" as const;
 export const SETTINGS_UPDATED = "settings:updated" as const;
 export const VOCABULARY_CHANGED = "vocabulary:changed" as const;
+export const REPLACEMENTS_CHANGED = "replacements:changed" as const;
 
 // Rust 偵測到 OS 外觀變更時廣播（"dark" | "light"）。
 // 透明+隱藏的 HUD 視窗在 Windows 下收不到 WM_THEMECHANGED，改由 Rust

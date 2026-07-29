@@ -11,12 +11,18 @@ const WHISPER_MIN_BILLING_MS = 10_000;
  * 計算 Whisper API 費用上限。
  * Groq 最低計費 10 秒/次，不足 10 秒一律按 10 秒算。
  * 從 modelRegistry 查表取得對應模型的每小時費率。
+ *
+ * 非 Whisper 系模型（如 Gemini 轉錄）採 audio-token 計價、與每小時費率無關，
+ * 一律回 0 表示「未追蹤」——套用 Groq 費率會在 Dashboard 顯示錯誤金額。
+ * 此判斷刻意放在這裡（而非各呼叫點），確保即時轉錄與歷史重新辨識兩條路徑一致。
  */
 export function calculateWhisperCostCeiling(
   audioDurationMs: number,
   modelId: string = DEFAULT_WHISPER_MODEL_ID,
 ): number {
   const config = findWhisperModelConfig(modelId);
+  // 查無設定且不是 whisper 系 → 非 Whisper provider，成本未追蹤
+  if (!config && !modelId.startsWith("whisper")) return 0;
   const costPerHour = config?.costPerHour ?? 0.111;
   const billedMs = Math.max(audioDurationMs, WHISPER_MIN_BILLING_MS);
   return (billedMs / 3_600_000) * costPerHour;

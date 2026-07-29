@@ -273,6 +273,64 @@ describe("hallucinationDetector.ts", () => {
     });
   });
 
+  describe("Layer 2b: NSP 為 null（provider 未提供，如 Gemini）", () => {
+    it("[P0] NSP=null + 低能量 → 不判定幻覺（不可 fail-open 也不可誤殺）", () => {
+      const result = detectHallucination({
+        rawText: "這個 API 的 latency 有點高",
+        recordingDurationMs: 3000,
+        // 落在 Layer 2b 區間（peak < 0.03 且 rms < 0.015），但無 NSP 可判斷
+        peakEnergyLevel: 0.02,
+        rmsEnergyLevel: 0.01,
+        noSpeechProbability: null,
+      });
+
+      expect(result.isHallucination).toBe(false);
+    });
+
+    it("[P0] NSP=null 不影響 Layer 2a（完全靜音仍攔截）", () => {
+      const result = detectHallucination({
+        rawText: "謝謝收看",
+        recordingDurationMs: 3000,
+        peakEnergyLevel: 0.001,
+        rmsEnergyLevel: 0.0005,
+        noSpeechProbability: null,
+      });
+
+      expect(result.isHallucination).toBe(true);
+      expect(result.reason).toBe("no-speech-detected");
+    });
+
+    it("[P0] NSP=null 不影響 Layer 1（語速異常仍攔截）", () => {
+      const result = detectHallucination({
+        rawText: "謝謝收看請訂閱我的頻道感謝大家",
+        recordingDurationMs: 500,
+        peakEnergyLevel: 0.5,
+        rmsEnergyLevel: 0.1,
+        noSpeechProbability: null,
+      });
+
+      expect(result.isHallucination).toBe(true);
+      expect(result.reason).toBe("speed-anomaly");
+    });
+
+    it("[P1] NSP=0 與 null 在 Layer 2b 區間的行為一致（皆放行）", () => {
+      const params = {
+        rawText: "測試",
+        recordingDurationMs: 3000,
+        peakEnergyLevel: 0.02,
+        rmsEnergyLevel: 0.01,
+      };
+      expect(
+        detectHallucination({ ...params, noSpeechProbability: 0 })
+          .isHallucination,
+      ).toBe(false);
+      expect(
+        detectHallucination({ ...params, noSpeechProbability: null })
+          .isHallucination,
+      ).toBe(false);
+    });
+  });
+
   describe("正常放行", () => {
     it("[P0] 有能量的正常語音 → 放行", () => {
       const result = detectHallucination({

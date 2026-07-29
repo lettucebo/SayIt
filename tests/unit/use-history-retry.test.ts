@@ -7,10 +7,23 @@ const h = vi.hoisted(() => {
   const mockInvoke = vi.fn();
   const mockEnhanceGuard = vi.fn();
   const mockGetTopTerms = vi.fn();
+  const mockReplacementState = {
+    rules: [] as Array<{
+      id: string;
+      patterns: string[];
+      replacement: string;
+      isRegex: boolean;
+      timing: "beforeAI" | "afterAI" | "both";
+      enabled: boolean;
+    }>,
+    ensureLoaded: vi.fn().mockResolvedValue(undefined),
+  };
   const settingsStub = {
     whisperProviderId: "groq",
+    hasWhisperConfig: true,
     getApiKey: () => "whisper-key",
     refreshApiKey: vi.fn(),
+    refreshTranscriptionApiKey: vi.fn(),
     getWhisperRequestConfig: vi.fn(),
     selectedWhisperModelId: "whisper-large-v3-turbo",
     getWhisperLanguageCode: () => "zh",
@@ -24,6 +37,7 @@ const h = vi.hoisted(() => {
     mockInvoke,
     mockEnhanceGuard,
     mockGetTopTerms,
+    mockReplacementState,
     settingsStub,
   };
 });
@@ -42,6 +56,12 @@ vi.mock("../../src/lib/enhancer", () => ({
 }));
 vi.mock("../../src/stores/useSettingsStore", () => ({
   useSettingsStore: () => h.settingsStub,
+}));
+vi.mock("../../src/stores/useReplacementStore", () => ({
+  useReplacementStore: () => ({
+    rules: h.mockReplacementState.rules,
+    ensureLoaded: h.mockReplacementState.ensureLoaded,
+  }),
 }));
 vi.mock("../../src/stores/useVocabularyStore", () => ({
   useVocabularyStore: () => ({ getTopTermListByWeight: h.mockGetTopTerms }),
@@ -90,11 +110,18 @@ describe("useHistoryStore retry", () => {
     h.mockInvoke.mockReset();
     h.mockEnhanceGuard.mockReset();
     h.mockGetTopTerms.mockReset().mockResolvedValue([]);
+    h.mockReplacementState.rules = [];
+    h.mockReplacementState.ensureLoaded.mockClear().mockResolvedValue(undefined);
     h.settingsStub.refreshApiKey.mockReset().mockResolvedValue(undefined);
-    h.settingsStub.refreshLlmApiKey.mockReset().mockResolvedValue(undefined);
-    h.settingsStub.getWhisperRequestConfig
+    h.settingsStub.refreshTranscriptionApiKey
       .mockReset()
-      .mockResolvedValue({ apiKey: "whisper-key", provider: "groq" });
+      .mockResolvedValue(undefined);
+    h.settingsStub.refreshLlmApiKey.mockReset().mockResolvedValue(undefined);
+    h.settingsStub.getWhisperRequestConfig.mockReset().mockResolvedValue({
+      apiKey: "whisper-key",
+      provider: "groq",
+      modelId: "whisper-large-v3-turbo",
+    });
     h.settingsStub.getLlmRequestConfig.mockReset().mockResolvedValue({
       apiKey: "llm-key",
       provider: "groq",
@@ -139,6 +166,33 @@ describe("useHistoryStore retry", () => {
       const record = createRecord({ rawText: "原本失敗" });
       store.transcriptionList.push(record);
       const res = await store.retranscribeRecord(record);
+      expect(res.ok).toBe(false);
+      expect(res.errorKey).toBe("history.retranscribeFailed");
+      expect(store.transcriptionList[0].status).toBe("failed");
+      expect(store.transcriptionList[0].rawText).toBe("原本失敗");
+    });
+
+    it("[P1] 空轉錄偵測使用 Whisper 原始結果，不被 beforeAI 規則繞過", async () => {
+      h.mockReplacementState.rules = [
+        {
+          id: "before-empty-history",
+          patterns: ["^\\s*$"],
+          replacement: "被規則補出的文字",
+          isRegex: true,
+          timing: "beforeAI",
+          enabled: true,
+        },
+      ];
+      h.mockInvoke.mockResolvedValue({
+        ...GOOD_TRANSCRIBE_RESULT,
+        rawText: "  ",
+      });
+      const store = useHistoryStore();
+      const record = createRecord({ rawText: "原本失敗" });
+      store.transcriptionList.push(record);
+
+      const res = await store.retranscribeRecord(record);
+
       expect(res.ok).toBe(false);
       expect(res.errorKey).toBe("history.retranscribeFailed");
       expect(store.transcriptionList[0].status).toBe("failed");

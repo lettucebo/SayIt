@@ -61,6 +61,13 @@ import {
   type LlmModelId,
   type LlmProviderId,
   type WhisperModelId,
+  type TranscriptionProviderId,
+  type QuotaPeriod,
+  type GeminiTranscriptionModelId,
+  DEFAULT_QUOTA_PERIOD,
+  GEMINI_TRANSCRIPTION_MODEL,
+  getEffectiveTranscriptionProviderId,
+  getEffectiveGeminiTranscriptionModelId,
 } from "../lib/modelRegistry";
 import {
   normalizeAzureEndpoint,
@@ -84,6 +91,7 @@ const STORE_NAME = "settings.json";
 
 export const DEFAULT_ENHANCEMENT_THRESHOLD_ENABLED = false;
 export const DEFAULT_ENHANCEMENT_THRESHOLD_CHAR_COUNT = 10;
+export const DEFAULT_CONTEXT_INJECTION_ENABLED = false;
 export const DEFAULT_MUTE_ON_RECORDING = true;
 const DEFAULT_SMART_DICTIONARY_ENABLED = navigator.userAgent.includes("Mac"); // macOS only — Windows 尚未支援 text field 讀取
 const DEFAULT_SOUND_EFFECTS_ENABLED = true;
@@ -187,6 +195,9 @@ export const useSettingsStore = defineStore("settings", () => {
   const isCopyTranscriptionToClipboardEnabled = ref<boolean>(
     DEFAULT_COPY_TRANSCRIPTION_TO_CLIPBOARD,
   );
+  const contextInjectionEnabled = ref<boolean>(
+    DEFAULT_CONTEXT_INJECTION_ENABLED,
+  );
   // ── Azure / Microsoft Foundry ──
   const azureEnabled = ref<boolean>(false);
   const azureEndpoint = ref<string>("");
@@ -199,8 +210,16 @@ export const useSettingsStore = defineStore("settings", () => {
   const azureOmitTemperature = ref<boolean>(false);
   const azureChatDeployment = ref<string>("");
   const azureWhisperDeployment = ref<string>("");
-  const whisperProviderId = ref<"groq" | "azure">("groq");
+  const whisperProviderId = ref<TranscriptionProviderId>("groq");
+  /** Gemini 轉錄模型（Flash-Lite 免費額度高、Flash 品質優先） */
+  const geminiTranscriptionModelId = ref<GeminiTranscriptionModelId>(
+    GEMINI_TRANSCRIPTION_MODEL,
+  );
+  /** Gemini 轉錄免費額度（0 = 未設定）；Google 不公開 Free tier 數字，只能由使用者填入。 */
+  const geminiFreeQuotaRequests = ref<number>(0);
+  const geminiFreeQuotaPeriod = ref<QuotaPeriod>(DEFAULT_QUOTA_PERIOD);
   const hasWhisperConfig = computed(() => {
+    if (whisperProviderId.value === "gemini") return geminiApiKey.value !== "";
     if (whisperProviderId.value !== "azure") return apiKey.value !== "";
     return (
       azureEnabled.value &&
@@ -314,19 +333,34 @@ export const useSettingsStore = defineStore("settings", () => {
   }
 
   /**
-   * 解析語音轉錄所需的 auth + provider + Azure 連線參數。
+   * 解析語音轉錄所需的 auth + provider + 模型 + Azure 連線參數。
    * Azure-Entra 用 cognitiveservices scope（deployments 路徑）。
+   * modelId 由 provider 決定：Gemini 有自己的固定轉錄模型，不可沿用 WhisperModelId。
    */
   async function getWhisperRequestConfig(): Promise<{
     apiKey: string;
-    provider: "groq" | "azure";
+    provider: TranscriptionProviderId;
+    modelId: string;
     endpoint?: string;
     deployment?: string;
     apiVersion?: string;
     authMode?: "key" | "entra";
   }> {
+    // Gemini 走 generateContent，模型固定（沿用 whisper-large-v3 會打到不存在的端點）
+    if (whisperProviderId.value === "gemini") {
+      return {
+        apiKey: geminiApiKey.value,
+        provider: "gemini",
+        modelId: geminiTranscriptionModelId.value,
+      };
+    }
+
     if (whisperProviderId.value !== "azure") {
-      return { apiKey: apiKey.value, provider: "groq" };
+      return {
+        apiKey: apiKey.value,
+        provider: "groq",
+        modelId: selectedWhisperModelId.value,
+      };
     }
 
     if (
@@ -334,11 +368,16 @@ export const useSettingsStore = defineStore("settings", () => {
       azureEndpoint.value === "" ||
       azureWhisperDeployment.value === ""
     ) {
-      return { apiKey: "", provider: "azure" };
+      return {
+        apiKey: "",
+        provider: "azure",
+        modelId: selectedWhisperModelId.value,
+      };
     }
 
     const base = {
       provider: "azure" as const,
+      modelId: selectedWhisperModelId.value,
       endpoint: azureEndpoint.value,
       deployment: azureWhisperDeployment.value,
       apiVersion: azureApiVersion.value || undefined,
@@ -514,8 +553,17 @@ export const useSettingsStore = defineStore("settings", () => {
         (await store.get<string>("azureChatDeployment"))?.trim() ?? "";
       azureWhisperDeployment.value =
         (await store.get<string>("azureWhisperDeployment"))?.trim() ?? "";
-      whisperProviderId.value =
-        (await store.get<"groq" | "azure">("whisperProviderId")) ?? "groq";
+      whisperProviderId.value = getEffectiveTranscriptionProviderId(
+        await store.get<string>("whisperProviderId"),
+      );
+      geminiFreeQuotaRequests.value =
+        (await store.get<number>("geminiFreeQuotaRequests")) ?? 0;
+      geminiFreeQuotaPeriod.value =
+        (await store.get<QuotaPeriod>("geminiFreeQuotaPeriod")) ??
+        DEFAULT_QUOTA_PERIOD;
+      geminiTranscriptionModelId.value = getEffectiveGeminiTranscriptionModelId(
+        await store.get<string>("geminiTranscriptionModelId"),
+      );
 
       // LLM Model ID（含 Kimi K2 遷移）
       const savedLlmModelId = await store.get<string>("llmModelId");
@@ -608,6 +656,10 @@ export const useSettingsStore = defineStore("settings", () => {
         savedCopyTranscriptionToClipboard ??
         DEFAULT_COPY_TRANSCRIPTION_TO_CLIPBOARD;
 
+      contextInjectionEnabled.value =
+        (await store.get<boolean>("contextInjectionEnabled")) ??
+        DEFAULT_CONTEXT_INJECTION_ENABLED;
+
       // Sync saved (or default) config to Rust on startup
       await syncHotkeyConfigToRust(key, mode);
       isLoaded = true;
@@ -633,6 +685,7 @@ export const useSettingsStore = defineStore("settings", () => {
       isHideDockIconEnabled.value = DEFAULT_HIDE_DOCK_ICON;
       isCopyTranscriptionToClipboardEnabled.value =
         DEFAULT_COPY_TRANSCRIPTION_TO_CLIPBOARD;
+      contextInjectionEnabled.value = DEFAULT_CONTEXT_INJECTION_ENABLED;
     }
   }
 
@@ -794,6 +847,32 @@ export const useSettingsStore = defineStore("settings", () => {
     } catch (err) {
       console.error(
         "[useSettingsStore] refreshApiKey failed:",
+        extractErrorMessage(err),
+      );
+    }
+  }
+
+  /**
+   * 依「轉錄 provider」刷新對應金鑰。
+   * 與 refreshLlmApiKey（依 LLM provider）不同：使用者可能用 Groq LLM + Gemini 轉錄，
+   * 那條路徑刷不到 Gemini key，會讓 HUD 一直持有空值而轉錄失敗。
+   */
+  async function refreshTranscriptionApiKey() {
+    try {
+      const store = await load(STORE_NAME);
+      if (whisperProviderId.value === "gemini") {
+        const savedKey = await store.get<string>("geminiApiKey");
+        geminiApiKey.value = savedKey?.trim() ?? "";
+        return;
+      }
+      if (whisperProviderId.value === "groq") {
+        const savedApiKey = await store.get<string>("groqApiKey");
+        apiKey.value = savedApiKey?.trim() ?? "";
+      }
+      // azure：連線參數由 refreshCrossWindowSettings 統一刷新
+    } catch (err) {
+      console.error(
+        "[useSettingsStore] refreshTranscriptionApiKey failed:",
         extractErrorMessage(err),
       );
     }
@@ -972,8 +1051,57 @@ export const useSettingsStore = defineStore("settings", () => {
     }
   }
 
-  async function saveLlmModel(id: LlmModelId) {
+  /**
+   * 儲存 Gemini 轉錄的免費額度（使用者自 AI Studio 查得後填入）。
+   * Google 不公開 Free tier 的 RPD/TPD 數字（依帳號浮動），因此無法內建預設值；
+   * 未填（0）時 Dashboard 只顯示實際用量、不顯示額度條，避免捏造分母。
+   */
+  async function saveGeminiFreeQuota(requests: number, period: QuotaPeriod) {
+    const validatedRequests =
+      !Number.isFinite(requests) || requests < 0 ? 0 : Math.floor(requests);
     try {
+      const store = await load(STORE_NAME);
+      await store.set("geminiFreeQuotaRequests", validatedRequests);
+      await store.set("geminiFreeQuotaPeriod", period);
+      await store.save();
+      geminiFreeQuotaRequests.value = validatedRequests;
+      geminiFreeQuotaPeriod.value = period;
+
+      const payload: SettingsUpdatedPayload = {
+        key: "geminiFreeQuota",
+        value: { requests: validatedRequests, period },
+      };
+      await emitEvent(SETTINGS_UPDATED, payload);
+    } catch (err) {
+      console.error(
+        "[useSettingsStore] saveGeminiFreeQuota failed:",
+        extractErrorMessage(err),
+      );
+      throw err;
+    }
+  }
+
+  async function saveGeminiTranscriptionModel(id: GeminiTranscriptionModelId) {
+    try {
+      const store = await load(STORE_NAME);
+      await store.set("geminiTranscriptionModelId", id);
+      await store.save();
+      geminiTranscriptionModelId.value = id;
+      const payload: SettingsUpdatedPayload = {
+        key: "geminiTranscriptionModel",
+        value: id,
+      };
+      await emitEvent(SETTINGS_UPDATED, payload);
+    } catch (err) {
+      console.error(
+        "[useSettingsStore] saveGeminiTranscriptionModel failed:",
+        extractErrorMessage(err),
+      );
+      throw err;
+    }
+  }
+
+  async function saveLlmModel(id: LlmModelId) {    try {
       const store = await load(STORE_NAME);
       await store.set("llmModelId", id);
       await store.save();
@@ -1112,6 +1240,10 @@ export const useSettingsStore = defineStore("settings", () => {
       await store.set("geminiApiKey", trimmedKey);
       await store.save();
       geminiApiKey.value = trimmedKey;
+      // 通知其他視窗（HUD）重讀：Gemini 也可能是「轉錄」provider，
+      // 舊 key 若不刷新會讓 HUD 繼續用過期憑證。payload 不含金鑰值。
+      const payload: SettingsUpdatedPayload = { key: "geminiApiKey", value: "" };
+      await emitEvent(SETTINGS_UPDATED, payload);
       console.log("[useSettingsStore] Gemini API Key saved");
     } catch (err) {
       console.error(
@@ -1132,6 +1264,9 @@ export const useSettingsStore = defineStore("settings", () => {
       await store.delete("geminiApiKey");
       await store.save();
       geminiApiKey.value = "";
+      // 刪除同樣要廣播，否則 HUD 會繼續持有已刪除的 key 並送出請求
+      const payload: SettingsUpdatedPayload = { key: "geminiApiKey", value: "" };
+      await emitEvent(SETTINGS_UPDATED, payload);
       console.log("[useSettingsStore] Gemini API Key deleted");
     } catch (err) {
       console.error(
@@ -1327,7 +1462,7 @@ export const useSettingsStore = defineStore("settings", () => {
     }
   }
 
-  async function saveWhisperProvider(id: "groq" | "azure") {
+  async function saveWhisperProvider(id: TranscriptionProviderId) {
     try {
       const store = await load(STORE_NAME);
       await store.set("whisperProviderId", id);
@@ -1649,6 +1784,32 @@ export const useSettingsStore = defineStore("settings", () => {
     }
   }
 
+  async function saveContextInjectionEnabled(enabled: boolean) {
+    try {
+      const store = await load(STORE_NAME);
+      await store.set("contextInjectionEnabled", enabled);
+      await store.save();
+      contextInjectionEnabled.value = enabled;
+
+      const payload: SettingsUpdatedPayload = {
+        key: "contextInjectionEnabled",
+        value: enabled,
+      };
+      await emitEvent(SETTINGS_UPDATED, payload);
+      console.log(`[useSettingsStore] contextInjectionEnabled saved: ${enabled}`);
+    } catch (err) {
+      console.error(
+        "[useSettingsStore] saveContextInjectionEnabled failed:",
+        extractErrorMessage(err),
+      );
+      captureError(err, {
+        source: "settings",
+        step: "save-context-injection",
+      });
+      throw err;
+    }
+  }
+
   async function saveRecordingAutoCleanup(enabled: boolean, days: number) {
     const validatedDays =
       !Number.isInteger(days) || days < 1
@@ -1804,6 +1965,9 @@ export const useSettingsStore = defineStore("settings", () => {
       const savedSmartDictionary = await store.get<boolean>(
         "smartDictionaryEnabled",
       );
+      const savedContextInjectionEnabled = await store.get<boolean>(
+        "contextInjectionEnabled",
+      );
 
       hotkeyConfig.value = {
         triggerKey: savedKey ?? getDefaultTriggerKey(),
@@ -1875,6 +2039,8 @@ export const useSettingsStore = defineStore("settings", () => {
         savedMuteOnRecording ?? DEFAULT_MUTE_ON_RECORDING;
       isSoundEffectsEnabled.value =
         savedSoundEffects ?? DEFAULT_SOUND_EFFECTS_ENABLED;
+      contextInjectionEnabled.value =
+        savedContextInjectionEnabled ?? DEFAULT_CONTEXT_INJECTION_ENABLED;
       const nextHideDockIcon = savedHideDockIcon ?? DEFAULT_HIDE_DOCK_ICON;
       if (nextHideDockIcon !== isHideDockIconEnabled.value) {
         void applyDockVisibility(nextHideDockIcon);
@@ -1934,8 +2100,17 @@ export const useSettingsStore = defineStore("settings", () => {
         (await store.get<string>("azureChatDeployment"))?.trim() ?? "";
       azureWhisperDeployment.value =
         (await store.get<string>("azureWhisperDeployment"))?.trim() ?? "";
-      whisperProviderId.value =
-        (await store.get<"groq" | "azure">("whisperProviderId")) ?? "groq";
+      whisperProviderId.value = getEffectiveTranscriptionProviderId(
+        await store.get<string>("whisperProviderId"),
+      );
+      geminiFreeQuotaRequests.value =
+        (await store.get<number>("geminiFreeQuotaRequests")) ?? 0;
+      geminiFreeQuotaPeriod.value =
+        (await store.get<QuotaPeriod>("geminiFreeQuotaPeriod")) ??
+        DEFAULT_QUOTA_PERIOD;
+      geminiTranscriptionModelId.value = getEffectiveGeminiTranscriptionModelId(
+        await store.get<string>("geminiTranscriptionModelId"),
+      );
     } catch (err) {
       console.error(
         "[useSettingsStore] refreshCrossWindowSettings failed:",
@@ -2010,15 +2185,22 @@ export const useSettingsStore = defineStore("settings", () => {
     if (!excludeSecrets) return result;
 
     const stripped = stripSensitiveKeys(result);
-    // 排除金鑰時，避免在目標機產生「已啟用但缺憑證」的壞掉 Azure 狀態：
-    // 同步停用 Azure，並把使用 Azure 的 provider 退回預設（groq）。
+    // 排除金鑰時，避免在目標機產生「已啟用但缺憑證」的壞掉狀態：
+    // Azure 同步停用，並把使用 Azure／Gemini 的 provider 退回預設（groq）——
+    // geminiApiKey 也是敏感 key，被剔除後留著 gemini provider 同樣無法運作。
     if (stripped.azureEnabled === true) {
       stripped.azureEnabled = false;
     }
-    if (stripped.whisperProviderId === "azure") {
+    if (
+      stripped.whisperProviderId === "azure" ||
+      stripped.whisperProviderId === "gemini"
+    ) {
       stripped.whisperProviderId = "groq";
     }
-    if (stripped.llmProviderId === "azure") {
+    if (
+      stripped.llmProviderId === "azure" ||
+      stripped.llmProviderId === "gemini"
+    ) {
       stripped.llmProviderId = "groq";
       delete stripped.llmModelId; // 讓目標機依 provider 套用預設模型
     }
@@ -2096,6 +2278,7 @@ export const useSettingsStore = defineStore("settings", () => {
     saveAiPrompt,
     resetAiPrompt,
     refreshApiKey,
+    refreshTranscriptionApiKey,
     loadSettings,
     saveHotkeyConfig,
     saveCustomTriggerKey,
@@ -2137,6 +2320,11 @@ export const useSettingsStore = defineStore("settings", () => {
     azureChatDeployment,
     azureWhisperDeployment,
     whisperProviderId,
+    geminiTranscriptionModelId,
+    saveGeminiTranscriptionModel,
+    geminiFreeQuotaRequests,
+    geminiFreeQuotaPeriod,
+    saveGeminiFreeQuota,
     saveAzureConnection,
     deleteAzureConnection,
     saveAzureChatDeployment,
@@ -2153,6 +2341,8 @@ export const useSettingsStore = defineStore("settings", () => {
     saveHideDockIcon,
     isSmartDictionaryEnabled,
     saveSmartDictionaryEnabled,
+    contextInjectionEnabled,
+    saveContextInjectionEnabled,
     isRecordingAutoCleanupEnabled,
     recordingAutoCleanupDays,
     saveRecordingAutoCleanup,

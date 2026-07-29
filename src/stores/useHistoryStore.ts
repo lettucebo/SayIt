@@ -13,7 +13,11 @@ import type { TranscriptionResult } from "../types/audio";
 import type { TranscriptionCompletedPayload } from "../types/events";
 import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "../lib/database";
-import { buildDailyUsageSeries, getLocalDayUtcRangeForSqlite } from "../lib/usageTrend";
+import {
+  buildDailyUsageSeries,
+  getLocalDayUtcRangeForSqlite,
+  getLocalMonthUtcRangeForSqlite,
+} from "../lib/usageTrend";
 import { extractErrorMessage } from "../lib/errorUtils";
 import { captureError } from "../lib/sentry";
 import {
@@ -32,6 +36,7 @@ import {
 } from "../lib/transcriptTransforms";
 import { useSettingsStore } from "./useSettingsStore";
 import { useVocabularyStore } from "./useVocabularyStore";
+import { useReplacementStore } from "./useReplacementStore";
 import {
   emitToWindow,
   TRANSCRIPTION_COMPLETED,
@@ -143,12 +148,13 @@ const INSERT_API_USAGE_SQL = `
 const DAILY_QUOTA_USAGE_SQL = `
   SELECT
     api_type,
+    CASE WHEN model LIKE 'gemini-%' THEN 1 ELSE 0 END as is_gemini,
     COUNT(*) as request_count,
     COALESCE(SUM(total_tokens), 0) as total_tokens,
     COALESCE(SUM(MAX(COALESCE(audio_duration_ms, 0), 10000)), 0) as billed_audio_ms
   FROM api_usage
   WHERE created_at >= $1 AND created_at < $2
-  GROUP BY api_type
+  GROUP BY api_type, is_gemini
 `;
 
 const DAILY_USAGE_TREND_SQL = `
@@ -220,6 +226,7 @@ interface DashboardStatsRow {
 
 interface DailyQuotaUsageRow {
   api_type: string;
+  is_gemini: number;
   request_count: number;
   total_tokens: number;
   billed_audio_ms: number;
@@ -365,28 +372,34 @@ export const useHistoryStore = defineStore("history", () => {
     }
   }
 
+  const EMPTY_QUOTA_USAGE: DailyQuotaUsage = {
+    whisperRequestCount: 0,
+    whisperBilledAudioMs: 0,
+    geminiTranscriptionRequestCount: 0,
+    geminiTranscriptionTotalTokens: 0,
+    llmRequestCount: 0,
+    llmTotalTokens: 0,
+    vocabularyAnalysisRequestCount: 0,
+    vocabularyAnalysisTotalTokens: 0,
+  };
+
   const dashboardStats = ref<DashboardStats>({
     totalTranscriptions: 0,
     totalCharacters: 0,
     totalRecordingDurationMs: 0,
     estimatedTimeSavedMs: 0,
-    dailyQuotaUsage: {
-      whisperRequestCount: 0,
-      whisperBilledAudioMs: 0,
-      llmRequestCount: 0,
-      llmTotalTokens: 0,
-      vocabularyAnalysisRequestCount: 0,
-      vocabularyAnalysisTotalTokens: 0,
-    },
+    dailyQuotaUsage: { ...EMPTY_QUOTA_USAGE },
+    monthlyQuotaUsage: { ...EMPTY_QUOTA_USAGE },
   });
   const recentTranscriptionList = ref<TranscriptionRecord[]>([]);
   const dailyUsageTrendList = ref<DailyUsageTrend[]>([]);
 
   async function fetchDashboardStats(): Promise<DashboardStats> {
     const db = getDatabase();
-    const [statsRows, dailyQuotaUsage] = await Promise.all([
+    const [statsRows, dailyQuotaUsage, monthlyQuotaUsage] = await Promise.all([
       db.select<DashboardStatsRow[]>(DASHBOARD_STATS_SQL),
       fetchDailyQuotaUsage(),
+      fetchMonthlyQuotaUsage(),
     ]);
     const row = statsRows[0] ?? {
       total_count: 0,
@@ -405,6 +418,7 @@ export const useHistoryStore = defineStore("history", () => {
         ) - row.total_recording_duration_ms,
       ),
       dailyQuotaUsage,
+      monthlyQuotaUsage,
     };
   }
 
@@ -426,9 +440,11 @@ export const useHistoryStore = defineStore("history", () => {
     ]);
   }
 
-  async function fetchDailyQuotaUsage(): Promise<DailyQuotaUsage> {
+  async function fetchQuotaUsageInRange(
+    startUtc: string,
+    endUtc: string,
+  ): Promise<DailyQuotaUsage> {
     const db = getDatabase();
-    const [startUtc, endUtc] = getLocalDayUtcRangeForSqlite();
     const rows = await db.select<DailyQuotaUsageRow[]>(DAILY_QUOTA_USAGE_SQL, [
       startUtc,
       endUtc,
@@ -437,26 +453,46 @@ export const useHistoryStore = defineStore("history", () => {
     const result: DailyQuotaUsage = {
       whisperRequestCount: 0,
       whisperBilledAudioMs: 0,
+      geminiTranscriptionRequestCount: 0,
+      geminiTranscriptionTotalTokens: 0,
       llmRequestCount: 0,
       llmTotalTokens: 0,
       vocabularyAnalysisRequestCount: 0,
       vocabularyAnalysisTotalTokens: 0,
     };
 
+    // 每個 api_type 現在最多兩列（gemini / 非 gemini）→ 一律累加，不可覆寫
     for (const row of rows) {
+      const isGemini = row.is_gemini === 1;
       if (row.api_type === "whisper") {
-        result.whisperRequestCount = row.request_count;
-        result.whisperBilledAudioMs = row.billed_audio_ms;
+        if (isGemini) {
+          // Gemini 依 token 計量，音訊時長對它沒有計費意義
+          result.geminiTranscriptionRequestCount += row.request_count;
+          result.geminiTranscriptionTotalTokens += row.total_tokens;
+        } else {
+          result.whisperRequestCount += row.request_count;
+          result.whisperBilledAudioMs += row.billed_audio_ms;
+        }
       } else if (row.api_type === "chat") {
-        result.llmRequestCount = row.request_count;
-        result.llmTotalTokens = row.total_tokens;
+        result.llmRequestCount += row.request_count;
+        result.llmTotalTokens += row.total_tokens;
       } else if (row.api_type === "vocabulary_analysis") {
-        result.vocabularyAnalysisRequestCount = row.request_count;
-        result.vocabularyAnalysisTotalTokens = row.total_tokens;
+        result.vocabularyAnalysisRequestCount += row.request_count;
+        result.vocabularyAnalysisTotalTokens += row.total_tokens;
       }
     }
 
     return result;
+  }
+
+  async function fetchDailyQuotaUsage(): Promise<DailyQuotaUsage> {
+    const [startUtc, endUtc] = getLocalDayUtcRangeForSqlite();
+    return fetchQuotaUsageInRange(startUtc, endUtc);
+  }
+
+  async function fetchMonthlyQuotaUsage(): Promise<DailyQuotaUsage> {
+    const [startUtc, endUtc] = getLocalMonthUtcRangeForSqlite();
+    return fetchQuotaUsageInRange(startUtc, endUtc);
   }
 
   async function fetchDailyUsageTrend(
@@ -631,15 +667,21 @@ export const useHistoryStore = defineStore("history", () => {
     transcriptionId: string,
     audioDurationMs: number,
     model: string,
+    tokens?: {
+      promptTokens: number | null;
+      completionTokens: number | null;
+      totalTokens: number | null;
+    },
   ): void {
     void addApiUsage({
       id: crypto.randomUUID(),
       transcriptionId,
       apiType: "whisper",
       model,
-      promptTokens: null,
-      completionTokens: null,
-      totalTokens: null,
+      // Gemini 依 token 計量並回報用量；Whisper 系（Groq/Azure）為 null
+      promptTokens: tokens?.promptTokens ?? null,
+      completionTokens: tokens?.completionTokens ?? null,
+      totalTokens: tokens?.totalTokens ?? null,
       promptTimeMs: null,
       completionTimeMs: null,
       totalTimeMs: null,
@@ -688,11 +730,9 @@ export const useHistoryStore = defineStore("history", () => {
     const settingsStore = useSettingsStore();
     const vocabularyStore = useVocabularyStore();
 
-    if (
-      settingsStore.whisperProviderId === "groq" &&
-      !settingsStore.getApiKey()
-    ) {
-      await settingsStore.refreshApiKey();
+    // 跨視窗：HUD/Dashboard 可能持有過期或空的金鑰，依轉錄 provider 補刷一次
+    if (!settingsStore.hasWhisperConfig) {
+      await settingsStore.refreshTranscriptionApiKey();
     }
 
     const whisperCfg = await settingsStore.getWhisperRequestConfig();
@@ -701,7 +741,7 @@ export const useHistoryStore = defineStore("history", () => {
     }
 
     const whisperTermList = await vocabularyStore.getTopTermListByWeight(50);
-    const model = settingsStore.selectedWhisperModelId;
+    const model = whisperCfg.modelId;
 
     let result: TranscriptionResult;
     try {
@@ -723,27 +763,24 @@ export const useHistoryStore = defineStore("history", () => {
       return { ok: false, errorKey: "history.retranscribeFailed" };
     }
 
-    // #39：同主路徑，重新辨識後也套用簡→繁（寫回 raw_text 前）
-    result.rawText = await applyTranscriptTextTransforms(
-      result.rawText,
-      resolveEffectiveTranscriptionLocale(
-        settingsStore.selectedTranscriptionLocale,
-        settingsStore.selectedLocale,
-      ),
-    );
+    const whisperRawText = result.rawText;
 
     // HTTP 成功即計費（不論轉錄內容）→ 記錄 whisper 用量
-    recordWhisperUsage(record.id, record.recordingDurationMs, model);
+    recordWhisperUsage(record.id, record.recordingDurationMs, model, {
+      promptTokens: result.promptTokens,
+      completionTokens: result.completionTokens,
+      totalTokens: result.totalTokens,
+    });
 
     // 空轉錄或幻覺 → 保留 failed、不覆寫原文
-    const isEmpty = !result.rawText || !result.rawText.trim();
+    const isEmpty = !whisperRawText || !whisperRawText.trim();
     // 時長未知/非正時跳過語速異常層（無法判斷語速），仍保留能量/NSP 偵測
     const recordingDurationForDetection =
       record.recordingDurationMs > 0
         ? record.recordingDurationMs
         : Number.MAX_SAFE_INTEGER;
     const hallucination = detectHallucination({
-      rawText: result.rawText,
+      rawText: whisperRawText,
       recordingDurationMs: recordingDurationForDetection,
       peakEnergyLevel: result.peakEnergyLevel,
       rmsEnergyLevel: result.rmsEnergyLevel,
@@ -752,6 +789,18 @@ export const useHistoryStore = defineStore("history", () => {
     if (isEmpty || hallucination.isHallucination) {
       return { ok: false, errorKey: "history.retranscribeFailed" };
     }
+
+    // #39/#55：同主路徑，重新辨識通過偵測後才套 beforeAI 取代 → 簡→繁
+    const replacementStore = useReplacementStore();
+    await replacementStore.ensureLoaded();
+    result.rawText = await applyTranscriptTextTransforms(
+      whisperRawText,
+      resolveEffectiveTranscriptionLocale(
+        settingsStore.selectedTranscriptionLocale,
+        settingsStore.selectedLocale,
+      ),
+      replacementStore.rules,
+    );
 
     const charCount = result.rawText.length;
     const transcriptionDurationMs = Math.round(result.transcriptionDurationMs);
