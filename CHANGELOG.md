@@ -9,6 +9,10 @@ SayIt 版本更新紀錄。
 - 智慧字典學習在 Windows 上改為預設啟用。這個開關的預設值一直停在功能初版的判斷式（只有 macOS 啟用），理由是當時 Windows 還讀不到游標所在的輸入框；後來 Windows 版改用 UI Automation 補上讀取能力後，預設值卻沒有跟著更新，等於 Windows 使用者一直拿不到一個其實已經可以運作的功能。升級摘要彈窗會說明這項變更，不需要的話可在設定頁關閉。
 - 補正 `text_field_reader` 的相關文件：文字場讀取早已不是 macOS 專屬（macOS 走 AXUIElement、Windows 走 UI Automation），且密碼欄位守衛在兩個平台**並不對稱**——Windows 以 `CurrentIsPassword` fail-closed 排除，macOS 目前僅以 `AXRole` 過濾、不檢查 `AXSubrole`，倚賴系統不對 secure field 暴露 `AXValue`。
 
+### Fixed
+
+- 修正模型清單中 GPT OSS 120B 的標籤：原本標「穩定可靠 · 成本高」，但這個模型的價格是 $0.15/$0.60，在全部可選模型裡第二便宜，比預設的 Qwen3.6 27B（$0.6/$3.0）還便宜 4 到 5 倍；而且 Groq 的三個模型都有免費額度，成本本來就不是這裡要區分的東西。真正的差別在於預設模型是 Groq preview、可能無預警下架，而這個是正式版。標籤改為「穩定 · 正式版」，i18n key 也一併從 `stableCostly` 改名為 `stableProduction`，避免日後又照著鍵名把文案改回成本敘述。
+
 ## [0.14.0] - 2026-07-29
 
 ### Added
