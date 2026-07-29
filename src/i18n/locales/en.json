@@ -594,7 +594,6 @@
       "item1": "Gemini speech transcription added — when you mix English terms into Chinese speech, Whisper tends to translate the English away instead of transcribing it as spoken. Transcription can now be switched to Gemini in Settings, with a model picker: the default Flash-Lite allows around 500 requests a day, 25x what Flash allows.",
       "item2": "Word replacements added — names, product names and technical terms that are consistently misheard no longer need fixing by hand every time. Map several wrong spellings to one correct term (regex supported) and choose whether they apply before AI cleanup, after it, or both.",
       "item3": "Gemini usage and remaining free quota on the dashboard — Gemini bills by token and its free quota runs out quickly. You can now see how much you have used today and how much is left, and replace the quota figure with the one from your own account.",
-      "item4": "Smart dictionary learning is now on by default on Windows. It used to be off because Windows could not read the focused text field, and that limitation is gone. When you correct a transcription, the text before and after your edit is sent to the AI service you configured so new terms can be learned automatically — turn it off in Settings if you would rather not.",
       "dismiss": "Got it"
     }
   },
