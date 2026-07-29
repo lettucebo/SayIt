@@ -1,8 +1,8 @@
 # Integration Architecture — Frontend ↔ Backend
 
 > Tauri v2 multi-part desktop app · Vue 3 frontend ↔ Rust backend
-> 同步來源：`AGENTS.md` 的 IPC 契約表（authoritative） + `lib.rs` 的 `generate_handler!` macro
-> 掃描日期：2026-05-08 · 版本：0.9.5
+> 同步來源：`.github/copilot-instructions.md` 的 IPC 契約表（authoritative） + `lib.rs` 的 `generate_handler!` macro
+> 掃描日期：2026-05-08（migration 版本已於 2026-07-29 校正）· 版本：0.14.0
 
 本文件描述 SayIt 兩個 part 之間如何協作 — 是 PRD / 新功能設計時必讀的「邊界契約」。
 
@@ -89,7 +89,7 @@ SayIt 採典型 **Tauri 雙向 IPC 模式**，沒有外部 message broker，所�
 
 ## 三、Tauri Commands（Frontend → Rust）
 
-> 完整列表見 `AGENTS.md` 「IPC 契約表」。本節按「業務語意」分組，並標出 frontend 主要呼叫點。
+> 完整列表見 `.github/copilot-instructions.md` 「IPC 契約表」。本節按「業務語意」分組，並標出 frontend 主要呼叫點。
 
 ### 3.1 系統與生命週期
 

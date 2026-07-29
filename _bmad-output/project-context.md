@@ -262,25 +262,11 @@ _This file contains critical rules and patterns that AI agents must follow when 
 
 #### Tauri Events 完整清單
 
-| Event Name | 常量名 | Direction | Payload |
-|------------|--------|-----------|---------|
-| `voice-flow:state-changed` | `VOICE_FLOW_STATE_CHANGED` | HUD ← VoiceFlow | `VoiceFlowStateChangedPayload` |
-| `transcription:completed` | `TRANSCRIPTION_COMPLETED` | → Main Window | `TranscriptionCompletedPayload` |
-| `settings:updated` | `SETTINGS_UPDATED` | → All Windows | `SettingsUpdatedPayload` |
-| `vocabulary:changed` | `VOCABULARY_CHANGED` | → All Windows | `VocabularyChangedPayload` |
-| `hotkey:pressed` | `HOTKEY_PRESSED` | Rust → HUD | — |
-| `hotkey:released` | `HOTKEY_RELEASED` | Rust → HUD | — |
-| `hotkey:toggled` | `HOTKEY_TOGGLED` | Rust → HUD | `HotkeyEventPayload` |
-| `hotkey:error` | `HOTKEY_ERROR` | Rust → HUD | `HotkeyErrorPayload` |
-| `quality-monitor:result` | `QUALITY_MONITOR_RESULT` | Rust → HUD | `QualityMonitorResultPayload` |
-| `correction-monitor:result` | `CORRECTION_MONITOR_RESULT` | Rust → HUD | `CorrectionMonitorResultPayload` |
-| `audio:waveform` | `AUDIO_WAVEFORM` | Rust → HUD | `WaveformPayload { levels: [f32; 6] }` |
-| `vocabulary:learned` | `VOCABULARY_LEARNED` | VoiceFlowStore → HUD | `VocabularyLearnedPayload` |
-| `escape:pressed` | `ESCAPE_PRESSED` | Rust → HUD | — |
-| `hotkey:mode-toggle` | `HOTKEY_MODE_TOGGLE` | Rust → HUD | `()` |
-| `hotkey:recording-captured` | `HOTKEY_RECORDING_CAPTURED` | Rust → Dashboard | `RecordingCapturedPayload` |
-| `hotkey:recording-rejected` | `HOTKEY_RECORDING_REJECTED` | Rust → Dashboard | `RecordingRejectedPayload` |
-| `audio:preview-level` | `AUDIO_PREVIEW_LEVEL` | Rust → Dashboard | `AudioPreviewLevelPayload` |
+> **唯一權威來源：`.github/copilot-instructions.md` 的「Rust → Frontend Events」與「Frontend-only Events」兩張表**，以及 `docs/api-contracts-backend.md` 第三、四章。
+>
+> 此處原本重複列了一份清單，但它會隨程式演進而與權威表分歧（曾把 `hotkey:pressed` / `hotkey:released` 標成無 payload，實際兩者都送 `HotkeyEventPayload`；也缺了 `theme:os-changed`、`replacements:changed`、`database:ready`、`database:ready-ping`）。為避免第三份會腐化的副本，改為指向權威表。
+>
+> 事件名稱常數在前端**只能**從 `src/composables/useTauriEvents.ts` import。
 
 #### SettingsKey 跨視窗同步
 
@@ -412,7 +398,7 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - **時間戳** — `created_at TEXT DEFAULT (datetime('now'))`
 - **操作限制** — SQLite 操作只從 Pinia store actions 發起，元件不可直接執行 SQL
 - **SQL 參數** — 使用 `$1`, `$2` 位置參數語法（tauri-plugin-sql 規範）
-- **Schema Migration** — `schema_version` 表追蹤版本號，migration 在 `database.ts` 中依序執行（`if (currentVersion < N)` → 建表/改表 → 更新版本號），當前版本：v7
+- **Schema Migration** — `schema_version` 表追蹤版本號，migration 在 `database.ts` 中依序執行（`if (currentVersion < N)` → 建表/改表 → 更新版本號），當前版本：**v9**。新增 schema 變更請追加**下一個未使用的版本號**，重複使用既有版本號會讓已升級的使用者靜默跳過。
   - v3：vocabulary.weight/source 欄位 + api_usage CHECK constraint 擴展
   - v4（Story 4.4）：`ALTER TABLE transcriptions ADD COLUMN audio_file_path TEXT`、`ADD COLUMN status TEXT NOT NULL DEFAULT 'success'`、`CREATE INDEX idx_transcriptions_status`
   - v5（Story 2.4）：`CREATE TABLE hallucination_terms`（已於 v7 移除）
@@ -671,7 +657,7 @@ src/
 
 **建構/簽署（CI/CD only）：**
 - **`TAURI_SIGNING_PRIVATE_KEY`** / **`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`** — Updater 簽署
-- **`APPLE_CERTIFICATE` 等 6 個** — Apple Code Signing（見 AGENTS.md）
+- **`APPLE_CERTIFICATE` 等 6 個** — Apple Code Signing（見 `.github/copilot-instructions.md`）
 
 **Sentry（CI/CD 注入，生產環境用）：**
 

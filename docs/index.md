@@ -91,7 +91,7 @@
 ### 4.1 規範性文件（authoritative · 必讀）
 
 - [`_bmad-output/project-context.md`](../_bmad-output/project-context.md) — **AI Agent 必讀規則 · 323 條**（最高優先）
-- [`AGENTS.md`](../AGENTS.md) — AI Agent 唯一指南、IPC 契約表、Hooks 設定
+- [`.github/copilot-instructions.md`](../.github/copilot-instructions.md) — AI Agent 唯一權威指南、IPC 契約表、Hooks 設定
 - [`_bmad-output/planning-artifacts/architecture.md`](../_bmad-output/planning-artifacts/architecture.md) — 架構決策（ADR）
 - [`_bmad-output/planning-artifacts/ux-ui-design-spec.md`](../_bmad-output/planning-artifacts/ux-ui-design-spec.md) — UI 設計規範
 - [`design.pen`](../design.pen) — Pencil MCP 設計稿（UI 實作前必讀）
@@ -130,7 +130,7 @@
 | 改 hotkey / paste 機制            | `architecture-backend.md` §4.1 / §4.4 + `_bmad-output/project-context.md` |
 | 發版                              | `deployment-guide.md` §四 + `scripts/release.sh`                      |
 | 看實作規則（323 條）              | `_bmad-output/project-context.md`                                     |
-| 看 IPC 契約表                     | `AGENTS.md` §IPC 契約表（authoritative）                              |
+| 看 IPC 契約表                     | `.github/copilot-instructions.md` §IPC 契約表（authoritative）        |
 
 ---
 

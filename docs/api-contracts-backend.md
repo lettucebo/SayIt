@@ -22,6 +22,10 @@
 
 格式：`fn(params) -> ReturnType`，所有 command 由 frontend `invoke('name', { params })` 呼叫。
 
+> **⚠️ 兩種名字不要搞混**
+> - 下方 `invoke(...)` 範例中的參數是**前端實際要傳的鍵名**，一律 **camelCase**（Tauri 會轉成 Rust 的 snake_case）。例如 Rust 的 `api_key` / `file_path` / `restore_clipboard`，前端要寫 `apiKey` / `filePath` / `restoreClipboard`。
+> - Rust 簽章中的 `app: AppHandle`、`state: State<T>` 由 **Tauri 自動注入**，呼叫端**不要傳**。表格中的「簽名」欄列的是 Rust 端簽章（含注入參數），`invoke(...)` 範例則只列呼叫端該傳的東西。
+
 ### 2.1 系統與生命週期（7 個）
 
 #### `set_file_logging_enabled`
@@ -90,9 +94,12 @@ invoke('get_os_theme') → 'dark' | 'light' | null
 | `start_hotkey_recording`                 | `(state) → ()`                                                         |
 | `cancel_hotkey_recording`                | `(state) → ()`                                                         |
 
-**型別**：
-- `TriggerKey` = `'fn' | 'control' | 'option' | 'command' | { combo: string[] }`
+**型別**（`src/types/settings.ts`）：
+- `PresetTriggerKey` = `'fn' | 'option' | 'rightOption' | 'command' | 'rightAlt' | 'leftAlt' | 'control' | 'rightControl' | 'shift'`
+- `TriggerKey` = `PresetTriggerKey | { custom: { keycode: number } } | { combo: { modifiers: ModifierFlag[], keycode: number } }`
+- `ModifierFlag` = `'command' | 'control' | 'option' | 'shift' | 'fn'`
 - `TriggerMode` = `'hold' | 'toggle'`
+- 前端 invoke 時傳 `{ triggerKey, triggerMode }`（camelCase）
 
 ### 2.3 音訊（10 個 · `plugins/audio_recorder.rs`）
 
@@ -134,9 +141,10 @@ invoke('restore_system_audio') → Result<(), String>
 ### 2.6 鍵盤監測（2 個 · `plugins/keyboard_monitor.rs`）
 
 ```ts
-invoke('start_quality_monitor', { app: AppHandle })    → void
-invoke('start_correction_monitor', { app: AppHandle }) → void
+invoke('start_quality_monitor')    → void
+invoke('start_correction_monitor') → void
 ```
+（Rust 端簽章為 `(app: AppHandle)`，由 Tauri 注入，呼叫端不傳。）
 
 ### 2.7 文字場讀取（4 個 · `plugins/text_field_reader.rs`，macOS 為主，非 macOS 降級）
 
@@ -155,37 +163,39 @@ invoke('read_selection_state')    → { kind: 'selection' | 'noSelection' | 'una
 #### `transcribe_audio`
 ```ts
 invoke('transcribe_audio', {
-  api_key: string,
-  vocabulary_term_list?: string[],
-  model_id?: string,        // 預設 'whisper-large-v3'
+  apiKey: string,
+  vocabularyTermList?: string[] | null,
+  modelId?: string,        // Whisper 預設 'whisper-large-v3'；Gemini 走獨立模型清單
   language?: string | null, // null／省略 = 不送 language 欄位，由 provider 自動偵測
   provider?: 'groq' | 'azure' | 'gemini',  // 預設 groq；未知值 fail-closed 報錯
-  endpoint?: string,        // Azure
-  deployment?: string,      // Azure
-  api_version?: string,     // Azure
-  auth_mode?: string,       // Azure：api-key | entra
+  endpoint?: string | null,        // Azure
+  deployment?: string | null,      // Azure
+  apiVersion?: string | null,      // Azure
+  authMode?: 'key' | 'entra' | null,  // Azure 驗證方式
 }) → Result<TranscriptionResult, TranscriptionError>
 ```
 
 #### `retranscribe_from_file`
 ```ts
 invoke('retranscribe_from_file', {
-  file_path: string,      // 前端傳 filePath
-  api_key: string,
-  vocabulary_term_list?: string[],
-  model_id?: string,
+  filePath: string,        // Rust 端為 file_path
+  apiKey: string,
+  vocabularyTermList?: string[] | null,
+  modelId?: string,
   language?: string | null,
   provider?: 'groq' | 'azure' | 'gemini',
-  endpoint?: string, deployment?: string, api_version?: string, auth_mode?: string,
+  endpoint?: string | null, deployment?: string | null,
+  apiVersion?: string | null, authMode?: 'key' | 'entra' | null,
 }) → Result<TranscriptionResult, TranscriptionError>
 ```
 
 #### `test_whisper_connection`
 ```ts
 invoke('test_whisper_connection', {
-  api_key: string, model_id?: string,
+  apiKey: string, modelId?: string,
   provider?: 'groq' | 'azure' | 'gemini',
-  endpoint?: string, deployment?: string, api_version?: string, auth_mode?: string,
+  endpoint?: string | null, deployment?: string | null,
+  apiVersion?: string | null, authMode?: 'key' | 'entra' | null,
 }) → Result<(), TranscriptionError>
 ```
 - **呼叫端**：`src/lib/connectionTest.ts`（SettingsView 的連線測試按鈕）
@@ -210,7 +220,7 @@ invoke('play_learned_sound')  → void
 
 ```ts
 invoke('get_azure_entra_token', {
-  tenant_id: string, client_id: string, client_secret: string, scope: string,
+  tenantId: string, clientId: string, clientSecret: string, scope: string,
 }) → Result<{ accessToken: string, expiresIn: number }, string>
 ```
 - **呼叫端**：`src/lib/azureAuth.ts`（`getAzureAccessToken`，含快取與提前 60 秒續期）
@@ -326,7 +336,7 @@ POST https://api.groq.com/openai/v1/audio/transcriptions
 
 > **Azure Whisper**（`provider: 'azure'`）走 `{endpoint}/openai/deployments/{deployment}/audio/transcriptions?api-version=...`，同 multipart 協定並保留 `verbose_json` / `no_speech_prob`；驗證用 `api-key` header 或 Entra ID 的 `Authorization: Bearer`（token 由 `get_azure_entra_token` 取得）。
 >
-> **Gemini**（`provider: 'gemini'`）**不走** Whisper multipart 協定，而是 `POST https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent`（`x-goog-api-key` header + inline base64 WAV + structured output `{ transcript }`）。模型**固定**（Rust `GEMINI_TRANSCRIPTION_MODEL` 與 TS `modelRegistry.ts` 兩端必須一致），**不吃 `WhisperModelId`**；inline 上限 20MB request（raw WAV 約 14 MiB ≈ 7 分 39 秒）；無 `no_speech_prob` → `noSpeechProbability` 回 `null`。
+> **Gemini**（`provider: 'gemini'`）**不走** Whisper multipart 協定，而是 `POST https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent`（`x-goog-api-key` header + inline base64 WAV + structured output `{ transcript }`）。模型走**獨立的 Gemini 轉錄清單**（Rust `GEMINI_TRANSCRIPTION_MODELS` allowlist：`gemini-3.5-flash-lite`（預設）／`gemini-3.6-flash`，須與 TS `modelRegistry.ts` 的 `GEMINI_TRANSCRIPTION_MODEL_LIST` 一致），**不吃 `WhisperModelId`**；allowlist 外的值 fallback 回預設模型，避免壞掉的匯入設定打到不存在的端點。inline 上限 20MB request（raw WAV 約 14 MiB；16kHz mono 約 7 分 39 秒，裝置 fallback 到 48kHz 則約 2 分 33 秒）；無 `no_speech_prob` → `noSpeechProbability` 回 `null`。
 
 | Provider   | Endpoint                                                                                | Auth Header                       | Body 特例                                                |
 | ---------- | --------------------------------------------------------------------------------------- | --------------------------------- | -------------------------------------------------------- |

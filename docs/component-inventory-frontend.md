@@ -1,7 +1,7 @@
 # Component Inventory — Frontend
 
 > Vue 3 components · 自製元件 + shadcn-vue（new-york style）UI 庫
-> 掃描日期：2026-05-08 · root: `src/components/`
+> 掃描日期：2026-05-08（LOC 已於 2026-07-29 校正）· root: `src/components/`
 
 ---
 

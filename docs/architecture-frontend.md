@@ -1,7 +1,7 @@
 # Architecture — Frontend Part
 
 > Vue 3 + TypeScript + Tauri JS API · 雙視窗 SPA
-> 掃描日期：2026-05-08 · 版本：0.9.5 · part_id: `frontend` · root: `src/`
+> 掃描日期：2026-05-08（LOC 與模組清單已於 2026-07-29 校正）· 版本：0.14.0 · part_id: `frontend` · root: `src/`
 
 ---
 

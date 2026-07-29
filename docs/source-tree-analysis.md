@@ -1,7 +1,7 @@
 # Source Tree Analysis
 
 > 由 BMad Document Project 工作流自動產生
-> 掃描層級：**Exhaustive** · 掃描日期：2026-05-08 · 專案版本：0.9.5
+> 掃描層級：**Exhaustive** · 掃描日期：2026-05-08（LOC 與模組清單已於 2026-07-29 校正）· 專案版本：0.14.0
 
 本文件以「兩個 part」為視角註解 SayIt 的原始碼結構：
 
@@ -76,7 +76,7 @@ say-it/
 | `useVoiceFlowStore.ts`        | ~2.3k | **核心狀態機** — 錄音→轉錄→AI 整理→貼上的完整 voice flow，協調所有 Tauri Command + Event |
 | `useHistoryStore.ts`          |  ~900 | 轉錄歷史 CRUD（SQLite `transcriptions` 表）+ Dashboard 統計聚合 + 每日趨勢                                       |
 | `useVocabularyStore.ts`       |  ~300 | 字典 CRUD + 廣播 `vocabulary:changed` / `vocabulary:learned`                                                      |
-| `useReplacementStore.ts`      |  ~250 | 文字取代規則 CRUD — 字面／正則、beforeAI／afterAI／both 階段套用，含長度上限與可編譯性檢查（ReDoS 防護）        |
+| `useReplacementStore.ts`      |  ~250 | 文字取代規則 CRUD — 字面／正則、beforeAI／afterAI／both 階段套用；驗證含規則數／樣式長度上限與 `new RegExp()` 可編譯性檢查（**注意：不防災難性回溯，非 ReDoS 防護**）        |
 
 ### 2.3 Composables（`src/composables/`）
 
