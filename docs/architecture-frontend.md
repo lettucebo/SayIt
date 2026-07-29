@@ -107,7 +107,7 @@ lib/     ──→ External APIs (Groq / OpenAI / Anthropic / Gemini)
 
 詳見 `source-tree-analysis.md` 第 2.4 節，重點：
 
-- **`database.ts`** — singleton + double-init 防護（HUD 用 `connectToDatabase()`、Dashboard 用 `initializeDatabase()`）；支援 v1→v8 migration；含恢復邏輯（issue #27 vocabulary column 修復）
+- **`database.ts`** — singleton + double-init 防護（HUD 用 `connectToDatabase()`、Dashboard 用 `initializeDatabase()`）；支援 v1→v9 migration；含恢復邏輯（issue #27 vocabulary column 修復）
 - **`llmProvider.ts`** — 五 provider 抽象（Groq / Gemini / OpenAI / Anthropic / Azure），差異點封裝在 `buildFetchParams` / `parseProviderResponse`
 - **`modelRegistry.ts`** — 集中管理模型清單；`DECOMMISSIONED_MODEL_MAP` 支援舊 ID 自動遷移到新 ID
 - **`hallucinationDetector.ts`** — Whisper 幻覺偵測 v3，含繁中常見幻覺詞表

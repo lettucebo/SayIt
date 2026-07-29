@@ -125,7 +125,7 @@ HistoryView.vue
 DictionaryView.vue
   └─ shadcn-vue: Table、Input、Button、AlertDialog
 
-SettingsView.vue（1907 LOC，最大 view）
+SettingsView.vue（~3.8k LOC，最大 view）
   ├─ AccessibilityGuide
   └─ shadcn-vue: 全部表單元件 + Tabs + Sheet
 

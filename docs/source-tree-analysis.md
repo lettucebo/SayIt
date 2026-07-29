@@ -63,7 +63,7 @@ say-it/
 | 路徑                          | LOC  | 職責                                                                                                |
 | ----------------------------- | ---: | --------------------------------------------------------------------------------------------------- |
 | `src/main.ts`                 |  ~30 | **HUD 入口** — 載入 `App.vue`，初始化 Sentry HUD（無 tracing）、Pinia、i18n、主題、console 轉送     |
-| `src/main-window.ts`          | ~150 | **Dashboard 入口** — 載入 `MainApp.vue`，初始化 DB（migration v1→v8）、Sentry Dashboard、router、autostart、自動清理錄音檔與日誌 |
+| `src/main-window.ts`          | ~150 | **Dashboard 入口** — 載入 `MainApp.vue`，初始化 DB（migration v1→v9）、Sentry Dashboard、router、autostart、自動清理錄音檔與日誌 |
 | `src/App.vue`                 | ~150 | HUD root component（瀏海狀態浮窗）                                                                  |
 | `src/MainApp.vue`             | ~400 | Dashboard root component（含 Sidebar、Sidebar Footer 的「檢查更新」按鈕）                           |
 | `src/router.ts`               |  ~20 | 5 routes：`/dashboard` `/history` `/dictionary` `/settings` `/guide`，使用 `createWebHashHistory()` |
@@ -94,7 +94,7 @@ say-it/
 | ----------------------------- | ---: | --------------------------------------------------------------------------------------------------- |
 | `settingsTransfer.ts`         | ~600 | 設定與字典備份／還原 — AES-GCM 加密、敏感金鑰剔除、版本相容檢查、PBKDF2 迭代數上限（DoS 防護）    |
 | `keycodeMap.ts`               | ~550 | 跨平台鍵碼對應（macOS / Windows）                                                                  |
-| `database.ts`                 | ~500 | SQLite 連線池（HUD 與 Dashboard 共用）+ migration v1→v8                                             |
+| `database.ts`                 | ~500 | SQLite 連線池（HUD 與 Dashboard 共用）+ migration v1→v9                                             |
 | `llmProvider.ts`              | ~500 | **多 Provider 抽象層** — Groq / Gemini / OpenAI / Anthropic / Azure 統一 fetch / parse             |
 | `modelRegistry.ts`            | ~450 | LLM + Whisper 模型清單、預設值、下架遷移（`DECOMMISSIONED_MODEL_MAP`）                              |
 | `enhancer.ts`                 | ~350 | LLM 文字整理（口語→書面語）                                                                         |
@@ -263,8 +263,8 @@ tests/
 
 ## 六、關鍵交互點（為 PRD 提供導引）
 
-1. **「錄音 → 轉錄 → 整理 → 貼上」流程的中樞** = `useVoiceFlowStore.ts`（1871 行）— 修改錄音流程必先讀此檔。
-2. **「設定」全部入口** = `useSettingsStore.ts`（1395 行）+ `SettingsView.vue`（1907 行）— 新增任何設定欄位需同步兩處。
+1. **「錄音 → 轉錄 → 整理 → 貼上」流程的中樞** = `useVoiceFlowStore.ts`（~2.3k 行）— 修改錄音流程必先讀此檔。
+2. **「設定」全部入口** = `useSettingsStore.ts`（~2.4k 行）+ `SettingsView.vue`（~3.8k 行）— 新增任何設定欄位需同步兩處。
 3. **「IPC 契約」唯一定義處** = `lib.rs` 的 `invoke_handler!` macro + `useTauriEvents.ts` 常數 — 新增 Command / Event 必須兩端對齊（用 `tauri-reviewer` subagent 審查）。
-4. **「DB Schema」單一來源** = `src/lib/database.ts` 的 migration 鏈（v1→v8）— 加欄位請追加 v9，不要直接改舊 migration。
+4. **「DB Schema」單一來源** = `src/lib/database.ts` 的 migration 鏈（目前最新 **v9**）— 加欄位請追加**下一個未使用的版本號**，不要直接改舊 migration。每段 migration 的守衛是 `if (currentVersion < N)`，重複使用既有版本號會讓已升級的使用者靜默跳過，導致新舊安裝的 schema 不一致。
 5. **「LLM Provider」抽象邊界** = `src/lib/llmProvider.ts` — 新增 provider 在此擴展即可，業務層（`enhancer.ts` / `vocabularyAnalyzer.ts`）不需改。

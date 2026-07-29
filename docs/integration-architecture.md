@@ -69,7 +69,7 @@ SayIt 採典型 **Tauri 雙向 IPC 模式**，沒有外部 message broker，所�
 │  ↓                             │
 │  initializeDatabase()          │
 │  → Database.load(...)          │
-│  → 跑 migration v1→v8          │
+│  → 跑 migration v1→v9          │
 │  → 設定 singleton db           │
 └────────────┬───────────────────┘
              │
@@ -238,7 +238,7 @@ SayIt 採典型 **Tauri 雙向 IPC 模式**，沒有外部 message broker，所�
 
 2. Frontend HUD：main.ts → initSentryForHud → mount
 3. Frontend Dashboard：main-window.ts → initSentryForDashboard
-   → initializeDatabase（migration v1→v8）
+   → initializeDatabase（migration v1→v9）
    → settingsStore.loadSettings + initializeAutoStart
    → 若缺 API Key：強制顯示視窗並導向 /settings
    → 背景：cleanup_old_recordings（不阻斷啟動）
