@@ -109,7 +109,7 @@ say-it/
 | -------------------------- | ---: | ------------ | --------------------------------------------------- |
 | `SettingsView.vue`         | 1907 | `/settings`  | API Key / 模型 / 熱鍵 / 音訊裝置 / 進階設定         |
 | `HistoryView.vue`          |  379 | `/history`   | 轉錄歷史瀏覽 / 搜尋 / 複製 / 重新轉錄 / 音訊播放    |
-| `DashboardView.vue`        |  309 | `/dashboard` | 統計卡片 + 使用量圖表 + 近期轉錄                    |
+| `DashboardView.vue`        |  309 | `/dashboard` | 統計卡片 + 額度卡片 + 使用量圖表                    |
 | `DictionaryView.vue`       |  281 | `/dictionary`| 字典 CRUD（手動 + AI 學習）                         |
 | `FeatureGuideView.vue`     |   56 | `/guide`     | 功能導覽                                            |
 

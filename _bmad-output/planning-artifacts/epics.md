@@ -58,7 +58,8 @@ This document provides the complete epic and story breakdown for SayIt, decompos
 - FR22: 使用者可搜尋歷史記錄（全文搜尋）
 - FR23: 使用者可複製歷史記錄中的文字
 - FR24: 使用者可在 Dashboard 查看統計指標（總口述時間、口述字數、平均口述速度、節省時間、使用次數、AI 整理使用率）
-- FR25: 使用者可在 Dashboard 查看最近轉錄摘要列表
+- FR25: ~~使用者可在 Dashboard 查看最近轉錄摘要列表~~
+  - **2026-07-29 已作廢**：Dashboard 不再顯示最近轉錄；歷史記錄頁（HistoryView）為唯一的詳細列表。請勿依此 FR 重新實作。
 
 **狀態回饋（HUD）**
 - FR26: 系統在各階段透過 Notch-style HUD 顯示目前狀態（idle → recording → transcribing → enhancing → success/error → idle）
@@ -153,7 +154,7 @@ This document provides the complete epic and story breakdown for SayIt, decompos
 - FR22: Epic 4 — 搜尋歷史記錄
 - FR23: Epic 4 — 複製歷史記錄文字
 - FR24: Epic 4 — Dashboard 統計指標
-- FR25: Epic 4 — Dashboard 最近轉錄摘要
+- FR25: ~~Epic 4 — Dashboard 最近轉錄摘要~~（2026-07-29 已作廢，見上方 FR25 註記）
 - FR26: Epic 1 — HUD 狀態顯示（基本 4 態：recording/transcribing/success/error）
 - FR27: Epic 1 — success 狀態自動收起 HUD
 - FR28: Epic 1 — API 失敗 HUD 錯誤訊息
@@ -770,6 +771,8 @@ So that 我能找回之前說過的內容並重新使用。
 **Then** 顯示空狀態提示（如「尚無轉錄記錄，開始使用語音輸入吧！」）
 
 ### Story 4.3: Dashboard 統計與最近轉錄摘要
+
+> **2026-07-29 部分作廢**：本 Story 的「最近轉錄摘要列表」相關驗收條件已被產品決策移除——歷史記錄頁已有完整列表，Dashboard 重複顯示價值不高。統計卡片與即時更新部分仍然有效。以下內容保留作為當時的實作紀錄，**請勿依此重新實作最近轉錄列表**。
 
 As a 使用者,
 I want 在 Dashboard 看到使用統計和最近的轉錄摘要,

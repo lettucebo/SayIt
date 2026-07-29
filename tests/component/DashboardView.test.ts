@@ -8,10 +8,6 @@ vi.mock("../../src/composables/useTauriEvents", () => ({
   TRANSCRIPTION_COMPLETED: "transcription:completed",
 }));
 
-vi.mock("vue-router", () => ({
-  useRouter: () => ({ push: vi.fn() }),
-}));
-
 vi.mock("../../src/lib/sentry", () => ({
   captureError: vi.fn(),
 }));
@@ -50,7 +46,6 @@ function makeHistory(usage: Record<string, number> = {}) {
     },
     dailyUsageTrendList: [],
     usageTrendDays: 14,
-    recentTranscriptionList: [],
     refreshDashboard: vi.fn().mockResolvedValue(undefined),
   };
 }

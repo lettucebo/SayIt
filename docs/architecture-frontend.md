@@ -127,7 +127,7 @@ lib/     ──→ External APIs (Groq / OpenAI / Anthropic / Gemini)
 | --------------------- | ---: | ------------- | ------------------------------------------- |
 | SettingsView.vue      | 1907 | /settings     | 全部設定（API Key、模型、熱鍵、音訊、進階）  |
 | HistoryView.vue       |  379 | /history      | 歷史瀏覽 + 搜尋 + 重新轉錄 + 音訊播放        |
-| DashboardView.vue     |  309 | /dashboard    | 統計卡片 + 使用量圖表 + 近期清單             |
+| DashboardView.vue     |  309 | /dashboard    | 統計卡片 + 額度卡片 + 使用量圖表             |
 | DictionaryView.vue    |  281 | /dictionary   | 字典 CRUD + 智慧學習                         |
 | FeatureGuideView.vue  |   56 | /guide        | 功能導覽                                     |
 

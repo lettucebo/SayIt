@@ -537,7 +537,7 @@ async function processTranscription() {
 | AI 文字整理 | FR8-12 | enhancer.ts, useVoiceFlowStore.ts, useSettingsStore.ts | lib/, stores/ |
 | 文字輸出 | FR13-15 | clipboard_paste.rs, keyboard_monitor.rs | plugins/ |
 | 自訂詞彙字典 | FR16-19 | useVocabularyStore.ts, DictionaryView.vue | stores/, views/ |
-| 歷史記錄與統計 | FR20-25 | database.ts, useHistoryStore.ts, DashboardView.vue, HistoryView.vue | lib/, stores/, views/ |
+| 歷史記錄與統計 | FR20-24（FR25 已作廢） | database.ts, useHistoryStore.ts, DashboardView.vue, HistoryView.vue | lib/, stores/, views/ |
 | 狀態回饋 HUD | FR26-29 | NotchHud.vue, useHudState.ts, App.vue | components/, composables/, src/ |
 | 應用程式管理 | FR30-36 | lib.rs, useSettingsStore.ts, SettingsView.vue, updater.ts | src-tauri/src/, stores/, views/, lib/ |
 
@@ -583,7 +583,7 @@ sayit/
 │   │   └── useVoiceFlowStore.ts       # 錄音/轉錄/AI 整理流程狀態
 │   │
 │   ├── views/                          # Main Window 頁面 [新增目錄]
-│   │   ├── DashboardView.vue          # 統計卡片 + 最近轉錄列表
+│   │   ├── DashboardView.vue          # 統計卡片 + 額度卡片 + 每日使用趨勢圖
 │   │   ├── HistoryView.vue            # 歷史記錄搜尋與管理
 │   │   ├── DictionaryView.vue         # 詞彙字典 CRUD
 │   │   └── SettingsView.vue           # 快捷鍵 / API Key / AI Prompt 設定
@@ -808,7 +808,7 @@ pnpm tauri build  # 1. Vite 打包前端 → dist/
 | FR8-12 | AI 文字整理 | enhancer.ts (Groq LLM) + useSettingsStore (prompt) + 詞彙/剪貼簿上下文注入 |
 | FR13-15 | 文字輸出 | clipboard_paste.rs (arboard + CGEvent Cmd+V / SendInput) + keyboard_monitor.rs |
 | FR16-19 | 自訂詞彙字典 | useVocabularyStore + DictionaryView.vue + SQLite vocabulary table |
-| FR20-25 | 歷史記錄與統計 | useHistoryStore + DashboardView.vue + HistoryView.vue + SQLite transcriptions table |
+| FR20-24 | 歷史記錄與統計 | useHistoryStore + DashboardView.vue + HistoryView.vue + SQLite transcriptions table（FR25「Dashboard 最近轉錄摘要」已於 2026-07-29 作廢） |
 | FR26-29 | 狀態回饋 HUD | NotchHud.vue (6-state) + useHudState.ts + voice-flow:state-changed events |
 | FR30-36 | 應用程式管理 | SettingsView.vue + useSettingsStore + lib.rs + updater.ts + tauri-plugin-autostart |
 

@@ -579,7 +579,7 @@ src/
 │   ├── useVocabularyStore.ts    # 詞彙字典 CRUD + 權重系統 + AI 推薦詞管理
 │   └── useVoiceFlowStore.ts     # 錄音/轉錄/AI 整理/貼上/修正偵測/字典學習完整流程
 ├── views/                # Main Window 頁面
-│   ├── DashboardView.vue      # 統計卡片 + 最近轉錄列表
+│   ├── DashboardView.vue      # 統計卡片 + 額度卡片 + 每日使用趨勢圖
 │   ├── FeatureGuideView.vue   # 功能介紹頁（8 張功能卡片）
 │   ├── HistoryView.vue        # 歷史記錄搜尋與管理
 │   ├── DictionaryView.vue   # 詞彙字典 CRUD
