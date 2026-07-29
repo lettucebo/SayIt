@@ -94,10 +94,14 @@
       "whisperLabel": "语音转录模型（Whisper）",
       "llmLabel": "文字整理模型（LLM）",
       "whisperUpdated": "语音转录模型已更新",
-      "geminiTranscriptionHint": "使用 Gemini 进行语音转录（模型：{model}）。对中英夹杂的识别通常优于 Whisper，需要 Gemini API Key。",
+      "geminiTranscriptionHint": "Gemini 对中英夹杂的识别通常优于 Whisper，需要 Gemini API Key。",
+      "geminiModelDescription": {
+        "flashLite": "免费额度最高（约 500 次/日、15 次/分），官方文档明列「语音转录」为建议用途。日常听写建议用这个",
+        "flash": "最新旗舰、多模态理解最强，但免费额度极少（约 20 次/日、5 次/分），适合少量但要求最准的场合"
+      },
       "geminiQuotaLabel": "免费额度（选填）",
       "geminiQuotaPlaceholder": "例：1500",
-      "geminiQuotaHint": "Google 未公开免费额度数字（依账号浮动）。填入后仪表板才会显示剩余额度，留空则只显示实际用量",
+      "geminiQuotaHint": "Google 未在文档公开免费额度，但可在 AI Studio 的 Rate limits 页看到自己的 RPD（每日请求上限）。填入后仪表板才会显示剩余额度，留空则只显示实际用量",
       "geminiQuotaLink": "到 AI Studio 查看我的额度",
       "geminiQuotaSaved": "免费额度已更新",
       "quotaPeriodDaily": "每日",
@@ -112,6 +116,7 @@
     },
     "modelBadge": {
       "accurate": "准确度优先",
+      "highQuota": "免费额度最高",
       "balanced": "平衡 · 默认",
       "stableCostly": "稳定可靠 · 成本高",
       "fastCheap": "最快 · 最便宜",
@@ -389,6 +394,7 @@
     "dailyUsage": "今日用量",
     "billedPlan": "计费",
     "billedNoFreeQuota": "付费方案 — 无免费额度限制",
+    "freeTierQuotaUnknown": "免费方案 — 额度未公开，可在设置填入以显示剩余量",
     "usageWhisper": "Whisper：{requests} 次 · {audio}",
     "usageGeminiTranscription": "Gemini 转录：{requests} 次 · {tokens} tokens",
     "quotaGeminiRequests": "Gemini 转录今日 {used} / {limit} 次",

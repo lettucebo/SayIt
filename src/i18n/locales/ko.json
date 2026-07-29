@@ -94,10 +94,14 @@
       "whisperLabel": "음성 전사 모델 (Whisper)",
       "llmLabel": "텍스트 정리 모델 (LLM)",
       "whisperUpdated": "음성 전사 모델이 업데이트되었습니다",
-      "geminiTranscriptionHint": "Gemini로 음성을 전사합니다(모델: {model}). 중국어-영어 혼용 음성에서 Whisper보다 정확한 경우가 많으며 Gemini API 키가 필요합니다.",
+      "geminiTranscriptionHint": "Gemini는 중국어-영어 혼용 음성에서 Whisper보다 정확한 경우가 많으며 Gemini API 키가 필요합니다.",
+      "geminiModelDescription": {
+        "flashLite": "무료 할당량이 가장 큼(약 500회/일, 15회/분). 공식 문서가 전사를 권장 용도로 명시. 일상 받아쓰기에 적합",
+        "flash": "최신 플래그십으로 멀티모달 이해력이 가장 뛰어나지만 무료 할당량이 매우 적음(약 20회/일, 5회/분). 정확도가 중요한 소량 작업에 적합"
+      },
       "geminiQuotaLabel": "무료 할당량(선택)",
       "geminiQuotaPlaceholder": "예: 1500",
-      "geminiQuotaHint": "Google은 무료 한도를 공개하지 않습니다(계정마다 다름). 입력하면 대시보드에 잔여량이 표시되고, 비워 두면 사용량만 표시됩니다",
+      "geminiQuotaHint": "Google은 문서에 무료 한도를 공개하지 않지만 AI Studio의 Rate limits 페이지에서 자신의 RPD(일일 요청 한도)를 확인할 수 있습니다. 입력하면 대시보드에 잔여량이 표시됩니다",
       "geminiQuotaLink": "AI Studio에서 내 한도 확인",
       "geminiQuotaSaved": "무료 할당량이 업데이트되었습니다",
       "quotaPeriodDaily": "하루",
@@ -112,6 +116,7 @@
     },
     "modelBadge": {
       "accurate": "정확도 우선",
+      "highQuota": "무료 할당량 최대",
       "balanced": "균형 · 기본",
       "stableCostly": "안정 · 고비용",
       "fastCheap": "가장 빠름 · 가장 저렴",
@@ -389,6 +394,7 @@
     "dailyUsage": "오늘 사용량",
     "billedPlan": "유료",
     "billedNoFreeQuota": "유료 요금제 — 무료 할당량 없음",
+    "freeTierQuotaUnknown": "무료 등급 — 한도가 비공개입니다. 설정에 입력하면 잔여량이 표시됩니다",
     "usageWhisper": "Whisper: {requests}회 · {audio}",
     "usageGeminiTranscription": "Gemini 전사: {requests}회 · {tokens} tokens",
     "quotaGeminiRequests": "Gemini 전사 오늘 {used} / {limit}회",

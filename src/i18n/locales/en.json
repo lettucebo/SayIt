@@ -94,10 +94,14 @@
       "whisperLabel": "Speech Transcription Model (Whisper)",
       "llmLabel": "Text Enhancement Model (LLM)",
       "whisperUpdated": "Speech transcription model updated",
-      "geminiTranscriptionHint": "Transcribe speech with Gemini (model: {model}). Usually handles Chinese-English code-switching better than Whisper. Requires a Gemini API key.",
+      "geminiTranscriptionHint": "Gemini usually handles Chinese-English code-switching better than Whisper. Requires a Gemini API key.",
+      "geminiModelDescription": {
+        "flashLite": "Highest free quota (~500/day, 15/min); Google's docs list transcription as a recommended use. Best for everyday dictation",
+        "flash": "Latest flagship with the strongest multimodal understanding, but a very small free quota (~20/day, 5/min). Use it sparingly when accuracy matters most"
+      },
       "geminiQuotaLabel": "Free quota (optional)",
       "geminiQuotaPlaceholder": "e.g. 1500",
-      "geminiQuotaHint": "Google doesn't publish free-tier limits (they vary per account). Enter yours to see remaining quota on the dashboard; leave empty to show usage only",
+      "geminiQuotaHint": "Google doesn't publish free-tier limits in the docs, but AI Studio's Rate limits page shows your own RPD (requests per day). Enter it to see remaining quota on the dashboard; leave empty to show usage only",
       "geminiQuotaLink": "Check my limits in AI Studio",
       "geminiQuotaSaved": "Free quota updated",
       "quotaPeriodDaily": "Per day",
@@ -112,6 +116,7 @@
     },
     "modelBadge": {
       "accurate": "Accuracy first",
+      "highQuota": "Highest free quota",
       "balanced": "Balanced · Default",
       "stableCostly": "Stable · Costly",
       "fastCheap": "Fastest · Cheapest",
@@ -389,6 +394,7 @@
     "dailyUsage": "Today's Usage",
     "billedPlan": "Billed",
     "billedNoFreeQuota": "Pay-as-you-go — no free quota limit",
+    "freeTierQuotaUnknown": "Free tier — limit not published; enter yours in Settings to see remaining",
     "usageWhisper": "Whisper: {requests} req · {audio}",
     "usageGeminiTranscription": "Gemini transcription: {requests} req · {tokens} tokens",
     "quotaGeminiRequests": "Gemini transcription today {used} / {limit}",

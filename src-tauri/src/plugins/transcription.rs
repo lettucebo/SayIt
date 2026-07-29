@@ -22,9 +22,12 @@ const DEFAULT_WHISPER_MODEL_ID: &str = "whisper-large-v3";
 const REQUEST_TIMEOUT_SECS: u64 = 120;
 
 // ── Gemini 轉錄 ──
-/// Gemini 轉錄固定模型（官方 audio guide 示範、stable、支援 audio input，
-/// 與 LLM chat 模型解耦，避免沿用 WhisperModelId 打錯 API）。
-const GEMINI_TRANSCRIPTION_MODEL: &str = "gemini-3.6-flash";
+/// Gemini 轉錄預設模型（TS `GEMINI_TRANSCRIPTION_MODEL` 需一致）。
+/// Flash-Lite 免費層 RPD 為 Flash 的 25 倍，且官方文件明列 Transcription 用例。
+const DEFAULT_GEMINI_TRANSCRIPTION_MODEL: &str = "gemini-3.5-flash-lite";
+/// 可接受的 Gemini 轉錄模型 allowlist（與 TS `GEMINI_TRANSCRIPTION_MODEL_LIST` 一致）。
+/// 不放行任意字串：壞掉的匯入設定不得讓 App 打到未預期的模型端點。
+const GEMINI_TRANSCRIPTION_MODELS: [&str; 2] = ["gemini-3.5-flash-lite", "gemini-3.6-flash"];
 /// Gemini generateContent API base（與前端 LLM 整合一致）。
 const GEMINI_API_BASE: &str = "https://generativelanguage.googleapis.com/v1beta";
 /// Gemini inline 音訊 raw bytes 上限：base64 膨脹 4/3 後須 < 20MB request 上限，
@@ -583,8 +586,18 @@ enum TranscriptionTarget {
     },
 }
 
-/// 由 provider 解析出送出目標。Gemini 用固定轉錄模型（不沿用 WhisperModelId）。
-fn resolve_transcription_target(provider: &ResolvedProvider) -> TranscriptionTarget {
+/// 由前端傳入的 model 解析出實際使用的 Gemini 轉錄模型。
+/// 不在 allowlist（未設定、舊值、壞掉的匯入）一律退回預設，避免打到不存在的端點。
+fn resolve_gemini_model(model: &str) -> &'static str {
+    GEMINI_TRANSCRIPTION_MODELS
+        .iter()
+        .find(|m| **m == model)
+        .copied()
+        .unwrap_or(DEFAULT_GEMINI_TRANSCRIPTION_MODEL)
+}
+
+/// 由 provider 解析出送出目標。Gemini 用 allowlist 過的模型（不沿用 WhisperModelId）。
+fn resolve_transcription_target(provider: &ResolvedProvider, model: &str) -> TranscriptionTarget {
     match provider {
         ResolvedProvider::Whisper { azure } => {
             let (url, use_bearer, include_model) = resolve_transcription_endpoint(azure);
@@ -595,7 +608,10 @@ fn resolve_transcription_target(provider: &ResolvedProvider) -> TranscriptionTar
             }
         }
         ResolvedProvider::Gemini => TranscriptionTarget::Gemini {
-            url: format!("{GEMINI_API_BASE}/models/{GEMINI_TRANSCRIPTION_MODEL}:generateContent"),
+            url: format!(
+                "{GEMINI_API_BASE}/models/{}:generateContent",
+                resolve_gemini_model(model)
+            ),
         },
     }
 }
@@ -855,14 +871,14 @@ async fn send_transcription_request(
     }
 
     let model = model_id.unwrap_or_else(|| DEFAULT_WHISPER_MODEL_ID.to_string());
-    let target = resolve_transcription_target(&provider);
+    let target = resolve_transcription_target(&provider, &model);
 
     log::info!(
         "[transcription] Sending {} bytes WAV via {} (model={})",
         wav_data.len(),
         if is_gemini { "Gemini" } else { "Whisper" },
         if is_gemini {
-            GEMINI_TRANSCRIPTION_MODEL
+            resolve_gemini_model(&model)
         } else {
             model.as_str()
         }
@@ -1162,7 +1178,7 @@ pub async fn test_whisper_connection(
     let resolved = resolve_provider(provider, endpoint, deployment, api_version, auth_mode)?;
 
     let model = model_id.unwrap_or_else(|| DEFAULT_WHISPER_MODEL_ID.to_string());
-    let target = resolve_transcription_target(&resolved);
+    let target = resolve_transcription_target(&resolved, &model);
 
     // 1 秒 16kHz silence ≈ 32044 bytes，遠超過 MINIMUM_AUDIO_SIZE 的 1000 byte 下限。
     let silence_samples = vec![0i16; 16_000];
@@ -1764,16 +1780,18 @@ mod tests {
 
     #[test]
     fn test_resolve_target_urls() {
-        let gemini = resolve_transcription_target(&ResolvedProvider::Gemini);
+        let gemini =
+            resolve_transcription_target(&ResolvedProvider::Gemini, "gemini-3.5-flash-lite");
         match gemini {
             TranscriptionTarget::Gemini { url } => {
                 assert!(url.starts_with(GEMINI_API_BASE));
-                assert!(url.contains(GEMINI_TRANSCRIPTION_MODEL));
+                assert!(url.contains("gemini-3.5-flash-lite"));
                 assert!(url.ends_with(":generateContent"));
             }
             _ => panic!("expected gemini target"),
         }
-        let groq = resolve_transcription_target(&ResolvedProvider::Whisper { azure: None });
+        let groq =
+            resolve_transcription_target(&ResolvedProvider::Whisper { azure: None }, "whisper-x");
         match groq {
             TranscriptionTarget::Whisper {
                 url,
@@ -1786,5 +1804,26 @@ mod tests {
             }
             _ => panic!("expected whisper target"),
         }
+    }
+
+    #[test]
+    fn test_resolve_gemini_model_allowlist() {
+        // allowlist 內原樣使用
+        assert_eq!(resolve_gemini_model("gemini-3.6-flash"), "gemini-3.6-flash");
+        assert_eq!(
+            resolve_gemini_model("gemini-3.5-flash-lite"),
+            "gemini-3.5-flash-lite"
+        );
+        // 不在 allowlist（Whisper 模型、已下架模型、任意字串）→ 退回預設，
+        // 避免打到不存在的 /models/<x>:generateContent
+        assert_eq!(
+            resolve_gemini_model("whisper-large-v3"),
+            DEFAULT_GEMINI_TRANSCRIPTION_MODEL
+        );
+        assert_eq!(
+            resolve_gemini_model("gemini-3.1-flash-lite"),
+            DEFAULT_GEMINI_TRANSCRIPTION_MODEL
+        );
+        assert_eq!(resolve_gemini_model(""), DEFAULT_GEMINI_TRANSCRIPTION_MODEL);
     }
 }

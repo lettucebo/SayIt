@@ -63,9 +63,11 @@ import {
   type WhisperModelId,
   type TranscriptionProviderId,
   type QuotaPeriod,
+  type GeminiTranscriptionModelId,
   DEFAULT_QUOTA_PERIOD,
   GEMINI_TRANSCRIPTION_MODEL,
   getEffectiveTranscriptionProviderId,
+  getEffectiveGeminiTranscriptionModelId,
 } from "../lib/modelRegistry";
 import {
   normalizeAzureEndpoint,
@@ -209,6 +211,10 @@ export const useSettingsStore = defineStore("settings", () => {
   const azureChatDeployment = ref<string>("");
   const azureWhisperDeployment = ref<string>("");
   const whisperProviderId = ref<TranscriptionProviderId>("groq");
+  /** Gemini 轉錄模型（Flash-Lite 免費額度高、Flash 品質優先） */
+  const geminiTranscriptionModelId = ref<GeminiTranscriptionModelId>(
+    GEMINI_TRANSCRIPTION_MODEL,
+  );
   /** Gemini 轉錄免費額度（0 = 未設定）；Google 不公開 Free tier 數字，只能由使用者填入。 */
   const geminiFreeQuotaRequests = ref<number>(0);
   const geminiFreeQuotaPeriod = ref<QuotaPeriod>(DEFAULT_QUOTA_PERIOD);
@@ -345,7 +351,7 @@ export const useSettingsStore = defineStore("settings", () => {
       return {
         apiKey: geminiApiKey.value,
         provider: "gemini",
-        modelId: GEMINI_TRANSCRIPTION_MODEL,
+        modelId: geminiTranscriptionModelId.value,
       };
     }
 
@@ -555,6 +561,9 @@ export const useSettingsStore = defineStore("settings", () => {
       geminiFreeQuotaPeriod.value =
         (await store.get<QuotaPeriod>("geminiFreeQuotaPeriod")) ??
         DEFAULT_QUOTA_PERIOD;
+      geminiTranscriptionModelId.value = getEffectiveGeminiTranscriptionModelId(
+        await store.get<string>("geminiTranscriptionModelId"),
+      );
 
       // LLM Model ID（含 Kimi K2 遷移）
       const savedLlmModelId = await store.get<string>("llmModelId");
@@ -1066,6 +1075,26 @@ export const useSettingsStore = defineStore("settings", () => {
     } catch (err) {
       console.error(
         "[useSettingsStore] saveGeminiFreeQuota failed:",
+        extractErrorMessage(err),
+      );
+      throw err;
+    }
+  }
+
+  async function saveGeminiTranscriptionModel(id: GeminiTranscriptionModelId) {
+    try {
+      const store = await load(STORE_NAME);
+      await store.set("geminiTranscriptionModelId", id);
+      await store.save();
+      geminiTranscriptionModelId.value = id;
+      const payload: SettingsUpdatedPayload = {
+        key: "geminiTranscriptionModel",
+        value: id,
+      };
+      await emitEvent(SETTINGS_UPDATED, payload);
+    } catch (err) {
+      console.error(
+        "[useSettingsStore] saveGeminiTranscriptionModel failed:",
         extractErrorMessage(err),
       );
       throw err;
@@ -2079,6 +2108,9 @@ export const useSettingsStore = defineStore("settings", () => {
       geminiFreeQuotaPeriod.value =
         (await store.get<QuotaPeriod>("geminiFreeQuotaPeriod")) ??
         DEFAULT_QUOTA_PERIOD;
+      geminiTranscriptionModelId.value = getEffectiveGeminiTranscriptionModelId(
+        await store.get<string>("geminiTranscriptionModelId"),
+      );
     } catch (err) {
       console.error(
         "[useSettingsStore] refreshCrossWindowSettings failed:",
@@ -2281,6 +2313,8 @@ export const useSettingsStore = defineStore("settings", () => {
     azureChatDeployment,
     azureWhisperDeployment,
     whisperProviderId,
+    geminiTranscriptionModelId,
+    saveGeminiTranscriptionModel,
     geminiFreeQuotaRequests,
     geminiFreeQuotaPeriod,
     saveGeminiFreeQuota,

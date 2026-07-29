@@ -94,10 +94,14 @@
       "whisperLabel": "音声文字起こしモデル（Whisper）",
       "llmLabel": "テキスト整理モデル（LLM）",
       "whisperUpdated": "音声文字起こしモデルが更新されました",
-      "geminiTranscriptionHint": "Gemini で音声を文字起こしします（モデル：{model}）。中国語と英語の混在音声では Whisper より高精度な場合が多く、Gemini API キーが必要です。",
+      "geminiTranscriptionHint": "Gemini は中国語と英語の混在音声で Whisper より高精度な場合が多く、Gemini API キーが必要です。",
+      "geminiModelDescription": {
+        "flashLite": "無料枠が最大（約 500 回/日、15 回/分）。公式ドキュメントが文字起こしを推奨用途として明記。日常の音声入力に最適",
+        "flash": "最新フラッグシップでマルチモーダル理解は最強だが、無料枠が非常に少ない（約 20 回/日、5 回/分）。精度重視の少量利用向け"
+      },
       "geminiQuotaLabel": "無料枠（任意）",
       "geminiQuotaPlaceholder": "例：1500",
-      "geminiQuotaHint": "Google は無料枠の数値を公開していません（アカウントごとに変動）。入力するとダッシュボードに残量が表示され、未入力の場合は使用量のみ表示されます",
+      "geminiQuotaHint": "Google はドキュメントで無料枠を公開していませんが、AI Studio の Rate limits ページで自分の RPD（1日あたりのリクエスト上限）を確認できます。入力するとダッシュボードに残量が表示されます",
       "geminiQuotaLink": "AI Studio で自分の上限を確認",
       "geminiQuotaSaved": "無料枠を更新しました",
       "quotaPeriodDaily": "1日あたり",
@@ -112,6 +116,7 @@
     },
     "modelBadge": {
       "accurate": "精度優先",
+      "highQuota": "無料枠が最大",
       "balanced": "バランス · デフォルト",
       "stableCostly": "安定 · 高コスト",
       "fastCheap": "最速 · 最安",
@@ -389,6 +394,7 @@
     "dailyUsage": "本日の使用量",
     "billedPlan": "従量課金",
     "billedNoFreeQuota": "従量課金 — 無料枠なし",
+    "freeTierQuotaUnknown": "無料枠 — 上限は非公開です。設定に入力すると残量が表示されます",
     "usageWhisper": "Whisper：{requests} 回 · {audio}",
     "usageGeminiTranscription": "Gemini 文字起こし：{requests} 回 · {tokens} tokens",
     "quotaGeminiRequests": "Gemini 文字起こし 本日 {used} / {limit} 回",

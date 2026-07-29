@@ -23,6 +23,7 @@ export type SettingsKey =
   | "apiKey"
   | "geminiApiKey"
   | "geminiFreeQuota"
+  | "geminiTranscriptionModel"
   | "aiPrompt"
   | "enhancementThreshold"
   | "llmModel"

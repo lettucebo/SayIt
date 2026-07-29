@@ -8,6 +8,8 @@ import {
   GEMINI_TRANSCRIPTION_MODEL,
   DEFAULT_TRANSCRIPTION_PROVIDER_ID,
   WHISPER_MODEL_LIST,
+  GEMINI_TRANSCRIPTION_MODEL_LIST,
+  getEffectiveGeminiTranscriptionModelId,
 } from "../../src/lib/modelRegistry";
 import zhTW from "../../src/i18n/locales/zh-TW.json";
 import zhCN from "../../src/i18n/locales/zh-CN.json";
@@ -35,6 +37,47 @@ const LOCALE_ENTRIES: [string, unknown][] = [
   ["ja", ja],
   ["ko", ko],
 ];
+
+describe("modelRegistry — Gemini 轉錄模型", () => {
+  it("[P0] 預設模型必須在清單內且被標為 isDefault", () => {
+    const def = GEMINI_TRANSCRIPTION_MODEL_LIST.find((m) => m.isDefault);
+    expect(def).toBeDefined();
+    expect(GEMINI_TRANSCRIPTION_MODEL).toBe(def?.id);
+  });
+
+  it("[P0] 未知/舊值一律退回預設（避免打到不存在的模型端點）", () => {
+    expect(getEffectiveGeminiTranscriptionModelId("whisper-large-v3")).toBe(
+      GEMINI_TRANSCRIPTION_MODEL,
+    );
+    // 官方公告 2027-05-07 停用，刻意不提供
+    expect(getEffectiveGeminiTranscriptionModelId("gemini-3.1-flash-lite")).toBe(
+      GEMINI_TRANSCRIPTION_MODEL,
+    );
+    expect(getEffectiveGeminiTranscriptionModelId(null)).toBe(
+      GEMINI_TRANSCRIPTION_MODEL,
+    );
+  });
+
+  it("[P0] 清單內的模型原樣保留", () => {
+    for (const model of GEMINI_TRANSCRIPTION_MODEL_LIST) {
+      expect(getEffectiveGeminiTranscriptionModelId(model.id)).toBe(model.id);
+    }
+  });
+
+  it("[P0] 每個模型的 badgeKey / descriptionKey 在五語系都要有字串", () => {
+    for (const model of GEMINI_TRANSCRIPTION_MODEL_LIST) {
+      for (const key of [model.badgeKey, model.descriptionKey]) {
+        for (const [localeName, messages] of LOCALE_ENTRIES) {
+          const value = resolveKey(messages, key);
+          expect(
+            typeof value === "string" && value.length > 0,
+            `${localeName} 缺少 ${key}（模型 ${model.id}）`,
+          ).toBe(true);
+        }
+      }
+    }
+  });
+});
 
 describe("modelRegistry — 轉錄模型說明文案", () => {
   it("[P0] 每個 Whisper 模型都有 badgeKey 與 descriptionKey", () => {

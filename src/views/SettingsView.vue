@@ -58,7 +58,9 @@ import {
   type WhisperModelId,
   type TranscriptionProviderId,
   type QuotaPeriod,
-  GEMINI_TRANSCRIPTION_MODEL,
+  type GeminiTranscriptionModelId,
+  GEMINI_TRANSCRIPTION_MODEL_LIST,
+  findGeminiTranscriptionModelConfig,
 } from "../lib/modelRegistry";
 import { LLM_PROVIDER_LIST, findProviderConfig } from "../lib/llmProvider";
 import {
@@ -891,6 +893,25 @@ function azureConnectionIssue(deployment: string): string {
 async function handleWhisperProviderChange(id: TranscriptionProviderId) {
   try {
     await settingsStore.saveWhisperProvider(id);
+    modelFeedback.show("success", t("settings.model.whisperUpdated"));
+  } catch (err) {
+    modelFeedback.show("error", extractErrorMessage(err));
+  }
+}
+
+const geminiTranscriptionModelDescription = computed(() => {
+  const config = findGeminiTranscriptionModelConfig(
+    settingsStore.geminiTranscriptionModelId,
+  );
+  if (!config) return "";
+  return t(config.descriptionKey);
+});
+
+async function handleGeminiTranscriptionModelChange(
+  id: GeminiTranscriptionModelId,
+) {
+  try {
+    await settingsStore.saveGeminiTranscriptionModel(id);
     modelFeedback.show("success", t("settings.model.whisperUpdated"));
   } catch (err) {
     modelFeedback.show("error", extractErrorMessage(err));
@@ -2202,8 +2223,30 @@ onBeforeUnmount(() => {
 
           <!-- Gemini 轉錄（模型固定，需 Gemini API Key；與 LLM 共用同一把 key） -->
           <template v-else-if="settingsStore.whisperProviderId === 'gemini'">
+            <Select
+              :model-value="settingsStore.geminiTranscriptionModelId"
+              @update:model-value="handleGeminiTranscriptionModelChange($event as GeminiTranscriptionModelId)"
+            >
+              <SelectTrigger id="whisper-model" class="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem
+                  v-for="model in GEMINI_TRANSCRIPTION_MODEL_LIST"
+                  :key="model.id"
+                  :value="model.id"
+                >
+                  {{ model.displayName }}
+                  <template #extra>
+                    <Badge variant="secondary" class="ml-2 text-xs">{{ $t(model.badgeKey) }}</Badge>
+                    <Badge v-if="model.isDefault" variant="outline" class="ml-1 text-xs">{{ $t("settings.model.default") }}</Badge>
+                  </template>
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <p class="text-xs text-muted-foreground">{{ geminiTranscriptionModelDescription }}</p>
             <p class="text-xs text-muted-foreground">
-              {{ $t("settings.model.geminiTranscriptionHint", { model: GEMINI_TRANSCRIPTION_MODEL }) }}
+              {{ $t("settings.model.geminiTranscriptionHint") }}
             </p>
             <Label for="gemini-whisper-api-key">{{ $t("settings.providerApiKey.geminiTitle") }}</Label>
             <div v-if="settingsStore.geminiApiKey" class="flex items-center gap-2">

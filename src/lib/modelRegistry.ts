@@ -38,11 +38,66 @@ export const DEFAULT_QUOTA_PERIOD: QuotaPeriod = "daily";
 export const DEFAULT_TRANSCRIPTION_PROVIDER_ID: TranscriptionProviderId = "groq";
 
 /**
- * Gemini 轉錄固定模型（Rust `GEMINI_TRANSCRIPTION_MODEL` 需一致）。
+ * Gemini 轉錄可選模型（Rust 端有相同 allowlist，兩端必須一致）。
+ * 刻意不提供 gemini-3.1-flash-lite：官方公告 2027-05-07 停用、接替者即 3.5-flash-lite。
+ */
+export type GeminiTranscriptionModelId =
+  | "gemini-3.5-flash-lite"
+  | "gemini-3.6-flash";
+
+export interface GeminiTranscriptionModelConfig {
+  id: GeminiTranscriptionModelId;
+  displayName: string;
+  badgeKey: string;
+  descriptionKey: string;
+  /** 免費層每日請求上限（依帳號可能不同，此為 AI Studio 常見值，僅供顯示參考） */
+  typicalFreeRpd: number;
+  isDefault: boolean;
+}
+
+export const GEMINI_TRANSCRIPTION_MODEL_LIST: GeminiTranscriptionModelConfig[] =
+  [
+    {
+      // 免費層 RPD 是 Flash 的 25 倍，且官方 Flash-Lite 文件明列 Transcription 用例
+      id: "gemini-3.5-flash-lite",
+      displayName: "Gemini 3.5 Flash-Lite",
+      badgeKey: "settings.modelBadge.highQuota",
+      descriptionKey: "settings.model.geminiModelDescription.flashLite",
+      typicalFreeRpd: 500,
+      isDefault: true,
+    },
+    {
+      id: "gemini-3.6-flash",
+      displayName: "Gemini 3.6 Flash",
+      badgeKey: "settings.modelBadge.accurate",
+      descriptionKey: "settings.model.geminiModelDescription.flash",
+      typicalFreeRpd: 20,
+      isDefault: false,
+    },
+  ];
+
+/**
+ * Gemini 轉錄預設模型（Rust `DEFAULT_GEMINI_TRANSCRIPTION_MODEL` 需一致）。
  * 刻意與 LLM chat 模型解耦：轉錄若沿用 WhisperModelId 會打到不存在的
  * `/models/whisper-large-v3:generateContent`。
  */
-export const GEMINI_TRANSCRIPTION_MODEL = "gemini-3.6-flash";
+export const GEMINI_TRANSCRIPTION_MODEL: GeminiTranscriptionModelId =
+  "gemini-3.5-flash-lite";
+
+export function findGeminiTranscriptionModelConfig(
+  id: string,
+): GeminiTranscriptionModelConfig | undefined {
+  return GEMINI_TRANSCRIPTION_MODEL_LIST.find((m) => m.id === id);
+}
+
+/** 未知值（舊設定／壞掉的匯入）一律退回預設，避免送出不存在的模型。 */
+export function getEffectiveGeminiTranscriptionModelId(
+  savedId: string | null | undefined,
+): GeminiTranscriptionModelId {
+  return savedId && findGeminiTranscriptionModelConfig(savedId)
+    ? (savedId as GeminiTranscriptionModelId)
+    : GEMINI_TRANSCRIPTION_MODEL;
+}
 
 interface BaseModelConfig {
   displayName: string;
