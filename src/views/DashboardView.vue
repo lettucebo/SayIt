@@ -64,6 +64,14 @@ const hasGeminiTranscriptionQuota = computed(
     settingsStore.geminiFreeQuotaRequests > 0,
 );
 
+/**
+ * 正在使用「免費方案但額度未知」的 provider（Gemini 未填額度、或免費額度不公開的
+ * Gemini LLM）。這與「付費方案」是兩回事：不能因為算不出剩餘百分比就宣告使用者在付費。
+ */
+const hasFreeProviderWithUnknownQuota = computed(
+  () => isQuotaHiddenWhisperProvider.value || isQuotaHiddenLlmProvider.value,
+);
+
 /** 依設定的額度週期取對應統計視窗（每月免費額度不能用單日用量計算） */
 const geminiQuotaUsage = computed(() =>
   settingsStore.geminiFreeQuotaPeriod === "monthly"
@@ -342,12 +350,19 @@ onBeforeUnmount(() => {
                   </p>
                 </div>
 
-                <!-- 全付費提示（混用不顯示，避免與免費額度 % 矛盾）-->
+                <!-- 付費提示：僅在真的有付費 provider 時顯示 -->
                 <p
-                  v-if="!hasFreeQuota && paidUsageList.length > 0"
+                  v-if="!hasFreeQuota && hasAnyPaidProvider"
                   class="text-xs text-muted-foreground mt-1.5"
                 >
                   {{ $t("dashboard.billedNoFreeQuota") }}
+                </p>
+                <!-- 免費但額度未知：不可誤標成付費方案 -->
+                <p
+                  v-if="!hasFreeQuota && hasFreeProviderWithUnknownQuota"
+                  class="text-xs text-muted-foreground mt-1.5"
+                >
+                  {{ $t("dashboard.freeTierQuotaUnknown") }}
                 </p>
               </CardContent>
             </Card>
@@ -390,6 +405,7 @@ onBeforeUnmount(() => {
                 {{ item.label }}
               </div>
               <p v-if="hasAnyPaidProvider" class="text-xs text-muted-foreground">{{ $t("dashboard.billedNoFreeQuota") }}</p>
+              <p v-if="hasFreeProviderWithUnknownQuota" class="text-xs text-muted-foreground">{{ $t("dashboard.freeTierQuotaUnknown") }}</p>
             </div>
             <div
               v-if="historyStore.dashboardStats.dailyQuotaUsage.vocabularyAnalysisRequestCount > 0"
