@@ -285,7 +285,7 @@ _This file contains critical rules and patterns that AI agents must follow when 
 #### SettingsKey 跨視窗同步
 
 - **`SettingsKey` 型別** — 定義 `settings:updated` event 的 `key` 欄位（`events.ts`）：`hotkey` | `apiKey` | `aiPrompt` | `enhancementThreshold` | `llmModel` | `llmProvider` | `whisperModel` | `muteOnRecording` | `smartDictionaryEnabled` | `locale` | `transcriptionLocale` | `soundEffectsEnabled` | `promptMode` | `audioInputDevice`
-- **智慧字典開關** — `isSmartDictionaryEnabled`（macOS 預設啟用，Windows 預設關閉——因 Windows 尚未支援 `read_focused_text_field` AX API）
+- **智慧字典開關** — `isSmartDictionaryEnabled`（全平台預設啟用；macOS 走 AXUIElement、Windows 走 UI Automation 讀取 `read_focused_text_field`）
 - **字典分析模型共用** — 字典分析與文字整理共用同一 provider + model + API key（`selectedLlmProviderId` + `selectedLlmModelId`），不再有獨立的字典分析模型選擇
 
 #### i18n 多語言（vue-i18n）

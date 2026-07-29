@@ -93,7 +93,11 @@ export const DEFAULT_ENHANCEMENT_THRESHOLD_ENABLED = false;
 export const DEFAULT_ENHANCEMENT_THRESHOLD_CHAR_COUNT = 10;
 export const DEFAULT_CONTEXT_INJECTION_ENABLED = false;
 export const DEFAULT_MUTE_ON_RECORDING = true;
-const DEFAULT_SMART_DICTIONARY_ENABLED = navigator.userAgent.includes("Mac"); // macOS only — Windows 尚未支援 text field 讀取
+// 全平台啟用：macOS 走 AXUIElement、Windows 走 UI Automation，兩邊都能讀游標所在
+// 輸入框（`text_field_reader.rs`）。
+// 密碼欄位守衛目前**不對稱**：Windows 用 `CurrentIsPassword` fail-closed 排除；
+// macOS 僅以 AXRole 過濾，倚賴系統不對 secure field 暴露 AXValue（追蹤中，見 issue 67）。
+const DEFAULT_SMART_DICTIONARY_ENABLED = true;
 const DEFAULT_SOUND_EFFECTS_ENABLED = true;
 const DEFAULT_HIDE_DOCK_ICON = false;
 const IS_MACOS = navigator.userAgent.includes("Mac");
