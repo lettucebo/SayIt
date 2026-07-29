@@ -97,9 +97,14 @@
       "geminiTranscriptionHint": "使用 Gemini 進行語音轉錄（模型：{model}）。對中英夾雜的辨識通常優於 Whisper，需要 Gemini API Key。",
       "llmUpdated": "文字整理模型已更新",
       "default": "預設",
-      "costPerHour": "每小時 ${cost}"
+      "costPerHour": "每小時 ${cost}",
+      "whisperDescription": {
+        "largeV3": "準確度較高（WER 10.3%），中英夾雜建議選這個；另支援翻譯成英文",
+        "largeV3Turbo": "速度最快、成本最低，但錯誤率較高（WER 12%），中英夾雜時較易把英文整段翻掉"
+      }
     },
     "modelBadge": {
+      "accurate": "準確度優先",
       "balanced": "平衡 · 預設",
       "stableCostly": "穩定可靠 · 成本高",
       "fastCheap": "最快 · 最便宜",

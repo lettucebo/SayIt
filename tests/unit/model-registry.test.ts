@@ -7,7 +7,57 @@ import {
   getEffectiveTranscriptionProviderId,
   GEMINI_TRANSCRIPTION_MODEL,
   DEFAULT_TRANSCRIPTION_PROVIDER_ID,
+  WHISPER_MODEL_LIST,
 } from "../../src/lib/modelRegistry";
+import zhTW from "../../src/i18n/locales/zh-TW.json";
+import zhCN from "../../src/i18n/locales/zh-CN.json";
+import en from "../../src/i18n/locales/en.json";
+import ja from "../../src/i18n/locales/ja.json";
+import ko from "../../src/i18n/locales/ko.json";
+
+/** 依 "a.b.c" 路徑取值，缺任一層回 undefined */
+function resolveKey(obj: unknown, path: string): unknown {
+  return path
+    .split(".")
+    .reduce<unknown>(
+      (acc, part) =>
+        acc && typeof acc === "object"
+          ? (acc as Record<string, unknown>)[part]
+          : undefined,
+      obj,
+    );
+}
+
+const LOCALE_ENTRIES: [string, unknown][] = [
+  ["zh-TW", zhTW],
+  ["zh-CN", zhCN],
+  ["en", en],
+  ["ja", ja],
+  ["ko", ko],
+];
+
+describe("modelRegistry — 轉錄模型說明文案", () => {
+  it("[P0] 每個 Whisper 模型都有 badgeKey 與 descriptionKey", () => {
+    for (const model of WHISPER_MODEL_LIST) {
+      expect(model.badgeKey, `${model.id} 缺 badgeKey`).toBeTruthy();
+      expect(model.descriptionKey, `${model.id} 缺 descriptionKey`).toBeTruthy();
+    }
+  });
+
+  it("[P0] badgeKey / descriptionKey 在五個語系都要有對應字串", () => {
+    for (const model of WHISPER_MODEL_LIST) {
+      for (const key of [model.badgeKey, model.descriptionKey]) {
+        for (const [localeName, messages] of LOCALE_ENTRIES) {
+          const value = resolveKey(messages, key);
+          expect(
+            typeof value === "string" && value.length > 0,
+            `${localeName} 缺少 ${key}（模型 ${model.id}）`,
+          ).toBe(true);
+        }
+      }
+    }
+  });
+});
 
 describe("modelRegistry — 轉錄 provider", () => {
   it("[P0] 已知 provider 原樣回傳", () => {

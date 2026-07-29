@@ -54,6 +54,10 @@ export interface LlmModelConfig extends BaseModelConfig {
 export interface WhisperModelConfig {
   id: WhisperModelId;
   displayName: string;
+  /** 下拉選項旁的特性標籤 i18n key */
+  badgeKey: string;
+  /** 選中後顯示的特性說明 i18n key（哪個較強／取捨） */
+  descriptionKey: string;
   costPerHour: number;
   freeQuotaRpd: number;
   freeQuotaAudioSecondsPerDay: number;
@@ -212,10 +216,14 @@ export const LLM_MODEL_LIST: LlmModelConfig[] = [
   },
 ];
 
+// 數據出自 Groq 官方 speech-to-text 文件（WER / 速度倍率 / 每小時單價）。
+// 兩者皆為多語言、免費額度相同，差別在準確度與成本速度的取捨。
 export const WHISPER_MODEL_LIST: WhisperModelConfig[] = [
   {
     id: "whisper-large-v3",
     displayName: "Whisper Large V3",
+    badgeKey: "settings.modelBadge.accurate",
+    descriptionKey: "settings.model.whisperDescription.largeV3",
     costPerHour: 0.111,
     freeQuotaRpd: 2_000,
     freeQuotaAudioSecondsPerDay: 28_800,
@@ -224,6 +232,8 @@ export const WHISPER_MODEL_LIST: WhisperModelConfig[] = [
   {
     id: "whisper-large-v3-turbo",
     displayName: "Whisper Large V3 Turbo",
+    badgeKey: "settings.modelBadge.fastCheap",
+    descriptionKey: "settings.model.whisperDescription.largeV3Turbo",
     costPerHour: 0.04,
     freeQuotaRpd: 2_000,
     freeQuotaAudioSecondsPerDay: 28_800,

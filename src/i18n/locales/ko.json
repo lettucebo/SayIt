@@ -97,9 +97,14 @@
       "geminiTranscriptionHint": "Gemini로 음성을 전사합니다(모델: {model}). 중국어-영어 혼용 음성에서 Whisper보다 정확한 경우가 많으며 Gemini API 키가 필요합니다.",
       "llmUpdated": "텍스트 정리 모델이 업데이트되었습니다",
       "default": "기본",
-      "costPerHour": "시간당 ${cost}"
+      "costPerHour": "시간당 ${cost}",
+      "whisperDescription": {
+        "largeV3": "정확도가 높고(WER 10.3%) 중국어-영어 혼용에 권장됩니다. 영어 번역도 지원",
+        "largeV3Turbo": "가장 빠르고 저렴하지만 오류율이 높으며(WER 12%) 혼용 시 영어가 번역될 수 있습니다"
+      }
     },
     "modelBadge": {
+      "accurate": "정확도 우선",
       "balanced": "균형 · 기본",
       "stableCostly": "안정 · 고비용",
       "fastCheap": "가장 빠름 · 가장 저렴",

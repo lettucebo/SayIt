@@ -97,9 +97,14 @@
       "geminiTranscriptionHint": "Transcribe speech with Gemini (model: {model}). Usually handles Chinese-English code-switching better than Whisper. Requires a Gemini API key.",
       "llmUpdated": "Text enhancement model updated",
       "default": "Default",
-      "costPerHour": "${cost}/hour"
+      "costPerHour": "${cost}/hour",
+      "whisperDescription": {
+        "largeV3": "Higher accuracy (10.3% WER); recommended for Chinese-English mixing. Also supports translation to English",
+        "largeV3Turbo": "Fastest and cheapest, but higher error rate (12% WER) and more likely to translate away embedded English"
+      }
     },
     "modelBadge": {
+      "accurate": "Accuracy first",
       "balanced": "Balanced · Default",
       "stableCostly": "Stable · Costly",
       "fastCheap": "Fastest · Cheapest",

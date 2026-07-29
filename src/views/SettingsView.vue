@@ -709,7 +709,8 @@ const modelFeedback = useFeedbackMessage();
 const whisperModelDescription = computed(() => {
   const config = findWhisperModelConfig(settingsStore.selectedWhisperModelId);
   if (!config) return "";
-  return t("settings.model.costPerHour", { cost: config.costPerHour });
+  const cost = t("settings.model.costPerHour", { cost: config.costPerHour });
+  return `${t(config.descriptionKey)} · ${cost}`;
 });
 
 const llmModelDescription = computed(() => {
@@ -2163,8 +2164,9 @@ onBeforeUnmount(() => {
                   :value="model.id"
                 >
                   {{ model.displayName }}
-                  <template v-if="model.isDefault" #extra>
-                    <Badge variant="secondary" class="ml-2 text-xs">{{ $t("settings.model.default") }}</Badge>
+                  <template #extra>
+                    <Badge variant="secondary" class="ml-2 text-xs">{{ $t(model.badgeKey) }}</Badge>
+                    <Badge v-if="model.isDefault" variant="outline" class="ml-1 text-xs">{{ $t("settings.model.default") }}</Badge>
                   </template>
                 </SelectItem>
               </SelectContent>
