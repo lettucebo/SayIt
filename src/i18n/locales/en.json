@@ -588,9 +588,8 @@
     },
     "upgradeNotice": {
       "title": "SayIt Update Summary",
-      "item1": "Gemini speech transcription added — when you mix English terms into Chinese speech, Whisper tends to translate the English away instead of transcribing it as spoken. Transcription can now be switched to Gemini in Settings, with a model picker: the default Flash-Lite allows around 500 requests a day, 25x what Flash allows.",
-      "item2": "Word replacements added — names, product names and technical terms that are consistently misheard no longer need fixing by hand every time. Map several wrong spellings to one correct term (regex supported) and choose whether they apply before AI cleanup, after it, or both.",
-      "item3": "Gemini usage and remaining free quota on the dashboard — Gemini bills by token and its free quota runs out quickly. You can now see how much you have used today and how much is left, and replace the quota figure with the one from your own account.",
+      "item1": "Smart Dictionary Learning is now on by default on Windows — it used to be off there because SayIt could not yet read the text field under your cursor, which Windows now does through UI Automation. If you never flipped the switch yourself, it will be on after this update: SayIt reads the text around your cursor once a paste completes and sends it to the AI to learn the terms you use (the text itself is never stored). You can turn it off under Settings → Smart Dictionary Learning.",
+      "item2": "The dashboard no longer shows the Recent Transcriptions card — it duplicated the History page, which already lists every record with search, playback and re-transcribe. Nothing was deleted: all records are still in History, and the dashboard now runs one query less on every load.",
       "dismiss": "Got it"
     }
   },
