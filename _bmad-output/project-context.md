@@ -155,7 +155,7 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - **平台隔離** — `#[cfg(target_os = "macos")]` / `#[cfg(target_os = "windows")]` 隔離，不可在同一函式中混合
 - **unsafe 標記** — macOS `objc::msg_send!` 呼叫必須在 `unsafe {}` 區塊內
 - **原子操作** — 跨執行緒共享狀態使用 `AtomicBool` + `Ordering::SeqCst`
-- **Plugin 模式** — 每個功能模組是獨立的 `TauriPlugin<R>`，在 `plugins/mod.rs` 中 `pub mod` 匯出（目前：`clipboard_paste`, `hotkey_listener`, `keyboard_monitor`, `audio_control`, `audio_recorder`, `transcription`, `sound_feedback`, `text_field_reader`）。`hotkey_listener` 額外提供 `reset_hotkey_state` command（ESC 中斷後重置 toggle 狀態）。`sound_feedback` 提供 `play_start_sound`/`play_stop_sound`/`play_error_sound`/`play_learned_sound` commands，前端透過 `playSoundIfEnabled()` 依 `isSoundEffectsEnabled` 設定條件呼叫
+- **Plugin 模式** — 每個功能模組是獨立的 `TauriPlugin<R>`，在 `plugins/mod.rs` 中 `pub mod` 匯出（目前 11 個：`clipboard_paste`, `hotkey_listener`, `keyboard_monitor`, `audio_control`, `audio_recorder`, `transcription`, `sound_feedback`, `text_field_reader`, `azure_auth`, `file_transfer`, `logging`）。`hotkey_listener` 額外提供 `reset_hotkey_state` command（ESC 中斷後重置 toggle 狀態）。`sound_feedback` 提供 `play_start_sound`/`play_stop_sound`/`play_error_sound`/`play_learned_sound` commands，前端透過 `playSoundIfEnabled()` 依 `isSoundEffectsEnabled` 設定條件呼叫
 - **audio_recorder 錄音檔管理 Commands（Story 4.4）** — `save_recording_file`（寫入 WAV 至 `{APP_DATA}/recordings/`）、`read_recording_file`（接受 `id` 參數，Rust 端組合路徑讀取 WAV 位元組，回傳 `Response`）、`delete_all_recordings`（清除所有錄音檔）、`cleanup_old_recordings`（按天數清理過期檔案，回傳被刪除的 transcription ID list）
 - **transcription 重送 Command（Story 4.5）** — `retranscribe_from_file`（從磁碟讀取 WAV 重新轉錄），內部共用 `send_transcription_request()` 函式（與 `transcribe_audio` 共用 Groq API 邏輯，避免重複實作）
 - **text_field_reader: `read_selected_text` command** — 透過模擬 Cmd+C（macOS）/ Ctrl+C（Windows）擷取剪貼簿內容偵測選取文字，不依賴 Accessibility API。流程：儲存剪貼簿 → 清空 → 模擬複製 → 等 100ms → 讀取 → 還原。實作位於 `clipboard_paste::capture_selected_text_via_clipboard()`。`read_focused_text_field` 仍使用 AX API（`FocusedElementContext` + role check）
@@ -262,25 +262,11 @@ _This file contains critical rules and patterns that AI agents must follow when 
 
 #### Tauri Events 完整清單
 
-| Event Name | 常量名 | Direction | Payload |
-|------------|--------|-----------|---------|
-| `voice-flow:state-changed` | `VOICE_FLOW_STATE_CHANGED` | HUD ← VoiceFlow | `VoiceFlowStateChangedPayload` |
-| `transcription:completed` | `TRANSCRIPTION_COMPLETED` | → Main Window | `TranscriptionCompletedPayload` |
-| `settings:updated` | `SETTINGS_UPDATED` | → All Windows | `SettingsUpdatedPayload` |
-| `vocabulary:changed` | `VOCABULARY_CHANGED` | → All Windows | `VocabularyChangedPayload` |
-| `hotkey:pressed` | `HOTKEY_PRESSED` | Rust → HUD | — |
-| `hotkey:released` | `HOTKEY_RELEASED` | Rust → HUD | — |
-| `hotkey:toggled` | `HOTKEY_TOGGLED` | Rust → HUD | `HotkeyEventPayload` |
-| `hotkey:error` | `HOTKEY_ERROR` | Rust → HUD | `HotkeyErrorPayload` |
-| `quality-monitor:result` | `QUALITY_MONITOR_RESULT` | Rust → HUD | `QualityMonitorResultPayload` |
-| `correction-monitor:result` | `CORRECTION_MONITOR_RESULT` | Rust → HUD | `CorrectionMonitorResultPayload` |
-| `audio:waveform` | `AUDIO_WAVEFORM` | Rust → HUD | `WaveformPayload { levels: [f32; 6] }` |
-| `vocabulary:learned` | `VOCABULARY_LEARNED` | VoiceFlowStore → HUD | `VocabularyLearnedPayload` |
-| `escape:pressed` | `ESCAPE_PRESSED` | Rust → HUD | — |
-| `hotkey:mode-toggle` | `HOTKEY_MODE_TOGGLE` | Rust → HUD | `()` |
-| `hotkey:recording-captured` | `HOTKEY_RECORDING_CAPTURED` | Rust → Dashboard | `RecordingCapturedPayload` |
-| `hotkey:recording-rejected` | `HOTKEY_RECORDING_REJECTED` | Rust → Dashboard | `RecordingRejectedPayload` |
-| `audio:preview-level` | `AUDIO_PREVIEW_LEVEL` | Rust → Dashboard | `AudioPreviewLevelPayload` |
+> **唯一權威來源：`.github/copilot-instructions.md` 的「Rust → Frontend Events」與「Frontend-only Events」兩張表**，以及 `docs/api-contracts-backend.md` 第三、四章。
+>
+> 此處原本重複列了一份清單，但它會隨程式演進而與權威表分歧（曾把 `hotkey:pressed` / `hotkey:released` 標成無 payload，實際兩者都送 `HotkeyEventPayload`；也缺了 `theme:os-changed`、`replacements:changed`、`database:ready`、`database:ready-ping`）。為避免第三份會腐化的副本，改為指向權威表。
+>
+> 事件名稱常數在前端**只能**從 `src/composables/useTauriEvents.ts` import。
 
 #### SettingsKey 跨視窗同步
 
@@ -412,7 +398,7 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - **時間戳** — `created_at TEXT DEFAULT (datetime('now'))`
 - **操作限制** — SQLite 操作只從 Pinia store actions 發起，元件不可直接執行 SQL
 - **SQL 參數** — 使用 `$1`, `$2` 位置參數語法（tauri-plugin-sql 規範）
-- **Schema Migration** — `schema_version` 表追蹤版本號，migration 在 `database.ts` 中依序執行（`if (currentVersion < N)` → 建表/改表 → 更新版本號），當前版本：v7
+- **Schema Migration** — `schema_version` 表追蹤版本號，migration 在 `database.ts` 中依序執行（`if (currentVersion < N)` → 建表/改表 → 更新版本號），當前版本：**v9**。新增 schema 變更請追加**下一個未使用的版本號**，重複使用既有版本號會讓已升級的使用者靜默跳過。
   - v3：vocabulary.weight/source 欄位 + api_usage CHECK constraint 擴展
   - v4（Story 4.4）：`ALTER TABLE transcriptions ADD COLUMN audio_file_path TEXT`、`ADD COLUMN status TEXT NOT NULL DEFAULT 'success'`、`CREATE INDEX idx_transcriptions_status`
   - v5（Story 2.4）：`CREATE TABLE hallucination_terms`（已於 v7 移除）
@@ -579,7 +565,7 @@ src/
 │   ├── useVocabularyStore.ts    # 詞彙字典 CRUD + 權重系統 + AI 推薦詞管理
 │   └── useVoiceFlowStore.ts     # 錄音/轉錄/AI 整理/貼上/修正偵測/字典學習完整流程
 ├── views/                # Main Window 頁面
-│   ├── DashboardView.vue      # 統計卡片 + 最近轉錄列表
+│   ├── DashboardView.vue      # 統計卡片 + 額度卡片 + 每日使用趨勢圖
 │   ├── FeatureGuideView.vue   # 功能介紹頁（8 張功能卡片）
 │   ├── HistoryView.vue        # 歷史記錄搜尋與管理
 │   ├── DictionaryView.vue   # 詞彙字典 CRUD
@@ -671,7 +657,7 @@ src/
 
 **建構/簽署（CI/CD only）：**
 - **`TAURI_SIGNING_PRIVATE_KEY`** / **`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`** — Updater 簽署
-- **`APPLE_CERTIFICATE` 等 6 個** — Apple Code Signing（見 AGENTS.md）
+- **`APPLE_CERTIFICATE` 等 6 個** — Apple Code Signing（見 `.github/copilot-instructions.md`）
 
 **Sentry（CI/CD 注入，生產環境用）：**
 

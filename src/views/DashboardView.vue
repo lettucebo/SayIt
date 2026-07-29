@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted } from "vue";
 import { useI18n } from "vue-i18n";
-import { useRouter } from "vue-router";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { useHistoryStore } from "../stores/useHistoryStore";
 import { useSettingsStore } from "../stores/useSettingsStore";
@@ -9,13 +8,7 @@ import {
   listenToEvent,
   TRANSCRIPTION_COMPLETED,
 } from "../composables/useTauriEvents";
-import {
-  formatTimestamp,
-  truncateText,
-  getDisplayText,
-  formatDurationFromMs,
-  formatNumber,
-} from "../lib/formatUtils";
+import { formatDurationFromMs, formatNumber } from "../lib/formatUtils";
 import {
   findLlmModelConfig,
   findWhisperModelConfig,
@@ -30,7 +23,6 @@ import {
   CardContent,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
   Tooltip,
   TooltipContent,
@@ -42,7 +34,6 @@ import { captureError } from "../lib/sentry";
 const { t } = useI18n();
 const historyStore = useHistoryStore();
 const settingsStore = useSettingsStore();
-const router = useRouter();
 
 // 付費偵測一律依 provider id：Azure Whisper 的 selectedWhisperModelId 仍是 Groq
 // model id，無法用 model config 判斷；LLM 同理（Azure 無 registry entry）。
@@ -223,10 +214,6 @@ const quotaBarColorClass = computed(() => {
 });
 
 let unlistenTranscriptionCompleted: UnlistenFn | null = null;
-
-function navigateToHistory() {
-  void router.push("/history");
-}
 
 onMounted(async () => {
   try {
@@ -439,55 +426,6 @@ onBeforeUnmount(() => {
       </CardHeader>
       <CardContent>
         <DashboardUsageChart :data="historyStore.dailyUsageTrendList" />
-      </CardContent>
-    </Card>
-
-    <!-- 最近轉錄 -->
-    <Card class="mt-6">
-      <CardHeader class="flex-row items-center justify-between">
-        <CardTitle class="text-base">{{ $t("dashboard.recentTranscriptions") }}</CardTitle>
-        <Button
-          v-if="historyStore.recentTranscriptionList.length > 0"
-          variant="link"
-          @click="navigateToHistory"
-        >
-          {{ $t("dashboard.viewAll") }}
-        </Button>
-      </CardHeader>
-      <CardContent>
-        <!-- 空狀態 -->
-        <div
-          v-if="historyStore.recentTranscriptionList.length === 0"
-          class="rounded-lg border border-dashed border-border px-4 py-8 text-center text-muted-foreground"
-        >
-          {{ $t("dashboard.emptyState") }}
-        </div>
-
-        <!-- 最近列表 -->
-        <div v-else class="space-y-2">
-          <Button
-            v-for="record in historyStore.recentTranscriptionList"
-            :key="record.id"
-            variant="ghost"
-            class="w-full h-auto rounded-lg border border-border px-4 py-3 text-left flex flex-col items-start"
-            @click="navigateToHistory"
-          >
-            <div class="flex w-full items-center justify-between gap-2">
-              <span class="text-xs text-muted-foreground">
-                {{ formatTimestamp(record.timestamp) }}
-              </span>
-              <Badge
-                v-if="record.wasEnhanced"
-                class="bg-emerald-500/20 text-emerald-400 border-0"
-              >
-                {{ $t("dashboard.aiEnhanced") }}
-              </Badge>
-            </div>
-            <p class="mt-1 text-sm text-muted-foreground truncate w-full">
-              {{ truncateText(getDisplayText(record)) }}
-            </p>
-          </Button>
-        </div>
       </CardContent>
     </Card>
   </div>
