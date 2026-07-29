@@ -106,7 +106,7 @@ CI（`.github/workflows/ci.yml`）：`vue-tsc --noEmit` → `eslint src` → `pn
 
 | Command | Rust 位置 | 前端呼叫點 | 參數 | 回傳 |
 |---------|-----------|-----------|------|------|
-| `request_app_restart` | `lib.rs` | main-window.ts | — | `()` |
+| `request_app_restart` | `lib.rs` | autoUpdater.ts（更新安裝後） | — | `()` |
 | `update_hotkey_config` | `lib.rs` | useSettingsStore | `trigger_key: TriggerKey, trigger_mode: TriggerMode` | `Result<(), String>` |
 | `get_hud_target_position` | `lib.rs` | useVoiceFlowStore | `app: AppHandle` | `Result<HudTargetPosition, String>`（含 `space: "physical"\|"logical"`，Windows 回 physical 以避開 tao 跨 DPI 錯位） |
 | `ensure_hud_visible` | `lib.rs` | useVoiceFlowStore（showHud 後） | `app: AppHandle` | `()`（Windows：記錄可見性快照 + 安全恢復：最小化還原、重宣告 topmost；非 Windows：no-op） |
@@ -116,7 +116,7 @@ CI（`.github/workflows/ci.yml`）：`vue-tsc --noEmit` → `eslint src` → `pn
 | `cleanup_old_logs` | `plugins/logging.rs` | main-window.ts | `days: u32, app: AppHandle` | `Result<Vec<String>, String>` |
 | `mute_system_audio` | `plugins/audio_control.rs` | useVoiceFlowStore | `state: State<AudioControlState>` | `Result<(), String>` |
 | `restore_system_audio` | `plugins/audio_control.rs` | useVoiceFlowStore | `state: State<AudioControlState>` | `Result<(), String>` |
-| `paste_text` | `plugins/clipboard_paste.rs` | useVoiceFlowStore | `text: String` | `Result<(), ClipboardError>` |
+| `paste_text` | `plugins/clipboard_paste.rs` | useVoiceFlowStore | `text: String, restore_clipboard: bool`（`restore_clipboard` = 未開啟「轉錄結果複製到剪貼簿」時才還原原本剪貼簿內容） | `Result<(), ClipboardError>` |
 | `copy_to_clipboard` | `plugins/clipboard_paste.rs` | HistoryView | `text: String` | `Result<(), ClipboardError>` |
 | `capture_target_window` | `plugins/clipboard_paste.rs` | useVoiceFlowStore | — | `()` |
 | `check_accessibility_permission_command` | `plugins/hotkey_listener.rs` | AccessibilityGuide.vue | — | `bool` |
@@ -134,13 +134,13 @@ CI（`.github/workflows/ci.yml`）：`vue-tsc --noEmit` → `eslint src` → `pn
 | `read_selection_state` | `plugins/text_field_reader.rs` | useVoiceFlowStore（編輯模式偵測） | — | `SelectionState { kind: "selection" \| "noSelection" \| "unavailable", text: Option<String> }`（macOS 走 AX worker + `spawn_blocking`，避免阻塞主執行緒拖慢隨後的 `start_recording`；single-flight，重入回 `unavailable`；非 macOS 一律 `unavailable`） |
 | `get_default_input_device_name` | `plugins/audio_recorder.rs` | SettingsView | — | `Option<String>` |
 | `list_audio_input_devices` | `plugins/audio_recorder.rs` | SettingsView | — | `Vec<AudioInputDeviceInfo>` |
-| `start_audio_preview` | `plugins/audio_recorder.rs` | SettingsView | `app, preview_state: State<AudioPreviewState>, device_name: String` | `Result<(), String>` |
-| `stop_audio_preview` | `plugins/audio_recorder.rs` | SettingsView | `preview_state: State<AudioPreviewState>` | `()` |
+| `start_audio_preview` | `plugins/audio_recorder.rs` | useAudioPreview.ts（SettingsView） | `app, preview_state: State<AudioPreviewState>, device_name: String` | `Result<(), String>` |
+| `stop_audio_preview` | `plugins/audio_recorder.rs` | useAudioPreview.ts（SettingsView） | `preview_state: State<AudioPreviewState>` | `()` |
 | `start_recording` | `plugins/audio_recorder.rs` | useVoiceFlowStore | `app, state: State<AudioRecorderState>, device_name: String` | `Result<(), AudioRecorderError>` |
 | `stop_recording` | `plugins/audio_recorder.rs` | useVoiceFlowStore | `state: State<AudioRecorderState>` | `Result<StopRecordingResult, AudioRecorderError>` |
 | `save_recording_file` | `plugins/audio_recorder.rs` | useVoiceFlowStore | `id: String, app, state: State<AudioRecorderState>` | `Result<String, String>` |
 | `read_recording_file` | `plugins/audio_recorder.rs` | HistoryView | `id: String, app: AppHandle` | `Result<Response, String>` |
-| `delete_all_recordings` | `plugins/audio_recorder.rs` | SettingsView | `app: AppHandle` | `Result<u32, String>` |
+| `delete_all_recordings` | `plugins/audio_recorder.rs` | useHistoryStore（SettingsView 觸發） | `app: AppHandle` | `Result<u32, String>` |
 | `cleanup_old_recordings` | `plugins/audio_recorder.rs` | main-window.ts | `days: u32, app: AppHandle` | `Result<Vec<String>, String>` |
 | `transcribe_audio` | `plugins/transcription.rs` | useVoiceFlowStore | `state, transcription_state, api_key, vocabulary_term_list?, model_id?, language?, provider?（`"groq"`(預設)/`"azure"`/`"gemini"`；未知值 fail-closed 報錯）, endpoint?, deployment?, api_version?, auth_mode?` | `Result<TranscriptionResult, TranscriptionError>`（`noSpeechProbability: number \| null` — Gemini 無此信號回 `null`） |
 | `retranscribe_from_file` | `plugins/transcription.rs` | useVoiceFlowStore、useHistoryStore（retranscribeRecord） | `file_path, api_key, vocabulary_term_list?, model_id?, language?, provider?（同上）, endpoint?, deployment?, api_version?, auth_mode?` | `Result<TranscriptionResult, TranscriptionError>`（同上） |
@@ -175,9 +175,9 @@ CI（`.github/workflows/ci.yml`）：`vue-tsc --noEmit` → `eslint src` → `pn
 
 | Event | 常量 | 發送方 | 接收方 |
 |-------|------|--------|--------|
-| `voice-flow:state-changed` | `VOICE_FLOW_STATE_CHANGED` | HUD VoiceFlow | Dashboard |
-| `transcription:completed` | `TRANSCRIPTION_COMPLETED` | VoiceFlow | Main Window |
-| `settings:updated` | `SETTINGS_UPDATED` | SettingsStore | All Windows |
+| `voice-flow:state-changed` | `VOICE_FLOW_STATE_CHANGED` | useVoiceFlowStore | **目前無接收方**（emit 保留，尚無 listener） |
+| `transcription:completed` | `TRANSCRIPTION_COMPLETED` | useHistoryStore（`emitToWindow("main-window", …)`） | DashboardView、HistoryView |
+| `settings:updated` | `SETTINGS_UPDATED` | useSettingsStore | HUD App.vue（目前唯一 listener） |
 | `vocabulary:changed` | `VOCABULARY_CHANGED` | VocabularyStore | All Windows |
 | `replacements:changed` | `REPLACEMENTS_CHANGED` | ReplacementStore（規則 CRUD 後） | HUD（App.vue，重載取代規則） |
 | `vocabulary:learned` | `VOCABULARY_LEARNED` | VoiceFlowStore | HUD NotchHud |

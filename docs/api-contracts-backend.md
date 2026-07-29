@@ -54,10 +54,13 @@ invoke('request_app_restart') → void
 
 #### `get_hud_target_position`
 ```ts
-invoke('get_hud_target_position') → { x: number, y: number, monitorKey: string }
+invoke('get_hud_target_position') → Result<{
+  x: number, y: number, monitorKey: string,
+  space: 'physical' | 'logical',   // Windows 回 physical 以避開 tao 跨 DPI 錯位
+}, string>
 ```
-- **Rust 位置**：`lib.rs:296`
-- **用途**：HUD 多螢幕追蹤（取得游標所在螢幕的 logical 中心位置）
+- **Rust 位置**：`lib.rs`
+- **用途**：HUD 多螢幕追蹤（取得游標所在螢幕的置中位置）
 - **錯誤**：若 `app.available_monitors()` 失敗或無螢幕 → `Result::Err(String)`
 
 #### `ensure_hud_visible`
@@ -107,8 +110,8 @@ invoke('get_os_theme') → 'dark' | 'light' | null
 | `cleanup_old_recordings`             | `(days, app) → Result<Vec<String>, String>` （回傳已刪檔的 id list）                                              |
 
 **型別**：
-- `AudioInputDeviceInfo = { name: string, isDefault: boolean }`
-- `StopRecordingResult = { audioBufferId: string, durationMs: number, sampleRate: number }`
+- `AudioInputDeviceInfo = { name: string }`
+- `StopRecordingResult = { recordingDurationMs: number, peakEnergyLevel: number, rmsEnergyLevel: number }`
 - `AudioRecorderError`（thiserror enum，serialize 為 string）
 
 ### 2.4 系統音量（2 個 · `plugins/audio_control.rs`）
@@ -124,7 +127,7 @@ invoke('restore_system_audio') → Result<(), String>
 
 | Command                  | 簽名                                                       |
 | ------------------------ | ---------------------------------------------------------- |
-| `paste_text`             | `(text: string) → Result<(), ClipboardError>`              |
+| `paste_text`             | `(text: string, restore_clipboard: bool) → Result<(), ClipboardError>`（`restore_clipboard` = 未開啟「轉錄結果複製到剪貼簿」時才還原原本剪貼簿內容） |
 | `copy_to_clipboard`      | `(text: string) → Result<(), ClipboardError>`              |
 | `capture_target_window`  | `() → ()`                                                  |
 
@@ -155,7 +158,7 @@ invoke('transcribe_audio', {
   api_key: string,
   vocabulary_term_list?: string[],
   model_id?: string,        // 預設 'whisper-large-v3'
-  language?: string | null, // null = Whisper 自動偵測；undefined → Rust fallback 'zh'
+  language?: string | null, // null／省略 = 不送 language 欄位，由 provider 自動偵測
   provider?: 'groq' | 'azure' | 'gemini',  // 預設 groq；未知值 fail-closed 報錯
   endpoint?: string,        // Azure
   deployment?: string,      // Azure
@@ -167,7 +170,7 @@ invoke('transcribe_audio', {
 #### `retranscribe_from_file`
 ```ts
 invoke('retranscribe_from_file', {
-  path: string,
+  file_path: string,      // 前端傳 filePath
   api_key: string,
   vocabulary_term_list?: string[],
   model_id?: string,
@@ -188,8 +191,10 @@ invoke('test_whisper_connection', {
 - **呼叫端**：`src/lib/connectionTest.ts`（SettingsView 的連線測試按鈕）
 
 **型別**：
-- `TranscriptionResult = { text: string, durationMs: number, noSpeechProbability: number | null, ... }`
-  — Gemini 無 `no_speech_prob` 信號，該欄回 `null`，前端幻覺偵測 Layer 2b 會跳過
+- `TranscriptionResult = { rawText: string, transcriptionDurationMs: number, noSpeechProbability: number | null, peakEnergyLevel: number, rmsEnergyLevel: number, promptTokens: number | null, completionTokens: number | null, totalTokens: number | null }`
+  — `noSpeechProbability`：Gemini 無此信號回 `null`，前端幻覺偵測 Layer 2b 跳過
+  — `peak/rmsEnergyLevel`：僅 `retranscribe_from_file` 會從 WAV 計算；即時轉錄路徑留 `0.0`（改用 recorder 的 `StopRecordingResult`）
+  — `prompt/completion/totalTokens`：僅 Gemini 回報（依 token 計量）；Whisper（Groq/Azure）以音訊時長計費，為 `null`
 - `TranscriptionError`（thiserror enum）
 
 ### 2.9 音效回饋（4 個 · `plugins/sound_feedback.rs`）
@@ -225,7 +230,7 @@ invoke('read_text_file', { path: string })                  → Result<string, s
 
 ## 三、Rust → Frontend Events（13 個）
 
-> 所有 payload 介面定義於 `src/types/events.ts`（後綴 `*Payload`）。
+> 熱鍵／監測類 payload 介面定義於 `src/types/events.ts`（後綴 `*Payload`）；音訊類（`WaveformPayload` / `AudioPreviewLevelPayload`）在 `src/types/audio.ts`；`theme:os-changed` 直接送字串，無介面。
 
 ### 3.1 熱鍵類（8 個 · `plugins/hotkey_listener.rs`）
 
@@ -268,9 +273,9 @@ invoke('read_text_file', { path: string })                  → Result<string, s
 
 | Event                          | 常量名                          | 發送方             | 接收方             |
 | ------------------------------ | ------------------------------- | ------------------ | ------------------ |
-| `voice-flow:state-changed`     | `VOICE_FLOW_STATE_CHANGED`      | HUD VoiceFlow      | Dashboard          |
-| `transcription:completed`      | `TRANSCRIPTION_COMPLETED`       | VoiceFlow          | Main Window        |
-| `settings:updated`             | `SETTINGS_UPDATED`              | useSettingsStore   | All Windows        |
+| `voice-flow:state-changed`     | `VOICE_FLOW_STATE_CHANGED`      | useVoiceFlowStore  | **目前無接收方**（emit 保留，尚無 listener） |
+| `transcription:completed`      | `TRANSCRIPTION_COMPLETED`       | useHistoryStore（`emitToWindow("main-window", …)`） | DashboardView、HistoryView |
+| `settings:updated`             | `SETTINGS_UPDATED`              | useSettingsStore   | HUD App.vue（目前唯一 listener） |
 | `vocabulary:changed`           | `VOCABULARY_CHANGED`            | useVocabularyStore | All Windows        |
 | `vocabulary:learned`           | `VOCABULARY_LEARNED`            | useVoiceFlowStore  | HUD NotchHud       |
 | `replacements:changed`         | `REPLACEMENTS_CHANGED`          | useReplacementStore（規則 CRUD 後） | HUD（App.vue，重載取代規則） |
