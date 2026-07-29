@@ -90,48 +90,54 @@ lib/     ──→ External APIs (Groq / OpenAI / Anthropic / Gemini)
 
 | 檔案                       | mount target | 視窗 label    | 職責                                          |
 | -------------------------- | ------------ | ------------- | --------------------------------------------- |
-| `src/main.ts` (22 行)      | `#app` (HUD) | `main`        | initSentryForHud → mount App.vue              |
-| `src/main-window.ts` (103) | `#app` (Dashboard) | `main-window` | DB init → router → settings → autostart |
+| `src/main.ts` (~30 行)     | `#app` (HUD) | `main`        | initSentryForHud → mount App.vue              |
+| `src/main-window.ts` (~150) | `#app` (Dashboard) | `main-window` | DB init → router → settings → autostart |
 
-### 4.2 Stores（4 個 · ~4 KLOC）
+### 4.2 Stores（5 個 · ~6.1 KLOC）
 
-| Store              | LOC  | 內部狀態（精選）                                                                                            |
-| ------------------ | ---: | ----------------------------------------------------------------------------------------------------------- |
-| useVoiceFlowStore  | 1871 | hud state、recording session、transcription、enhancement、quality monitor、edit mode、smart dict、模式切換 |
-| useSettingsStore   | 1395 | apiKey（store plugin）、provider/model、hotkey config、audio device、auto-update、autostart、所有偏好設定 |
-| useHistoryStore    |  580 | transcriptions list、search、cursor pagination、retranscribe                                                |
-| useVocabularyStore |  200 | vocabulary list、CRUD、AI 學習提交                                                                          |
+| Store               | LOC   | 內部狀態（精選）                                                                                            |
+| ------------------- | ----: | ----------------------------------------------------------------------------------------------------------- |
+| useSettingsStore    | ~2.4k | apiKey（store plugin）、provider/model、hotkey config、audio device、auto-update、autostart、所有偏好設定 |
+| useVoiceFlowStore   | ~2.3k | hud state、recording session、transcription、enhancement、quality monitor、edit mode、smart dict、模式切換 |
+| useHistoryStore     |  ~900 | transcriptions list、search、cursor pagination、retranscribe、dashboard stats、daily usage trend            |
+| useVocabularyStore  |  ~300 | vocabulary list、CRUD、AI 學習提交                                                                          |
+| useReplacementStore |  ~250 | 文字取代規則 list、CRUD、beforeAI/afterAI 階段套用、正則驗證                                                |
 
-### 4.3 Lib Modules（13 個 · ~2.6 KLOC）
+### 4.3 Lib Modules（24 個 · ~4.9 KLOC）
 
 詳見 `source-tree-analysis.md` 第 2.4 節，重點：
 
 - **`database.ts`** — singleton + double-init 防護（HUD 用 `connectToDatabase()`、Dashboard 用 `initializeDatabase()`）；支援 v1→v8 migration；含恢復邏輯（issue #27 vocabulary column 修復）
-- **`llmProvider.ts`** — 四 provider 抽象，差異點封裝在 `buildFetchParams` / `parseProviderResponse`
+- **`llmProvider.ts`** — 五 provider 抽象（Groq / Gemini / OpenAI / Anthropic / Azure），差異點封裝在 `buildFetchParams` / `parseProviderResponse`
 - **`modelRegistry.ts`** — 集中管理模型清單；`DECOMMISSIONED_MODEL_MAP` 支援舊 ID 自動遷移到新 ID
 - **`hallucinationDetector.ts`** — Whisper 幻覺偵測 v3，含繁中常見幻覺詞表
-- **`sentry.ts`** — 兩個 init function（HUD 輕量 / Dashboard 完整含 router tracing），統一 `captureError` 入口
+- **`sentry.ts` / `sentryScrubbing.ts`** — 兩個 init function（HUD 輕量 / Dashboard 完整含 router tracing），統一 `captureError` 入口；送出前以 **default-deny** 遮蔽逐字稿與金鑰
+- **`settingsTransfer.ts` / `vocabularyTransfer.ts`** — 備份還原（AES-GCM + PBKDF2，敏感金鑰可剔除）與字典匯入匯出（JSON / 純文字 / CSV）
+- **`transcriptTransforms.ts` / `simplifiedToTraditional.ts`** — 逐字稿落地前的轉換管線（beforeAI 取代規則 → 簡繁轉換）；opencc-js 惰性載入且轉換失敗 fail-open
+- **`azureAuth.ts`** — Entra ID token 快取；經 Rust 取 token 以避開 WebView `Origin` 造成的 `AADSTS9002326`
+- **`theme.ts` / `logger.ts` / `usageTrend.ts` / `connectionTest.ts` / `semanticDriftObserver.ts`** — 主題同步、log 轉送 Rust、趨勢日期補零、連線診斷、語意漂移影子觀測
 
-### 4.4 Composables（4 個 · ~220 LOC）
+### 4.4 Composables（5 個 · ~350 LOC）
 
 | Composable             | 用途                                          | 訂閱事件                |
 | ---------------------- | --------------------------------------------- | ----------------------- |
 | useTauriEvents.ts      | 唯一允許的 event API import 點                | （re-export）           |
 | useAudioWaveform.ts    | HUD 波形動畫                                  | `audio:waveform`        |
 | useAudioPreview.ts     | SettingsView 音量條                           | `audio:preview-level`   |
+| useTableSort.ts        | DictionaryView 表格排序（穩定次鍵）           | —                       |
 | useFeedbackMessage.ts  | UI 訊息提示                                   | —                       |
 
-### 4.5 Views（5 個 · ~3 KLOC）
+### 4.5 Views（5 個 · ~5.2 KLOC）
 
-| View                  | LOC  | 路徑          | 主要互動                                    |
-| --------------------- | ---: | ------------- | ------------------------------------------- |
-| SettingsView.vue      | 1907 | /settings     | 全部設定（API Key、模型、熱鍵、音訊、進階）  |
-| HistoryView.vue       |  379 | /history      | 歷史瀏覽 + 搜尋 + 重新轉錄 + 音訊播放        |
-| DashboardView.vue     |  309 | /dashboard    | 統計卡片 + 額度卡片 + 使用量圖表             |
-| DictionaryView.vue    |  281 | /dictionary   | 字典 CRUD + 智慧學習                         |
-| FeatureGuideView.vue  |   56 | /guide        | 功能導覽                                     |
+| View                  | LOC   | 路徑          | 主要互動                                    |
+| --------------------- | ----: | ------------- | ------------------------------------------- |
+| SettingsView.vue      | ~3.8k | /settings     | 全部設定（API Key、模型、熱鍵、音訊、取代規則、備份還原、進階） |
+| HistoryView.vue       |  ~450 | /history      | 歷史瀏覽 + 搜尋 + 重新轉錄 + 音訊播放        |
+| DashboardView.vue     |  ~450 | /dashboard    | 統計卡片 + 額度卡片 + 使用量圖表             |
+| DictionaryView.vue    |  ~350 | /dictionary   | 字典 CRUD + 智慧學習                         |
+| FeatureGuideView.vue  |  ~100 | /guide        | 功能導覽                                     |
 
-### 4.6 Components（11 個 · ~1.9 KLOC）+ shadcn-vue UI（21 個）
+### 4.6 Components（11 個 · ~1.8 KLOC）+ shadcn-vue UI（21 個）
 
 詳見 `source-tree-analysis.md` 第 2.6 節。
 
