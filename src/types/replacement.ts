@@ -17,4 +17,9 @@ export interface ReplacementRule {
   isRegex: boolean;
   timing: ReplacementTiming;
   enabled: boolean;
+  /**
+   * 建立時間（epoch 毫秒）。選填以相容既有資料——v0.14.0 之前建立的規則沒有
+   * 這個欄位，UI 顯示為「—」，排序時視為最舊。
+   */
+  createdAt?: number;
 }

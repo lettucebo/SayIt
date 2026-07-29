@@ -113,6 +113,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
   AtSign,
   Bug,
   CircleAlert,
@@ -132,6 +135,7 @@ import {
   X,
   Upload,
 } from "lucide-vue-next";
+import { formatTimestamp } from "../lib/formatUtils";
 import { openLogFolder } from "../lib/logger";
 import type { AudioInputDeviceInfo } from "../types/audio";
 import { useAudioPreview } from "../composables/useAudioPreview";
@@ -582,6 +586,87 @@ const replacementForm = ref<ReplacementFormState>({
 const isEditingReplacementRule = computed(
   () => editingReplacementRuleId.value !== null,
 );
+
+/** 可排序的欄位；`order` 代表回到真實的套用順序。 */
+type ReplacementSortKey =
+  | "order"
+  | "patterns"
+  | "replacement"
+  | "timing"
+  | "createdAt";
+
+const replacementSortKey = ref<ReplacementSortKey>("order");
+const replacementSortAsc = ref(true);
+
+/** 依欄位比較兩條規則；`order` 不走這裡（它直接用陣列順序）。 */
+function compareReplacementRules(
+  key: Exclude<ReplacementSortKey, "order">,
+  a: ReplacementRule,
+  b: ReplacementRule,
+): number {
+  switch (key) {
+    // 舊資料沒有 createdAt，視為最舊
+    case "createdAt":
+      return (a.createdAt ?? 0) - (b.createdAt ?? 0);
+    case "patterns":
+      return a.patterns.join(", ").localeCompare(b.patterns.join(", "));
+    case "replacement":
+      return a.replacement.localeCompare(b.replacement);
+    case "timing":
+      return a.timing.localeCompare(b.timing);
+  }
+}
+
+/**
+ * 表格顯示用的規則清單。
+ *
+ * 排序**只影響顯示**——`applyWordReplacements` 依儲存的陣列順序套用，前面的規則
+ * 會改動後面規則看到的文字（例如「一儀錶板」必須排在「儀錶板」之前）。因此每一
+ * 列都帶著 `order`（真實套用序號），無論怎麼排序都看得到實際順序，上下移按鈕
+ * 調整的也是這個真實順序。
+ */
+const sortedReplacementRules = computed(() => {
+  const withOrder = replacementStore.rules.map((rule, index) => ({
+    rule,
+    order: index,
+  }));
+  const key = replacementSortKey.value;
+  if (key === "order") {
+    return replacementSortAsc.value ? withOrder : [...withOrder].reverse();
+  }
+  const direction = replacementSortAsc.value ? 1 : -1;
+  return [...withOrder].sort((a, b) => {
+    const result = compareReplacementRules(key, a.rule, b.rule);
+    // 次要鍵用真實順序，讓相同值的列有穩定且可預期的排列
+    return result !== 0 ? result * direction : a.order - b.order;
+  });
+});
+
+function toggleReplacementSort(key: ReplacementSortKey) {
+  if (replacementSortKey.value === key) {
+    replacementSortAsc.value = !replacementSortAsc.value;
+    return;
+  }
+  replacementSortKey.value = key;
+  // 建立時間預設由新到舊，其餘由小到大
+  replacementSortAsc.value = key !== "createdAt";
+}
+
+function formatReplacementCreatedAt(rule: ReplacementRule): string {
+  return rule.createdAt ? formatTimestamp(rule.createdAt) : "—";
+}
+
+async function handleMoveReplacementRule(
+  rule: ReplacementRule,
+  direction: "up" | "down",
+) {
+  const moved = await replacementStore.moveRule(rule.id, direction);
+  if (!moved) return;
+  // 調整真實順序後回到套用順序檢視，否則使用者看不出移動效果
+  replacementSortKey.value = "order";
+  replacementSortAsc.value = true;
+  replacementFeedback.show("success", t("settings.replacements.moved"));
+}
 
 const replacementTimingOptions = computed(() =>
   REPLACEMENT_TIMINGS.map((value) => ({
@@ -2891,59 +2976,143 @@ onBeforeUnmount(() => {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>{{ $t("settings.replacements.patternsHeader") }}</TableHead>
-                <TableHead>{{ $t("settings.replacements.replacementHeader") }}</TableHead>
-                <TableHead>{{ $t("settings.replacements.timingHeader") }}</TableHead>
+                <TableHead class="w-[72px]">
+                  <button
+                    type="button"
+                    class="inline-flex items-center gap-1 hover:text-foreground"
+                    data-testid="replacement-sort-order"
+                    @click="toggleReplacementSort('order')"
+                  >
+                    {{ $t("settings.replacements.orderHeader") }}
+                    <component :is="replacementSortKey === 'order' ? (replacementSortAsc ? ArrowUp : ArrowDown) : ArrowUpDown" class="h-3 w-3" />
+                  </button>
+                </TableHead>
+                <TableHead>
+                  <button
+                    type="button"
+                    class="inline-flex items-center gap-1 hover:text-foreground"
+                    data-testid="replacement-sort-patterns"
+                    @click="toggleReplacementSort('patterns')"
+                  >
+                    {{ $t("settings.replacements.patternsHeader") }}
+                    <component :is="replacementSortKey === 'patterns' ? (replacementSortAsc ? ArrowUp : ArrowDown) : ArrowUpDown" class="h-3 w-3" />
+                  </button>
+                </TableHead>
+                <TableHead>
+                  <button
+                    type="button"
+                    class="inline-flex items-center gap-1 hover:text-foreground"
+                    data-testid="replacement-sort-replacement"
+                    @click="toggleReplacementSort('replacement')"
+                  >
+                    {{ $t("settings.replacements.replacementHeader") }}
+                    <component :is="replacementSortKey === 'replacement' ? (replacementSortAsc ? ArrowUp : ArrowDown) : ArrowUpDown" class="h-3 w-3" />
+                  </button>
+                </TableHead>
+                <TableHead>
+                  <button
+                    type="button"
+                    class="inline-flex items-center gap-1 hover:text-foreground"
+                    data-testid="replacement-sort-timing"
+                    @click="toggleReplacementSort('timing')"
+                  >
+                    {{ $t("settings.replacements.timingHeader") }}
+                    <component :is="replacementSortKey === 'timing' ? (replacementSortAsc ? ArrowUp : ArrowDown) : ArrowUpDown" class="h-3 w-3" />
+                  </button>
+                </TableHead>
                 <TableHead>{{ $t("settings.replacements.typeHeader") }}</TableHead>
+                <TableHead>
+                  <button
+                    type="button"
+                    class="inline-flex items-center gap-1 hover:text-foreground"
+                    data-testid="replacement-sort-created"
+                    @click="toggleReplacementSort('createdAt')"
+                  >
+                    {{ $t("settings.replacements.createdAtHeader") }}
+                    <component :is="replacementSortKey === 'createdAt' ? (replacementSortAsc ? ArrowUp : ArrowDown) : ArrowUpDown" class="h-3 w-3" />
+                  </button>
+                </TableHead>
                 <TableHead>{{ $t("settings.replacements.enabledHeader") }}</TableHead>
                 <TableHead class="text-right">{{ $t("settings.replacements.actionsHeader") }}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               <TableRow
-                v-for="rule in replacementStore.rules"
-                :key="rule.id"
+                v-for="entry in sortedReplacementRules"
+                :key="entry.rule.id"
                 data-testid="replacement-rule-row"
               >
+                <TableCell class="text-muted-foreground tabular-nums" data-testid="replacement-row-order">
+                  <span :title="$t('settings.replacements.orderHint')">#{{ entry.order + 1 }}</span>
+                </TableCell>
                 <TableCell class="max-w-[220px]">
-                  <div class="truncate font-medium" :title="rule.patterns.join(', ')">
-                    {{ rule.patterns.join(", ") }}
+                  <div class="truncate font-medium" :title="entry.rule.patterns.join(', ')">
+                    {{ entry.rule.patterns.join(", ") }}
                   </div>
                 </TableCell>
                 <TableCell class="max-w-[180px]">
-                  <div class="truncate" :title="rule.replacement">
-                    {{ rule.replacement }}
+                  <div class="truncate" :title="entry.rule.replacement">
+                    {{ entry.rule.replacement }}
                   </div>
                 </TableCell>
                 <TableCell>
                   <Badge variant="secondary">
-                    {{ $t(`settings.replacements.timing.${rule.timing}`) }}
+                    {{ $t(`settings.replacements.timing.${entry.rule.timing}`) }}
                   </Badge>
                 </TableCell>
                 <TableCell>
-                  <Badge :variant="rule.isRegex ? 'secondary' : 'outline'">
-                    {{ rule.isRegex ? $t("settings.replacements.regexBadge") : $t("settings.replacements.literalBadge") }}
+                  <Badge :variant="entry.rule.isRegex ? 'secondary' : 'outline'">
+                    {{ entry.rule.isRegex ? $t("settings.replacements.regexBadge") : $t("settings.replacements.literalBadge") }}
                   </Badge>
                 </TableCell>
+                <TableCell class="whitespace-nowrap text-sm text-muted-foreground" data-testid="replacement-row-created">
+                  {{ formatReplacementCreatedAt(entry.rule) }}
+                </TableCell>
                 <TableCell>
-                  <Label :for="`replacement-rule-enabled-${rule.id}`" class="sr-only">
+                  <Label :for="`replacement-rule-enabled-${entry.rule.id}`" class="sr-only">
                     {{ $t("settings.replacements.enabledHeader") }}
                   </Label>
                   <Switch
-                    :id="`replacement-rule-enabled-${rule.id}`"
-                    :model-value="rule.enabled"
+                    :id="`replacement-rule-enabled-${entry.rule.id}`"
+                    :model-value="entry.rule.enabled"
                     data-testid="replacement-row-enabled-switch"
-                    @update:model-value="handleToggleReplacementRule(rule, $event)"
+                    @update:model-value="handleToggleReplacementRule(entry.rule, $event)"
                   />
                 </TableCell>
                 <TableCell>
-                  <div class="flex justify-end gap-2">
+                  <div class="flex items-center justify-end gap-1">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      class="size-8"
+                      :disabled="entry.order === 0"
+                      :aria-label="$t('settings.replacements.moveUp')"
+                      :title="$t('settings.replacements.moveUp')"
+                      data-testid="replacement-move-up"
+                      @click="handleMoveReplacementRule(entry.rule, 'up')"
+                    >
+                      <ArrowUp class="size-4" />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      class="size-8"
+                      :disabled="entry.order === replacementStore.rules.length - 1"
+                      :aria-label="$t('settings.replacements.moveDown')"
+                      :title="$t('settings.replacements.moveDown')"
+                      data-testid="replacement-move-down"
+                      @click="handleMoveReplacementRule(entry.rule, 'down')"
+                    >
+                      <ArrowDown class="size-4" />
+                    </Button>
                     <Button
                       type="button"
                       variant="ghost"
                       size="sm"
                       data-testid="replacement-edit-button"
-                      @click="startEditingReplacementRule(rule)"
+                      @click="startEditingReplacementRule(entry.rule)"
                     >
                       <Pencil class="mr-1 size-4" />
                       {{ $t("settings.replacements.edit") }}
@@ -2976,7 +3145,7 @@ onBeforeUnmount(() => {
                           </AlertDialogCancel>
                           <AlertDialogAction
                             data-testid="replacement-delete-confirm"
-                            @click="handleDeleteReplacementRule(rule)"
+                            @click="handleDeleteReplacementRule(entry.rule)"
                           >
                             {{ $t("common.delete") }}
                           </AlertDialogAction>

@@ -96,6 +96,10 @@ function sanitizeRule(value: unknown): ReplacementRule | null {
       isRegex: r.isRegex,
       timing: r.timing as ReplacementTiming,
       enabled: r.enabled,
+      // 舊資料沒有這個欄位；只在型別正確且為有限正數時才保留。
+      ...(typeof r.createdAt === "number" && Number.isFinite(r.createdAt)
+        ? { createdAt: r.createdAt }
+        : {}),
     };
   }
   return null;
@@ -195,8 +199,32 @@ export const useReplacementStore = defineStore("replacement", () => {
       isRegex: input.isRegex,
       timing: input.timing,
       enabled: input.enabled,
+      createdAt: Date.now(),
     };
     return commitRules([...rules.value, rule], "add");
+  }
+
+  /**
+   * 調整規則的**套用順序**（往前 / 往後一位）。
+   *
+   * 順序有實質語意：`applyWordReplacements` 依陣列順序逐條套用，前面的規則會改
+   * 動後面規則看到的文字。例如「一儀錶板 → 儀表板」必須排在「儀錶板 → 儀表板」
+   * 之前，否則短的先命中會留下贅字「一」。因此這裡調整的是持久化的真實順序，
+   * 與 UI 的欄位排序（純檢視）是兩回事。
+   */
+  async function moveRule(
+    id: string,
+    direction: "up" | "down",
+  ): Promise<boolean> {
+    await ensureLoaded();
+    const index = rules.value.findIndex((r) => r.id === id);
+    if (index === -1) return false;
+    const target = direction === "up" ? index - 1 : index + 1;
+    if (target < 0 || target >= rules.value.length) return false;
+    const next = [...rules.value];
+    [next[index], next[target]] = [next[target], next[index]];
+    const result = await commitRules(next, "move");
+    return result.valid;
   }
 
   async function updateRule(
@@ -256,6 +284,7 @@ export const useReplacementStore = defineStore("replacement", () => {
     addRule,
     updateRule,
     removeRule,
+    moveRule,
     validateRuleInput,
     exportRules,
     importRules,

@@ -119,6 +119,28 @@ describe("applyWordReplacements", () => {
     );
   });
 
+  it("[P1] 中文 pattern 緊貼在英文字母後面仍可取代", () => {
+    // 迴歸防護：詞界若無條件加前瞻，「Enjoy客戶短」的前一個字元是 y，
+    // 會讓中文規則永遠比對不到——使用者在 UI 建的中文規則會默默失效。
+    const rule = createReplacementRule({
+      patterns: ["客戶短"],
+      replacement: "客戶端",
+    });
+    expect(
+      applyWordReplacements("都用同一個Enjoy客戶短嗎", [rule], "beforeAI"),
+    ).toBe("都用同一個Enjoy客戶端嗎");
+  });
+
+  it("[P1] 中文 pattern 緊貼在數字後面仍可取代", () => {
+    const rule = createReplacementRule({
+      patterns: ["個工作"],
+      replacement: "個任務",
+    });
+    expect(applyWordReplacements("有3個工作要跑", [rule], "beforeAI")).toBe(
+      "有3個任務要跑",
+    );
+  });
+
   it("[P1] 多變體任一命中皆取代為正確寫法", () => {
     const rule = createReplacementRule({
       patterns: ["raycast", "reycast", "recast"],

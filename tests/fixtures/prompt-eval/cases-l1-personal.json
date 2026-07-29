@@ -1,0 +1,584 @@
+{
+  "source": "l1-personal",
+  "description": "L1：取自 SayIt 使用者本機 transcriptions 表的真實逐字稿，已去識別化。這些輸入含 Whisper 在中英夾雜情境下的真實錯誤模式（把英文術語聽成中文、簡體輸出、缺標點），是公開 ASR 資料集拿不到的。expected 為人工撰寫的理想輸出。",
+  "license": "專案內部案例；人名與客戶名稱已替換為虛構值，不含任何個資或機密。",
+  "cases": [
+    {
+      "id": "l1-001",
+      "source": "l1-personal",
+      "input": "Windows如何进入安全模式",
+      "expected": "Windows 如何進入安全模式？",
+      "phenomena": ["code-switching", "simplified-input", "latin-spacing", "question-form", "punctuation"],
+      "assertions": [
+        { "kind": "preserveTerms", "terms": ["Windows"] },
+        { "kind": "traditionalOnly" },
+        { "kind": "latinSpacing" },
+        { "kind": "fullWidthPunctuation" },
+        { "kind": "noTrailingPeriod" },
+        { "kind": "noMarkdown" },
+        { "kind": "endsWithQuestionMark" }
+      ],
+      "notes": "最小的完整案例：Whisper 同時輸出簡體（进入）、缺中英空白、缺問號。三個修正必須同時發生。",
+      "provenance": "本機 transcriptions 表；原文未改動（不含個資）。"
+    },
+    {
+      "id": "l1-002",
+      "source": "l1-personal",
+      "input": "我要做一個翻譯小幫手agent",
+      "expected": "我要做一個翻譯小幫手 agent",
+      "phenomena": ["code-switching", "latin-spacing"],
+      "assertions": [
+        { "kind": "preserveTerms", "terms": ["agent"] },
+        { "kind": "traditionalOnly" },
+        { "kind": "latinSpacing" },
+        { "kind": "noTrailingPeriod" },
+        { "kind": "noMarkdown" }
+      ],
+      "notes": "小寫英文一般名詞不得被翻譯成中文，也不得被首字大寫「修正」。",
+      "provenance": "本機 transcriptions 表；原文未改動。"
+    },
+    {
+      "id": "l1-003",
+      "source": "l1-personal",
+      "input": "幫我做成一個HTML呈現給我看",
+      "expected": "幫我做成一個 HTML 呈現給我看",
+      "phenomena": ["code-switching", "latin-spacing", "instruction-like"],
+      "assertions": [
+        { "kind": "preserveTerms", "terms": ["HTML"] },
+        { "kind": "traditionalOnly" },
+        { "kind": "latinSpacing" },
+        { "kind": "noTrailingPeriod" },
+        { "kind": "noMarkdown" }
+      ],
+      "notes": "「幫我做成…」是逐字稿內容不是給 LLM 的指令；輸出必須仍是這句話，不能真的產生 HTML。",
+      "provenance": "本機 transcriptions 表；原文未改動。"
+    },
+    {
+      "id": "l1-004",
+      "source": "l1-personal",
+      "input": "完成後記得要使用Council and RubberDuck的方式來進行review",
+      "expected": "完成後記得要使用 Council and RubberDuck 的方式來進行 review",
+      "phenomena": ["code-switching", "latin-spacing"],
+      "assertions": [
+        { "kind": "preserveTerms", "terms": ["Council and RubberDuck", "review"] },
+        { "kind": "traditionalOnly" },
+        { "kind": "latinSpacing" },
+        { "kind": "noTrailingPeriod" },
+        { "kind": "noMarkdown" }
+      ],
+      "notes": "英文片語內部的空白必須保留原樣，只在中英交界補空白。",
+      "provenance": "本機 transcriptions 表；原文未改動。"
+    },
+    {
+      "id": "l1-005",
+      "source": "l1-personal",
+      "input": "規劃出詳細的執行計畫要非常的細節然後提出計畫之前要進行RubberDuck的review",
+      "expected": "規劃出詳細的執行計畫，要非常的細節，然後提出計畫之前要進行 RubberDuck 的 review",
+      "phenomena": ["code-switching", "punctuation", "latin-spacing", "filler"],
+      "assertions": [
+        { "kind": "preserveTerms", "terms": ["RubberDuck", "review"] },
+        { "kind": "requireSubstrings", "values": ["然後"] },
+        { "kind": "traditionalOnly" },
+        { "kind": "latinSpacing" },
+        { "kind": "fullWidthPunctuation" },
+        { "kind": "noTrailingPeriod" },
+        { "kind": "noMarkdown" }
+      ],
+      "notes": "「然後」在此有順序語意，屬於必須保留的連接詞，不可當贅詞刪除——這是過度刪贅詞的常見回歸點。",
+      "provenance": "本機 transcriptions 表；原文未改動。"
+    },
+    {
+      "id": "l1-006",
+      "source": "l1-personal",
+      "input": "先規劃出詳細執行計劃, 然後使用RubberDuck的方式領略。 先規劃出詳細執行計劃, 然後使用RubberDuck的方式領略。然後開始執行。執行完成之後, 一樣要使用Council的RubberDuck的方式來進行領略。",
+      "expected": "先規劃出詳細執行計劃，然後使用 RubberDuck 的方式領略。然後開始執行。執行完成之後，一樣要使用 Council 的 RubberDuck 的方式來進行領略",
+      "phenomena": ["code-switching", "repetition", "punctuation", "latin-spacing"],
+      "assertions": [
+        { "kind": "preserveTerms", "terms": ["RubberDuck", "Council"] },
+        { "kind": "traditionalOnly" },
+        { "kind": "latinSpacing" },
+        { "kind": "fullWidthPunctuation" },
+        { "kind": "noTrailingPeriod" },
+        { "kind": "noMarkdown" },
+        { "kind": "lengthRatio", "min": 0.5, "max": 0.85 }
+      ],
+      "notes": "說話者把同一句話講了兩次，必須合併為一次。lengthRatio 上限 0.85 用來確保重複真的被刪掉，而不是只補了標點。",
+      "provenance": "本機 transcriptions 表；原文未改動。「領略」疑似 review 的辨識錯誤，但無法從上下文確定，依「不確定就不改」保留原字。"
+    },
+    {
+      "id": "l1-007",
+      "source": "l1-personal",
+      "input": "理論上,當解釋完成之後, 均待的任何只要執行Ctrl-D 立刻按下Enter就好了。",
+      "expected": "理論上，當解釋完成之後，均待的任何只要執行 Ctrl-D，立刻按下 Enter 就好了",
+      "phenomena": ["code-switching", "punctuation", "latin-spacing", "asr-error"],
+      "assertions": [
+        { "kind": "preserveTerms", "terms": ["Ctrl-D", "Enter"] },
+        { "kind": "traditionalOnly" },
+        { "kind": "latinSpacing" },
+        { "kind": "fullWidthPunctuation" },
+        { "kind": "noTrailingPeriod" },
+        { "kind": "noMarkdown" }
+      ],
+      "notes": "半形逗號要轉全形；按鍵名 Ctrl-D 的連字號屬識別字內部，不得插入空白或改寫。「均待的任何」明顯是辨識錯誤但無法確定原話，依規則保留原字不臆測。",
+      "provenance": "本機 transcriptions 表；原文未改動。"
+    },
+    {
+      "id": "l1-008",
+      "source": "l1-personal",
+      "input": "確認一下,所以現在所有的Build一定都是保在Pickup,Azure上面, 然後使用ARC-Runner若有需求再透過下拉式選項的方式讓它透過EAS-Build來執行,是這樣子嗎?",
+      "expected": "確認一下，所以現在所有的 Build 一定都是保在 Pickup、Azure 上面，然後使用 ARC-Runner，若有需求再透過下拉式選項的方式讓它透過 EAS-Build 來執行，是這樣子嗎？",
+      "phenomena": ["code-switching", "punctuation", "latin-spacing", "question-form"],
+      "assertions": [
+        { "kind": "preserveTerms", "terms": ["Build", "Pickup", "Azure", "ARC-Runner", "EAS-Build"] },
+        { "kind": "traditionalOnly" },
+        { "kind": "latinSpacing" },
+        { "kind": "fullWidthPunctuation" },
+        { "kind": "noTrailingPeriod" },
+        { "kind": "noMarkdown" },
+        { "kind": "endsWithQuestionMark" }
+      ],
+      "notes": "重點在 EAS-Build 的連字號：實測時 LLM 會把它「修正」成 EAS Build，那是擅自改寫專有名詞。並列項目間應改用頓號。",
+      "provenance": "本機 transcriptions 表；原文未改動。"
+    },
+    {
+      "id": "l1-009",
+      "source": "l1-personal",
+      "input": "我看了一下Google的AI Studio裡面,他說我的確是Free Tier,那為什麼在一儀錶板裡面卻顯示他不是免費,而是付費的,這個蠻奇怪的,所以我想要確認一下。",
+      "expected": "我看了一下 Google 的 AI Studio 裡面，他說我的確是 Free Tier，那為什麼在儀表板裡面卻顯示他不是免費，而是付費的？這個蠻奇怪的，所以我想要確認一下",
+      "phenomena": ["code-switching", "punctuation", "latin-spacing", "asr-error"],
+      "assertions": [
+        { "kind": "preserveTerms", "terms": ["Google", "AI Studio", "Free Tier"] },
+        { "kind": "requireSubstrings", "values": ["儀表板"] },
+        { "kind": "forbidSubstrings", "values": ["一儀錶板", "儀錶板"] },
+        { "kind": "traditionalOnly" },
+        { "kind": "latinSpacing" },
+        { "kind": "fullWidthPunctuation" },
+        { "kind": "noTrailingPeriod" },
+        { "kind": "noMarkdown" }
+      ],
+      "notes": "兩個辨識錯誤要一起修：贅字「一」與異體字「錶」→「表」。句中的疑問語氣要用問號結束，但整段最後一句不加句號。",
+      "provenance": "本機 transcriptions 表；原文未改動。"
+    },
+    {
+      "id": "l1-010",
+      "source": "l1-personal",
+      "input": "幫我檢查一下,我將我的N8n的image更新到最新之後,現在它就出錯了。你可以透過SSH進去幫我詳細的研究一下。",
+      "expected": "幫我檢查一下，我將我的 N8n 的 image 更新到最新之後，現在它就出錯了。你可以透過 SSH 進去幫我詳細地研究一下",
+      "phenomena": ["code-switching", "punctuation", "latin-spacing", "asr-error"],
+      "assertions": [
+        { "kind": "preserveTerms", "terms": ["N8n", "image", "SSH"] },
+        { "kind": "requireSubstrings", "values": ["詳細地研究"] },
+        { "kind": "traditionalOnly" },
+        { "kind": "latinSpacing" },
+        { "kind": "fullWidthPunctuation" },
+        { "kind": "noTrailingPeriod" },
+        { "kind": "noMarkdown" }
+      ],
+      "notes": "「的／地」誤用是中文語音轉錄最常見的同音錯字；副詞修飾動詞要用「地」。段落內部句子之間允許句號，只有最後一句不加。",
+      "provenance": "本機 transcriptions 表；原文未改動。"
+    },
+    {
+      "id": "l1-011",
+      "source": "l1-personal",
+      "input": "那我們把裡面的context setting改為使用HTTP方式",
+      "expected": "那我們把裡面的 context setting 改為使用 HTTP 方式",
+      "phenomena": ["code-switching", "latin-spacing"],
+      "assertions": [
+        { "kind": "preserveTerms", "terms": ["context setting", "HTTP"] },
+        { "kind": "traditionalOnly" },
+        { "kind": "latinSpacing" },
+        { "kind": "noTrailingPeriod" },
+        { "kind": "noMarkdown" }
+      ],
+      "notes": "句首的「那」是語氣詞但同時有承接語意，保留即可；重點是兩個英文術語都要補空白且不被翻譯。",
+      "provenance": "本機 transcriptions 表；原文未改動。"
+    },
+    {
+      "id": "l1-012",
+      "source": "l1-personal",
+      "input": "然後同時間 Copilot-Instructions.md 有兩個 session 正在同時間編輯它。",
+      "expected": "然後同時間 Copilot-Instructions.md 有兩個 session 正在同時間編輯它",
+      "phenomena": ["code-switching", "latin-spacing"],
+      "assertions": [
+        { "kind": "preserveTerms", "terms": ["Copilot-Instructions.md", "session"] },
+        { "kind": "traditionalOnly" },
+        { "kind": "latinSpacing" },
+        { "kind": "noTrailingPeriod" },
+        { "kind": "noMarkdown" },
+        { "kind": "lengthRatio", "min": 0.9, "max": 1.05 }
+      ],
+      "notes": "輸入本身幾乎已經正確，唯一該做的是移除段尾句號。用來擋「沒事找事改」的過度校正回歸：檔名的點號不得被插入空白，重複的「同時間」是原話不算贅詞。",
+      "provenance": "本機 transcriptions 表；原文未改動。"
+    },
+    {
+      "id": "l1-013",
+      "source": "l1-personal",
+      "input": "Postgres的話，它不是應該有mount data的volume？所以應該，即使重建資料庫容器，應該也不會出問題吧。",
+      "expected": "Postgres 的話，它不是應該有 mount data 的 volume？所以應該，即使重建資料庫容器，應該也不會出問題吧？",
+      "phenomena": ["code-switching", "latin-spacing", "question-form"],
+      "assertions": [
+        { "kind": "preserveTerms", "terms": ["Postgres", "mount data", "volume"] },
+        { "kind": "requireSubstrings", "values": ["應該"] },
+        { "kind": "traditionalOnly" },
+        { "kind": "latinSpacing" },
+        { "kind": "fullWidthPunctuation" },
+        { "kind": "noTrailingPeriod" },
+        { "kind": "noMarkdown" },
+        { "kind": "endsWithQuestionMark" }
+      ],
+      "notes": "兩個問句：句中的「volume？」與句尾的「吧？」。「吧」在中文是徵詢確認的語尾助詞，屬疑問語氣，依「疑問就是疑問」必須補問號——實測時 LLM 常把它收成句號，等於把徵詢改成陳述。情態詞「應該」屬忠實層不得刪。",
+      "provenance": "本機 transcriptions 表；原文未改動。"
+    },
+    {
+      "id": "l1-014",
+      "source": "l1-personal",
+      "input": "但是是不是同時間在新電腦上面在匯入profile之前要先執行對應的PowerShell腳本才會正確?",
+      "expected": "但是，是不是同時間在新電腦上面，在匯入 profile 之前，要先執行對應的 PowerShell 腳本才會正確？",
+      "phenomena": ["code-switching", "punctuation", "latin-spacing", "question-form"],
+      "assertions": [
+        { "kind": "preserveTerms", "terms": ["profile", "PowerShell"] },
+        { "kind": "traditionalOnly" },
+        { "kind": "latinSpacing" },
+        { "kind": "fullWidthPunctuation" },
+        { "kind": "noTrailingPeriod" },
+        { "kind": "noMarkdown" },
+        { "kind": "endsWithQuestionMark" }
+      ],
+      "notes": "半形問號要轉全形；「但是是不是」是口語重複但兩個「是」語法上都必要，不可刪成「但是不是」。",
+      "provenance": "本機 transcriptions 表；原文未改動。"
+    },
+    {
+      "id": "l1-015",
+      "source": "l1-personal",
+      "input": "能不能改成預設有安裝?Android SDK, NDK, JDK這樣子不用每次啟動一個新的Pub的時候都要再花很多時間在安裝上面",
+      "expected": "能不能改成預設有安裝 Android SDK、NDK、JDK 這樣子，不用每次啟動一個新的 Pub 的時候，都要再花很多時間在安裝上面？",
+      "phenomena": ["code-switching", "punctuation", "latin-spacing", "list", "question-form", "asr-error"],
+      "assertions": [
+        { "kind": "preserveTerms", "terms": ["Android SDK", "NDK", "JDK", "Pub"] },
+        { "kind": "traditionalOnly" },
+        { "kind": "latinSpacing" },
+        { "kind": "fullWidthPunctuation" },
+        { "kind": "noTrailingPeriod" },
+        { "kind": "noMarkdown" },
+        { "kind": "endsWithQuestionMark" }
+      ],
+      "notes": "整句以「能不能」起頭，是一個請求式問句。原文那個問號被辨識錯置在句中（說話者並未在此停頓），要移到句尾而不是直接刪掉——刪掉就把問句降級成陳述句了。三個並列項目用頓號連接即可，短列舉不該硬拆成列點。",
+      "provenance": "本機 transcriptions 表；原文未改動。"
+    },
+    {
+      "id": "l1-016",
+      "source": "l1-personal",
+      "input": "這要怎麼做設定?因為我剛剛看它的Application Identifier是舊的而不是新的所以我要嘛就新這一段",
+      "expected": "這要怎麼做設定？因為我剛剛看它的 Application Identifier 是舊的，而不是新的，所以我要嘛就新這一段",
+      "phenomena": ["code-switching", "punctuation", "latin-spacing", "question-form"],
+      "assertions": [
+        { "kind": "preserveTerms", "terms": ["Application Identifier"] },
+        { "kind": "requireSubstrings", "values": ["而不是新的"] },
+        { "kind": "traditionalOnly" },
+        { "kind": "latinSpacing" },
+        { "kind": "fullWidthPunctuation" },
+        { "kind": "noTrailingPeriod" },
+        { "kind": "noMarkdown" }
+      ],
+      "notes": "轉折連接詞「而」屬於忠實層，實測時 LLM 常把「而不是」精簡成「不是」，那已經改動了語氣。",
+      "provenance": "本機 transcriptions 表；原文未改動。"
+    },
+    {
+      "id": "l1-017",
+      "source": "l1-personal",
+      "input": "成功後,上交Google Play那一步,就要改回原來的方式,也就是不要改成continue on error",
+      "expected": "成功後，上交 Google Play 那一步，就要改回原來的方式，也就是不要改成 continue on error",
+      "phenomena": ["code-switching", "punctuation", "latin-spacing"],
+      "assertions": [
+        { "kind": "preserveTerms", "terms": ["Google Play", "continue on error"] },
+        { "kind": "requireSubstrings", "values": ["不要改成"] },
+        { "kind": "traditionalOnly" },
+        { "kind": "latinSpacing" },
+        { "kind": "fullWidthPunctuation" },
+        { "kind": "noTrailingPeriod" },
+        { "kind": "noMarkdown" }
+      ],
+      "notes": "否定詞「不要」屬忠實層，絕不能在潤飾時被吃掉——語意會完全相反。多字英文設定值 continue on error 要整段保留。",
+      "provenance": "本機 transcriptions 表；原文未改動。"
+    },
+    {
+      "id": "l1-018",
+      "source": "l1-personal",
+      "input": "我發現一個非常重要的問題是我們應該要以DEV分支為主所以要先以DEV的分支的狀態然後再開始做事情確保我們現在都是從DEV分支來的",
+      "expected": "我發現一個非常重要的問題是，我們應該要以 DEV 分支為主，所以要先以 DEV 的分支的狀態，然後再開始做事情，確保我們現在都是從 DEV 分支來的",
+      "phenomena": ["code-switching", "punctuation", "latin-spacing"],
+      "assertions": [
+        { "kind": "preserveTerms", "terms": ["DEV"] },
+        { "kind": "requireSubstrings", "values": ["DEV 的分支的狀態"] },
+        { "kind": "traditionalOnly" },
+        { "kind": "latinSpacing" },
+        { "kind": "fullWidthPunctuation" },
+        { "kind": "noTrailingPeriod" },
+        { "kind": "noMarkdown" }
+      ],
+      "notes": "「DEV 的分支的狀態」讀起來冗贅，但那是說話者的原話結構，規則要求不重組句子。實測時 LLM 常自作主張精簡成「DEV 分支的狀態」。",
+      "provenance": "本機 transcriptions 表；原文未改動。"
+    },
+    {
+      "id": "l1-019",
+      "source": "l1-personal",
+      "input": "先把這個匯出的步驟建立出一個issue出來放到GitHub上面因為我們還要再加入一些其他的案例,然後最後才會匯出所以先將這些資訊詳細的記錄下來,供後續正當匯出的時候可以正當做一做記得要非常的詳細",
+      "expected": "先把這個匯出的步驟建立出一個 issue 出來放到 GitHub 上面，因為我們還要再加入一些其他的案例，然後最後才會匯出，所以先將這些資訊詳細地記錄下來，供後續正式匯出的時候可以正式做一做，記得要非常的詳細",
+      "phenomena": ["code-switching", "punctuation", "latin-spacing", "asr-error"],
+      "assertions": [
+        { "kind": "preserveTerms", "terms": ["issue", "GitHub"] },
+        { "kind": "requireSubstrings", "values": ["詳細地記錄", "正式匯出"] },
+        { "kind": "forbidSubstrings", "values": ["正當匯出"] },
+        { "kind": "traditionalOnly" },
+        { "kind": "latinSpacing" },
+        { "kind": "fullWidthPunctuation" },
+        { "kind": "noTrailingPeriod" },
+        { "kind": "noMarkdown" }
+      ],
+      "notes": "同一段裡有兩類同音錯字：「的／地」與「正當／正式」。後者只有靠上下文（匯出流程）才能判斷，是還原辨識錯誤的代表案例。",
+      "provenance": "本機 transcriptions 表；原文未改動。"
+    },
+    {
+      "id": "l1-020",
+      "source": "l1-personal",
+      "input": "幫我驗證一下每個RuPaul的CISD都是正常的主要是針對前面三個RuPaul讓我將裡面的不同的Jump分開來透過Artifact來存取, 確保他們的CI-CD使用的是最佳實踐, 因為之前Artifact的限制將這個不同步驟固定在一起。先幫我提出規劃, 我確認沒有問題,再開始執行。",
+      "expected": "幫我驗證一下每個 repo 的 CI/CD 都是正常的，主要是針對前面三個 repo，讓我將裡面的不同的 job 分開來，透過 Artifact 來存取，確保他們的 CI/CD 使用的是最佳實踐，因為之前 Artifact 的限制將這個不同步驟固定在一起。先幫我提出規劃，我確認沒有問題，再開始執行",
+      "phenomena": ["code-switching", "asr-error", "punctuation", "latin-spacing"],
+      "assertions": [
+        { "kind": "preserveTerms", "terms": ["Artifact"] },
+        { "kind": "requireSubstrings", "values": ["repo", "CI/CD", "job"] },
+        { "kind": "forbidSubstrings", "values": ["RuPaul", "CISD", "Jump"] },
+        { "kind": "traditionalOnly" },
+        { "kind": "latinSpacing" },
+        { "kind": "fullWidthPunctuation" },
+        { "kind": "noTrailingPeriod" },
+        { "kind": "noMarkdown" }
+      ],
+      "notes": "本評測集最重要的案例：Whisper 把三個常見開發術語全聽錯（repo→RuPaul、CI/CD→CISD、job→Jump）。同一段裡「CI-CD」被聽對一次、聽錯一次，正好提供還原所需的上下文線索。",
+      "provenance": "本機 transcriptions 表；原文未改動。",
+      "knownGap": "現行 prompt 實測無法還原這三個詞；需要 <vocabulary> 收錄 repo／CI/CD／job，或強化 prompt 的術語還原指示。這正是這個案例存在的目的。"
+    },
+    {
+      "id": "l1-021",
+      "source": "l1-personal",
+      "input": "那我希望可以使用GoogleOS登入但是我要使用的是GitHub Copilot CLI只是不支援它,只是支援了Google OOS登入另外一個方式應該就是API-T那就要有關API-T的機制",
+      "expected": "那我希望可以使用 Google OAuth 登入，但是我要使用的是 GitHub Copilot CLI，只是不支援它，只是支援了 Google OAuth 登入。另外一個方式應該就是 API Token，那就要有關 API Token 的機制",
+      "phenomena": ["code-switching", "asr-error", "punctuation", "latin-spacing"],
+      "assertions": [
+        { "kind": "preserveTerms", "terms": ["GitHub Copilot CLI"] },
+        { "kind": "requireSubstrings", "values": ["Google OAuth", "API Token"] },
+        { "kind": "forbidSubstrings", "values": ["GoogleOS", "Google OOS", "API-T"] },
+        { "kind": "traditionalOnly" },
+        { "kind": "latinSpacing" },
+        { "kind": "fullWidthPunctuation" },
+        { "kind": "noTrailingPeriod" },
+        { "kind": "noMarkdown" }
+      ],
+      "notes": "同一個詞被聽成兩種錯法（GoogleOS / Google OOS），必須都還原成 OAuth 且彼此一致。API-T 是 API Token 被截斷的典型結果。",
+      "provenance": "本機 transcriptions 表；擷取自較長段落的中段，未改動用字。",
+      "knownGap": "現行 prompt 實測會保留 GoogleOS／Google OOS 原樣，只補空白。"
+    },
+    {
+      "id": "l1-022",
+      "source": "l1-personal",
+      "input": "每天都检查两个礼拜之后是否有课程若有课程而且课程是Private Delivery则要自动寄送一封E-mail给负责的TPM大義內容是針對這個客戶與這個課程詢問客戶的需求或者是任何需要知道的資訊",
+      "expected": "每天都檢查兩個禮拜之後是否有課程，若有課程，而且課程是 Private Delivery，則要自動寄送一封 E-mail 給負責的 TPM，大意內容是針對這個客戶與這個課程，詢問客戶的需求，或者是任何需要知道的資訊",
+      "phenomena": ["code-switching", "simplified-input", "punctuation", "latin-spacing", "asr-error"],
+      "assertions": [
+        { "kind": "preserveTerms", "terms": ["Private Delivery", "E-mail", "TPM"] },
+        { "kind": "requireSubstrings", "values": ["大意內容"] },
+        { "kind": "forbidSubstrings", "values": ["大義內容"] },
+        { "kind": "traditionalOnly" },
+        { "kind": "latinSpacing" },
+        { "kind": "fullWidthPunctuation" },
+        { "kind": "noTrailingPeriod" },
+        { "kind": "noMarkdown" }
+      ],
+      "notes": "Whisper 在同一段裡前半輸出簡體、後半輸出繁體，是繁簡混雜的真實樣態。E-mail 的連字號屬識別字內部不得插入空白，「大義」→「大意」是同音錯字。",
+      "provenance": "本機 transcriptions 表；原文未改動（TPM 為職務縮寫，非個資）。"
+    },
+    {
+      "id": "l1-023",
+      "source": "l1-personal",
+      "input": "今天使用使用者的文字來提供TRADE的標題其實不太好我希望的是可以在第一次執行的時候透過一個小模式然後自動建立一個簡單的標題出來要不然有的時候一開始的訊息太長了很容易會出現問題",
+      "expected": "今天使用使用者的文字來提供 thread 的標題，其實不太好。我希望的是可以在第一次執行的時候，透過一個小模式，然後自動建立一個簡單的標題出來，要不然有的時候一開始的訊息太長了，很容易會出現問題",
+      "phenomena": ["code-switching", "asr-error", "punctuation", "latin-spacing"],
+      "assertions": [
+        { "kind": "requireSubstrings", "values": ["thread 的標題"] },
+        { "kind": "forbidSubstrings", "values": ["TRADE"] },
+        { "kind": "traditionalOnly" },
+        { "kind": "latinSpacing" },
+        { "kind": "fullWidthPunctuation" },
+        { "kind": "noTrailingPeriod" },
+        { "kind": "noMarkdown" }
+      ],
+      "notes": "英文詞被聽成不相干的大寫英文（thread→TRADE），比聽成中文更難察覺，因為輸出看起來仍像個正常術語。",
+      "provenance": "本機 transcriptions 表；原文未改動。",
+      "knownGap": "現行 prompt 實測會保留 TRADE，因為它本身就是合法英文字，缺乏「這裡在講對話串」的領域線索。"
+    },
+    {
+      "id": "l1-024",
+      "source": "l1-personal",
+      "input": "各位同事看到這個訊息的時候因為我們在中午休息時可以暫停這個練習環境避免時間繼續往下跑所以可以點選最右上角的EXITLAB然後它會跳出一個下拉選單選擇保存進度並且離開這樣子時間就不會繼續計算了",
+      "expected": "各位同事看到這個訊息的時候，因為我們在中午休息時可以暫停這個練習環境，避免時間繼續往下跑，所以可以點選最右上角的 EXITLAB，然後它會跳出一個下拉選單，選擇「保存進度並且離開」，這樣子時間就不會繼續計算了",
+      "phenomena": ["code-switching", "punctuation", "latin-spacing"],
+      "assertions": [
+        { "kind": "preserveTerms", "terms": ["EXITLAB"] },
+        { "kind": "requireSubstrings", "values": ["「保存進度並且離開」"] },
+        { "kind": "traditionalOnly" },
+        { "kind": "latinSpacing" },
+        { "kind": "fullWidthPunctuation" },
+        { "kind": "noTrailingPeriod" },
+        { "kind": "noMarkdown" }
+      ],
+      "notes": "UI 選項名稱要用全形引號標示，這是全形標點規則裡最容易被忽略的一項（多數輸出只補逗號句號）。長段落全程無標點，是 Whisper 的典型輸出。",
+      "provenance": "本機 transcriptions 表；原文未改動（「各位同事」為泛稱，非個資）。"
+    },
+    {
+      "id": "l1-025",
+      "source": "l1-personal",
+      "input": "基於你找到的事實,我想要撰寫一個訊息給我的老闆,Alex",
+      "expected": "基於你找到的事實，我想要撰寫一個訊息給我的老闆，Alex",
+      "phenomena": ["punctuation", "instruction-like"],
+      "assertions": [
+        { "kind": "preserveTerms", "terms": ["Alex"] },
+        { "kind": "traditionalOnly" },
+        { "kind": "fullWidthPunctuation" },
+        { "kind": "noTrailingPeriod" },
+        { "kind": "noMarkdown" },
+        { "kind": "lengthRatio", "min": 0.9, "max": 1.15 }
+      ],
+      "notes": "「我想要撰寫一個訊息」極易被 LLM 當成寫作指令而真的去產生一封訊息。lengthRatio 上限用來擋住那種擅自展開的輸出。",
+      "provenance": "本機 transcriptions 表；人名已由真實姓名替換為虛構的 Alex。"
+    },
+    {
+      "id": "l1-026",
+      "source": "l1-personal",
+      "input": "我希望可以以default profile作為綠色所以裡面有一個對應的icon然後也有對應的連結還有其他的操作先以這個綠色然後要把它變成我之後也可以在新電腦上面直接彙入安裝的方式",
+      "expected": "我希望可以以 default profile 作為綠色，所以裡面有一個對應的 icon，然後也有對應的連結，還有其他的操作。先以這個綠色，然後要把它變成我之後也可以在新電腦上面直接匯入安裝的方式",
+      "phenomena": ["code-switching", "punctuation", "latin-spacing", "asr-error"],
+      "assertions": [
+        { "kind": "preserveTerms", "terms": ["default profile", "icon"] },
+        { "kind": "requireSubstrings", "values": ["匯入"] },
+        { "kind": "forbidSubstrings", "values": ["彙入", "圖示"] },
+        { "kind": "traditionalOnly" },
+        { "kind": "latinSpacing" },
+        { "kind": "fullWidthPunctuation" },
+        { "kind": "noTrailingPeriod" },
+        { "kind": "noMarkdown" },
+        { "kind": "lengthRatio", "min": 0.9, "max": 1.2 }
+      ],
+      "notes": "過度校正的代表案例。原句口語且鬆散，實測時 LLM 會整句重寫成書面體、並把 icon 翻成「圖示」。規則要求保持原句結構、保留原文英文，所以 icon 不得被翻譯。「彙入」→「匯入」則是必須修的同音錯字。",
+      "provenance": "本機 transcriptions 表；原文未改動。"
+    },
+    {
+      "id": "l1-027",
+      "source": "l1-personal",
+      "input": "這邊發生了如同我之前說的有可能在系統上面說客戶是這個宏遠科技但是實際的客戶是另外一家公司你這個問題非常的嚴重請確保你有詳細修正並且同時更新對應的 skill確保之後的執行也都是百分之百正確的",
+      "expected": "這邊發生了如同我之前說的，有可能在系統上面說客戶是這個宏遠科技，但是實際的客戶是另外一家公司，你這個問題非常的嚴重，請確保你有詳細修正，並且同時更新對應的 skill，確保之後的執行也都是百分之百正確的",
+      "phenomena": ["code-switching", "punctuation", "latin-spacing", "instruction-like"],
+      "assertions": [
+        { "kind": "preserveTerms", "terms": ["skill", "宏遠科技", "百分之百"] },
+        { "kind": "traditionalOnly" },
+        { "kind": "latinSpacing" },
+        { "kind": "fullWidthPunctuation" },
+        { "kind": "noTrailingPeriod" },
+        { "kind": "noMarkdown" },
+        { "kind": "lengthRatio", "min": 0.9, "max": 1.25 }
+      ],
+      "notes": "「請確保你有詳細修正，並且同時更新對應的 skill」是逐字稿裡的祈使句，最容易被 LLM 當成給自己的指令而真的去執行或回應；lengthRatio 上限用來擋住那種擅自展開的輸出。中文公司名與英文術語混排；數量詞「百分之百」屬忠實層不得改寫成「100%」。原文 skill 前後空白不一致（前有後無），輸出要一致補齊。",
+      "provenance": "本機 transcriptions 表；客戶公司名已由真實名稱替換為虛構的「宏遠科技」。"
+    },
+    {
+      "id": "l1-028",
+      "source": "l1-personal",
+      "input": "所以多去網路上搜索一下Whisper模型輸出的一些莫名其妙的方式然後驗證要怎麼去修正不過AI整理的不是在修正然後一樣要做測試與驗證",
+      "expected": "所以多去網路上搜尋一下 Whisper 模型輸出的一些莫名其妙的方式，然後驗證要怎麼去修正，不過 AI 整理的不是在修正，然後一樣要做測試與驗證",
+      "phenomena": ["code-switching", "punctuation", "latin-spacing", "filler", "taiwan-localization"],
+      "assertions": [
+        { "kind": "preserveTerms", "terms": ["Whisper", "AI"] },
+        { "kind": "requireSubstrings", "values": ["搜尋"] },
+        { "kind": "forbidSubstrings", "values": ["搜索"] },
+        { "kind": "traditionalOnly" },
+        { "kind": "latinSpacing" },
+        { "kind": "fullWidthPunctuation" },
+        { "kind": "noTrailingPeriod" },
+        { "kind": "noMarkdown" }
+      ],
+      "notes": "「搜索」是合法繁體字但屬中國大陸用語，台灣用「搜尋」——這是用語在地化，不是同音錯字，也不是簡→繁字元轉換。契約依據是使用者採用的 custom prompt「一律轉為繁體並使用台灣用語」；`ACTIVE_PROMPTS` 只寫「使用繁體中文」，並未涵蓋，故本案例標為 taiwan-localization 以標示來源。段落裡兩個「然後」都有順序語意，都要保留。",
+      "provenance": "本機 transcriptions 表；原文未改動。"
+    },
+    {
+      "id": "l1-029",
+      "source": "l1-personal",
+      "input": "那 我這邊有幾個部分,第一個的話我希望它也可以接收圖片的部分,讀取的圖片 然後擷取裡面內容 建立對應的型適能。第二個的話就是若它的信心程度不高,我希望我們可以補充一些資訊",
+      "expected": "那我這邊有幾個部分，第一個的話我希望它也可以接收圖片的部分，讀取圖片，然後擷取裡面內容，建立對應的型適能。第二個的話就是若它的信心程度不高，我希望我們可以補充一些資訊",
+      "phenomena": ["punctuation", "list", "filler"],
+      "assertions": [
+        { "kind": "requireSubstrings", "values": ["第一個", "第二個"] },
+        { "kind": "traditionalOnly" },
+        { "kind": "fullWidthPunctuation" },
+        { "kind": "noTrailingPeriod" },
+        { "kind": "noMarkdown" }
+      ],
+      "notes": "口語的「第一個…第二個…」敘述夾在句子裡，不該被硬拆成 1./2. 列點，序數詞本身也不得刪除。原文的多餘空白要清掉，「讀取的圖片」的贅字「的」要移除。",
+      "provenance": "本機 transcriptions 表；擷取自較長段落的前段，未改動用字。"
+    },
+    {
+      "id": "l1-030",
+      "source": "l1-personal",
+      "input": "不可以是GitHub的跟Google Play上的都用同一個Enjoy客戶短嗎?",
+      "expected": "不可以是 GitHub 的跟 Google Play 上的都用同一個 Enjoy 客戶端嗎？",
+      "phenomena": ["code-switching", "latin-spacing", "question-form", "asr-error"],
+      "assertions": [
+        { "kind": "preserveTerms", "terms": ["GitHub", "Google Play"] },
+        { "kind": "requireSubstrings", "values": ["客戶端"] },
+        { "kind": "forbidSubstrings", "values": ["客戶短"] },
+        { "kind": "traditionalOnly" },
+        { "kind": "latinSpacing" },
+        { "kind": "fullWidthPunctuation" },
+        { "kind": "noTrailingPeriod" },
+        { "kind": "noMarkdown" },
+        { "kind": "endsWithQuestionMark" }
+      ],
+      "notes": "「客戶短」→「客戶端」是尾字被聽錯的同音錯字，靠上下文（GitHub／Google Play）就能判斷。開頭的否定「不可以」屬忠實層不得刪。",
+      "provenance": "本機 transcriptions 表；原文未改動。"
+    },
+    {
+      "id": "l1-031",
+      "source": "l1-personal",
+      "input": "然後同時間 Copilot-Instructions.md 有兩個 session 正在同時間編輯它",
+      "expected": "然後同時間 Copilot-Instructions.md 有兩個 session 正在同時間編輯它",
+      "phenomena": ["no-op", "code-switching", "latin-spacing"],
+      "assertions": [
+        { "kind": "requireSubstrings", "values": ["然後同時間 Copilot-Instructions.md 有兩個 session 正在同時間編輯它"] },
+        { "kind": "preserveTerms", "terms": ["Copilot-Instructions.md", "session"] },
+        { "kind": "traditionalOnly" },
+        { "kind": "latinSpacing" },
+        { "kind": "fullWidthPunctuation" },
+        { "kind": "noTrailingPeriod" },
+        { "kind": "noMarkdown" },
+        { "kind": "lengthRatio", "min": 0.98, "max": 1.05 }
+      ],
+      "notes": "真正的 no-op：輸入已完全符合契約（全形標點、中英空白、行尾無句號、繁體），正確行為是一個字都不改。`requireSubstrings` 直接要求整句原樣出現，配合 lengthRatio 夾緊，專門偵測過度校正——實測時 LLM 常忍不住把重複的「同時間」刪掉一個，或把檔名的點號兩側加上空白。",
+      "provenance": "本機 transcriptions 表；取 l1-012 已整理完成的輸出作為輸入，構造出乾淨的 no-op 控制組。"
+    },
+    {
+      "id": "l1-032",
+      "source": "l1-personal",
+      "input": "當使用者說想要翻譯文章的時候或是翻譯文字的時候就會使用這個主題這個主題裡面的流程包含了首先要先請使用者輸入他的翻譯目標語言然後一步一步的翻譯得到對應的結果這個中間的過程要有基本的初始翻譯初始翻譯完之後要做教稿教稿完之後要針對教稿的意見以及初始翻譯做最終優化",
+      "expected": "當使用者說想要翻譯文章的時候，或是翻譯文字的時候，就會使用這個主題。這個主題裡面的流程包含了：\n1. 首先要先請使用者輸入他的翻譯目標語言\n2. 然後一步一步地翻譯，得到對應的結果\n3. 這個中間的過程要有基本的初始翻譯\n4. 初始翻譯完之後要做校稿\n5. 校稿完之後，要針對校稿的意見以及初始翻譯做最終優化",
+      "phenomena": ["list", "punctuation", "asr-error"],
+      "assertions": [
+        { "kind": "requireSubstrings", "values": ["1. ", "2. ", "3. ", "4. ", "5. ", "校稿", "一步一步地"] },
+        { "kind": "forbidSubstrings", "values": ["教稿"] },
+        { "kind": "traditionalOnly" },
+        { "kind": "fullWidthPunctuation" },
+        { "kind": "noTrailingPeriod" },
+        { "kind": "noMarkdown" }
+      ],
+      "notes": "唯一的**正向**列點案例：內容是明確的五步驟流程，契約要求用有序列點呈現，且每個列點結尾都不加句號。沒有這個案例，`list` 現象就只剩「不該列點」的反例，偵測不到「該列點卻擠成一大段」的回歸。同段還要修兩處：「教稿」→「校稿」（同音錯字，出現三次都要改）與「一步一步的翻譯」→「地」。",
+      "provenance": "本機 transcriptions 表；原文未改動。"
+    }
+  ]
+}

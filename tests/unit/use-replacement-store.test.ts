@@ -198,4 +198,78 @@ describe("useReplacementStore", () => {
 
     expect(store.rules).toEqual([valid]);
   });
+
+  it("[P1] addRule 記錄建立時間", async () => {
+    const before = Date.now();
+    const store = useReplacementStore();
+
+    await store.addRule({
+      patterns: ["ts"],
+      replacement: "TypeScript",
+      isRegex: false,
+      timing: "beforeAI",
+      enabled: true,
+    });
+
+    const createdAt = store.rules[0].createdAt;
+    expect(typeof createdAt).toBe("number");
+    expect(createdAt).toBeGreaterThanOrEqual(before);
+    expect(createdAt).toBeLessThanOrEqual(Date.now());
+  });
+
+  it("[P1] 舊資料缺 createdAt 仍可載入；非數值的 createdAt 被丟棄", async () => {
+    const legacy = createReplacementRule({ patterns: ["legacy"] });
+    const withTimestamp = createReplacementRule({
+      patterns: ["new"],
+      createdAt: 1700000000000,
+    });
+    h.savedRules = [
+      legacy,
+      withTimestamp,
+      { ...createReplacementRule({ patterns: ["bad"] }), createdAt: "昨天" },
+      { ...createReplacementRule({ patterns: ["nan"] }), createdAt: Number.NaN },
+    ];
+    const store = useReplacementStore();
+
+    await store.reload();
+
+    expect(store.rules).toHaveLength(4);
+    expect(store.rules[0].createdAt).toBeUndefined();
+    expect(store.rules[1].createdAt).toBe(1700000000000);
+    // 型別錯誤或非有限數值一律丟棄，不讓壞資料流進排序邏輯
+    expect(store.rules[2].createdAt).toBeUndefined();
+    expect(store.rules[3].createdAt).toBeUndefined();
+  });
+
+  it("[P0] moveRule 調整套用順序並持久化", async () => {
+    const first = createReplacementRule({ patterns: ["一儀錶板"] });
+    const second = createReplacementRule({ patterns: ["儀錶板"] });
+    h.savedRules = [first, second];
+    const store = useReplacementStore();
+    await store.ensureLoaded();
+
+    await expect(store.moveRule(second.id, "up")).resolves.toBe(true);
+    expect(store.rules.map((r) => r.id)).toEqual([second.id, first.id]);
+    expect(h.savedRules).toEqual([second, first]);
+    expect(h.mockEmitEvent).toHaveBeenCalledWith("replacements:changed");
+
+    await expect(store.moveRule(second.id, "down")).resolves.toBe(true);
+    expect(store.rules.map((r) => r.id)).toEqual([first.id, second.id]);
+  });
+
+  it("[P1] moveRule 在邊界與未知 id 時回傳 false 且不寫入", async () => {
+    const first = createReplacementRule({ patterns: ["a"] });
+    const second = createReplacementRule({ patterns: ["b"] });
+    h.savedRules = [first, second];
+    const store = useReplacementStore();
+    await store.ensureLoaded();
+    h.store.set.mockClear();
+
+    await expect(store.moveRule(first.id, "up")).resolves.toBe(false);
+    await expect(store.moveRule(second.id, "down")).resolves.toBe(false);
+    await expect(store.moveRule("does-not-exist", "up")).resolves.toBe(false);
+
+    expect(h.store.set).not.toHaveBeenCalled();
+    expect(store.rules.map((r) => r.id)).toEqual([first.id, second.id]);
+  });
 });
