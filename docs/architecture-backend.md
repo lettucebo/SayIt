@@ -177,14 +177,20 @@ SayIt backend 是一個 **Tauri v2 Rust runtime**，扮演四個角色：
 
 **參數**：`api_key`, `vocabulary_term_list?`, `model_id?`（預設 `whisper-large-v3`）, `language?`（`null` = auto）
 
-### 4.7 `text_field_reader.rs`（325 LOC · macOS only）
+### 4.7 `text_field_reader.rs`（macOS：AXUIElement／Windows：UI Automation）
 
-**職責**：用 macOS Accessibility API 讀取游標所在輸入框內容（用於 Edit Mode）
+**職責**：讀取游標所在輸入框內容與選取狀態（用於 Edit Mode、智慧字典學習、情境注入）
 
-- `read_focused_text_field` — 讀取焦點輸入框完整內容
-- `read_selected_text` — 讀取選取文字（v0.9.1 改用 Cmd+C clipboard approach 後相容更多 App）
+- `read_focused_text_field` — 讀游標附近文字。macOS 用 AXUIElement；Windows 用 `IUIAutomation` + TextPattern/ValuePattern，跑在專用 MTA worker 執行緒（single-flight + timeout 守衛，目標 App 卡死不會拖住 command thread）
+- `read_selection_state` — Edit Mode 判定主路徑，回三態 `selection` / `noSelection` / `unavailable`。**僅 macOS 有實作**（被動 AX 查詢，零按鍵模擬）；Windows 一律回 `unavailable`
+- `read_selected_text` — 剪貼簿後備，模擬 Cmd+C／Ctrl+C。僅在三態回 `unavailable` 時由前端於錄音停止且按鍵放開後呼叫
+- `get_foreground_app_name` — macOS 走 `NSWorkspace.frontmostApplication`；Windows 走 `GetForegroundWindow` + `QueryFullProcessImageNameW`
 
-**已知問題**：選取文字方案在 Fn 按住期間執行會因 hardware flag 穿透導致 "c" 字元輸入（GitHub #25）
+**隱私守衛（不對稱，勿誤植為對稱）**：Windows 以 `IUIAutomationElement::CurrentIsPassword` fail-closed 排除密碼欄位（讀不到屬性時保守視為「是」）；macOS **無**等價守衛，僅以 `AXRole` 過濾（`AXTextField | AXTextArea | AXComboBox | AXWebArea`），不檢查 `AXSubrole == AXSecureTextField`，實際上倚賴系統/App 不對 secure field 暴露 `AXValue`。此缺口追蹤於 issue 67。
+
+**已知問題（已緩解，未消滅）**：Cmd+C 模擬在 Fn 按住期間執行會因 hardware flag 穿透而輸入 "c" 字元。主路徑（`read_selection_state` 被動 AX 查詢）已無此問題；但剪貼簿後備仍會模擬 Cmd+C，目前靠前端在錄音停止後延遲 `CLIPBOARD_FALLBACK_KEY_RELEASE_DELAY_MS`（250ms）等按鍵放開來緩解。Windows 端用 `SendInput` 注入 Ctrl+C，無此 hardware flag 問題，但有其他副作用（見下）。
+
+**Windows 後備的副作用**：因 `read_selection_state` 在 Windows 無條件回 `unavailable`，剪貼簿後備會在**每次錄音停止時**執行 → 對前景 App 注入一次 Ctrl+C。已知影響：非文字剪貼簿內容（圖片／檔案）會遺失（`restore_clipboard_text` 只還原文字）、終端機的 Ctrl+C 可能被當中斷訊號、CodeMirror 系編輯器「無選取複製整行」會誤觸發 Edit Mode。追蹤於 issue 69。
 
 ### 4.8 `sound_feedback.rs`（206 LOC）
 

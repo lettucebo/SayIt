@@ -121,11 +121,17 @@ invoke('start_quality_monitor', { app: AppHandle })    → void
 invoke('start_correction_monitor', { app: AppHandle }) → void
 ```
 
-### 2.7 文字場讀取（2 個 · `plugins/text_field_reader.rs`，macOS only）
+### 2.7 文字場讀取（4 個 · `plugins/text_field_reader.rs`）
+
+macOS 走 AXUIElement、Windows 走 UI Automation（`IUIAutomation` + TextPattern/ValuePattern，
+跑在專用 MTA worker 執行緒）。`read_selection_state` 的選取三態判定目前僅 macOS 有實作，
+Windows 一律回 `unavailable` 而落回剪貼簿後備。
 
 ```ts
 invoke('read_focused_text_field') → Result<string | null, string>
 invoke('read_selected_text')      → Result<string | null, string>
+invoke('read_selection_state')    → { kind: 'selection' | 'noSelection' | 'unavailable'; text: string | null }
+invoke('get_foreground_app_name') → string | null
 ```
 
 ### 2.8 LLM / 轉錄（2 個 · `plugins/transcription.rs`）

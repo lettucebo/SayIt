@@ -2,6 +2,13 @@
 
 SayIt 版本更新紀錄。
 
+## [Unreleased]
+
+### Changed
+
+- 智慧字典學習在 Windows 上改為預設啟用。這個開關的預設值一直停在功能初版的判斷式（只有 macOS 啟用），理由是當時 Windows 還讀不到游標所在的輸入框；後來 Windows 版改用 UI Automation 補上讀取能力後，預設值卻沒有跟著更新，等於 Windows 使用者一直拿不到一個其實已經可以運作的功能。升級摘要彈窗會說明這項變更，不需要的話可在設定頁關閉。
+- 補正 `text_field_reader` 的相關文件：文字場讀取早已不是 macOS 專屬（macOS 走 AXUIElement、Windows 走 UI Automation），且密碼欄位守衛在兩個平台**並不對稱**——Windows 以 `CurrentIsPassword` fail-closed 排除，macOS 目前僅以 `AXRole` 過濾、不檢查 `AXSubrole`，倚賴系統不對 secure field 暴露 `AXValue`。
+
 ## [0.14.0] - 2026-07-29
 
 ### Added
