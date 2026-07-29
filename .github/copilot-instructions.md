@@ -110,6 +110,7 @@ CI（`.github/workflows/ci.yml`）：`vue-tsc --noEmit` → `eslint src` → `pn
 | `update_hotkey_config` | `lib.rs` | useSettingsStore | `trigger_key: TriggerKey, trigger_mode: TriggerMode` | `Result<(), String>` |
 | `get_hud_target_position` | `lib.rs` | useVoiceFlowStore | `app: AppHandle` | `Result<HudTargetPosition, String>`（含 `space: "physical"\|"logical"`，Windows 回 physical 以避開 tao 跨 DPI 錯位） |
 | `ensure_hud_visible` | `lib.rs` | useVoiceFlowStore（showHud 後） | `app: AppHandle` | `()`（Windows：記錄可見性快照 + 安全恢復：最小化還原、重宣告 topmost；非 Windows：no-op） |
+| `get_os_theme` | `lib.rs` | theme.ts（`refreshOsTheme`） | — | `Option<String>`（`"dark"` / `"light"`；Windows 讀登錄檔為權威來源，非 Windows／讀取失敗回 `null` 讓前端 fallback 到 `window.theme()` → `matchMedia`） |
 | `set_file_logging_enabled` | `plugins/logging.rs` | useSettingsStore, logger.ts | `enabled: bool` | `()` |
 | `open_log_folder` | `plugins/logging.rs` | logger.ts（SettingsView） | — | `Result<(), String>` |
 | `cleanup_old_logs` | `plugins/logging.rs` | main-window.ts | `days: u32, app: AppHandle` | `Result<Vec<String>, String>` |
@@ -130,6 +131,7 @@ CI（`.github/workflows/ci.yml`）：`vue-tsc --noEmit` → `eslint src` → `pn
 | `read_focused_text_field` | `plugins/text_field_reader.rs` | useVoiceFlowStore | — | `Result<Option<String>, String>` |
 | `get_foreground_app_name` | `plugins/text_field_reader.rs` | useVoiceFlowStore | — | `Option<String>` |
 | `read_selected_text` | `plugins/text_field_reader.rs` | useVoiceFlowStore | — | `Result<Option<String>, String>` |
+| `read_selection_state` | `plugins/text_field_reader.rs` | useVoiceFlowStore（編輯模式偵測） | — | `SelectionState { kind: "selection" \| "noSelection" \| "unavailable", text: Option<String> }`（macOS 走 AX worker + `spawn_blocking`，避免阻塞主執行緒拖慢隨後的 `start_recording`；single-flight，重入回 `unavailable`；非 macOS 一律 `unavailable`） |
 | `get_default_input_device_name` | `plugins/audio_recorder.rs` | SettingsView | — | `Option<String>` |
 | `list_audio_input_devices` | `plugins/audio_recorder.rs` | SettingsView | — | `Vec<AudioInputDeviceInfo>` |
 | `start_audio_preview` | `plugins/audio_recorder.rs` | SettingsView | `app, preview_state: State<AudioPreviewState>, device_name: String` | `Result<(), String>` |
@@ -167,6 +169,7 @@ CI（`.github/workflows/ci.yml`）：`vue-tsc --noEmit` → `eslint src` → `pn
 | `correction-monitor:result` | keyboard_monitor.rs | `CORRECTION_MONITOR_RESULT` | `CorrectionMonitorResultPayload` |
 | `audio:waveform` | audio_recorder.rs | `AUDIO_WAVEFORM` | `WaveformPayload { levels: [f32; 6] }` |
 | `audio:preview-level` | audio_recorder.rs | `AUDIO_PREVIEW_LEVEL` | `AudioPreviewLevelPayload { level: f32 }` |
+| `theme:os-changed` | lib.rs（Windows 登錄檔輪詢） | `THEME_OS_CHANGED` | `"dark"` \| `"light"`（字串）— 透明且隱藏的 HUD 在 Windows 收不到 `WM_THEMECHANGED`，故改由 Rust 廣播 |
 
 ### Frontend-only Events（不經 Rust）
 
@@ -176,6 +179,7 @@ CI（`.github/workflows/ci.yml`）：`vue-tsc --noEmit` → `eslint src` → `pn
 | `transcription:completed` | `TRANSCRIPTION_COMPLETED` | VoiceFlow | Main Window |
 | `settings:updated` | `SETTINGS_UPDATED` | SettingsStore | All Windows |
 | `vocabulary:changed` | `VOCABULARY_CHANGED` | VocabularyStore | All Windows |
+| `replacements:changed` | `REPLACEMENTS_CHANGED` | ReplacementStore（規則 CRUD 後） | HUD（App.vue，重載取代規則） |
 | `vocabulary:learned` | `VOCABULARY_LEARNED` | VoiceFlowStore | HUD NotchHud |
 | `database:ready` | `DATABASE_READY` | Dashboard（main-window.ts，DB migration 完成後） | HUD（App.vue / waitForDatabaseReady） |
 | `database:ready-ping` | `DATABASE_READY_PING` | HUD（請 Dashboard 重新廣播，解決競態） | Dashboard（收到後 replay `database:ready`） |

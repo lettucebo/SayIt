@@ -1,8 +1,8 @@
 # API Contracts — Backend (Tauri)
 
 > Frontend → Rust 的 Tauri Commands · Rust → Frontend 的 Tauri Events
-> 掃描日期：2026-05-08 · 版本：0.9.5
-> Authoritative source：`src-tauri/src/lib.rs` 的 `generate_handler!` macro + `AGENTS.md` IPC 契約表
+> 掃描日期：2026-07-29 · 版本：0.14.0
+> Authoritative source：`src-tauri/src/lib.rs` 的 `generate_handler!` macro + `.github/copilot-instructions.md` IPC 契約表
 
 ---
 
@@ -10,9 +10,9 @@
 
 | 軌道                       | 數量    | 來源                                                                        |
 | -------------------------- | ------- | --------------------------------------------------------------------------- |
-| Tauri Commands             | **35**  | `lib.rs::run()` 的 `invoke_handler!` macro                                  |
-| Rust → Frontend Events     | **15**  | 各 plugin 模組頂部的 `pub const` 字串                                        |
-| Frontend-only Events       | **5**   | `src/composables/useTauriEvents.ts`                                         |
+| Tauri Commands             | **46**  | `lib.rs::run()` 的 `generate_handler!` macro                                |
+| Rust → Frontend Events     | **13**  | Rust 端 `emit()` 的事件名（前端常數在 `useTauriEvents.ts`）                 |
+| Frontend-only Events       | **8**   | `src/composables/useTauriEvents.ts`                                         |
 
 > 所有 event 名稱常數在前端**只能**從 `useTauriEvents.ts` import；Rust 端定義在各 plugin 模組頂部。新增時兩端必須對齊（用 `tauri-reviewer` subagent 審查）。
 
@@ -22,7 +22,7 @@
 
 格式：`fn(params) -> ReturnType`，所有 command 由 frontend `invoke('name', { params })` 呼叫。
 
-### 2.1 系統與生命週期（5 個）
+### 2.1 系統與生命週期（7 個）
 
 #### `set_file_logging_enabled`
 ```ts
@@ -60,7 +60,21 @@ invoke('get_hud_target_position') → { x: number, y: number, monitorKey: string
 - **用途**：HUD 多螢幕追蹤（取得游標所在螢幕的 logical 中心位置）
 - **錯誤**：若 `app.available_monitors()` 失敗或無螢幕 → `Result::Err(String)`
 
-### 2.2 熱鍵（8 個 · `plugins/hotkey_listener.rs`）
+#### `ensure_hud_visible`
+```ts
+invoke('ensure_hud_visible') → void
+```
+- **Rust 位置**：`lib.rs`
+- **用途**：Windows 下於 `showHud()` 後確保 HUD 真的可見——記錄可見性快照並安全恢復（最小化還原、重新宣告 topmost）。非 Windows 為 no-op。
+
+#### `get_os_theme`
+```ts
+invoke('get_os_theme') → 'dark' | 'light' | null
+```
+- **Rust 位置**：`lib.rs`
+- **用途**：查詢權威的 OS 外觀。Windows 讀登錄檔（透明且隱藏的 HUD 其 WebView2 拿不到正確值），非 Windows 或讀取失敗回 `null`，前端 fallback 到 `window.theme()` → `matchMedia`。
+
+### 2.2 熱鍵（8 個 · `plugins/hotkey_listener.rs`，`update_hotkey_config` 在 `lib.rs`）
 
 | Command                                  | 簽名                                                                   |
 | ---------------------------------------- | ---------------------------------------------------------------------- |
@@ -77,7 +91,7 @@ invoke('get_hud_target_position') → { x: number, y: number, monitorKey: string
 - `TriggerKey` = `'fn' | 'control' | 'option' | 'command' | { combo: string[] }`
 - `TriggerMode` = `'hold' | 'toggle'`
 
-### 2.3 音訊（11 個 · `plugins/audio_recorder.rs`）
+### 2.3 音訊（10 個 · `plugins/audio_recorder.rs`）
 
 | Command                              | 簽名                                                                                                              |
 | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
@@ -121,14 +135,19 @@ invoke('start_quality_monitor', { app: AppHandle })    → void
 invoke('start_correction_monitor', { app: AppHandle }) → void
 ```
 
-### 2.7 文字場讀取（2 個 · `plugins/text_field_reader.rs`，macOS only）
+### 2.7 文字場讀取（4 個 · `plugins/text_field_reader.rs`，macOS 為主，非 macOS 降級）
 
 ```ts
 invoke('read_focused_text_field') → Result<string | null, string>
 invoke('read_selected_text')      → Result<string | null, string>
+invoke('get_foreground_app_name') → string | null
+invoke('read_selection_state')    → { kind: 'selection' | 'noSelection' | 'unavailable', text: string | null }
 ```
 
-### 2.8 LLM / 轉錄（2 個 · `plugins/transcription.rs`）
+- `read_selection_state` 用於編輯模式偵測。macOS 走 AX worker 執行緒並以 `spawn_blocking` 等待——AX server 卡死時最壞會等 `SELECTION_READ_TIMEOUT_MS`，若阻塞 Tauri 主執行緒會連帶延後緊接其後的 `play_start_sound` / `start_recording`（錄音起點延遲＝開頭語音被吃掉）。
+- single-flight：熱鍵連按時重入直接回 `unavailable`，避免 AX 讀取堆疊。非 macOS 一律回 `unavailable`。
+
+### 2.8 LLM / 轉錄（3 個 · `plugins/transcription.rs`）
 
 #### `transcribe_audio`
 ```ts
@@ -137,6 +156,11 @@ invoke('transcribe_audio', {
   vocabulary_term_list?: string[],
   model_id?: string,        // 預設 'whisper-large-v3'
   language?: string | null, // null = Whisper 自動偵測；undefined → Rust fallback 'zh'
+  provider?: 'groq' | 'azure' | 'gemini',  // 預設 groq；未知值 fail-closed 報錯
+  endpoint?: string,        // Azure
+  deployment?: string,      // Azure
+  api_version?: string,     // Azure
+  auth_mode?: string,       // Azure：api-key | entra
 }) → Result<TranscriptionResult, TranscriptionError>
 ```
 
@@ -148,11 +172,24 @@ invoke('retranscribe_from_file', {
   vocabulary_term_list?: string[],
   model_id?: string,
   language?: string | null,
+  provider?: 'groq' | 'azure' | 'gemini',
+  endpoint?: string, deployment?: string, api_version?: string, auth_mode?: string,
 }) → Result<TranscriptionResult, TranscriptionError>
 ```
 
+#### `test_whisper_connection`
+```ts
+invoke('test_whisper_connection', {
+  api_key: string, model_id?: string,
+  provider?: 'groq' | 'azure' | 'gemini',
+  endpoint?: string, deployment?: string, api_version?: string, auth_mode?: string,
+}) → Result<(), TranscriptionError>
+```
+- **呼叫端**：`src/lib/connectionTest.ts`（SettingsView 的連線測試按鈕）
+
 **型別**：
-- `TranscriptionResult = { text: string, durationMs: number, ... }`
+- `TranscriptionResult = { text: string, durationMs: number, noSpeechProbability: number | null, ... }`
+  — Gemini 無 `no_speech_prob` 信號，該欄回 `null`，前端幻覺偵測 Layer 2b 會跳過
 - `TranscriptionError`（thiserror enum）
 
 ### 2.9 音效回饋（4 個 · `plugins/sound_feedback.rs`）
@@ -164,9 +201,29 @@ invoke('play_error_sound')    → void
 invoke('play_learned_sound')  → void
 ```
 
+### 2.10 Azure 驗證（1 個 · `plugins/azure_auth.rs`）
+
+```ts
+invoke('get_azure_entra_token', {
+  tenant_id: string, client_id: string, client_secret: string, scope: string,
+}) → Result<{ accessToken: string, expiresIn: number }, string>
+```
+- **呼叫端**：`src/lib/azureAuth.ts`（`getAzureAccessToken`，含快取與提前 60 秒續期）
+- **為何走 Rust**：reqwest 不帶 browser `Origin` header，避免 Entra 回 `AADSTS9002326`
+- **scope 依 API 路徑選**（非 host）：v1 `/openai/v1/` chat → `ai.azure.com/.default`；deployments/Whisper 路徑 → `cognitiveservices.azure.com/.default`
+
+### 2.11 檔案傳輸（2 個 · `plugins/file_transfer.rs`）
+
+```ts
+invoke('save_text_file', { path: string, content: string }) → Result<(), string>
+invoke('read_text_file', { path: string })                  → Result<string, string>
+```
+- **呼叫端**：SettingsView 的備份匯出 / 匯入
+- `read_text_file` 檔案過大時回符號錯誤字串 `"FILE_TOO_LARGE"`
+
 ---
 
-## 三、Rust → Frontend Events（15 個）
+## 三、Rust → Frontend Events（13 個）
 
 > 所有 payload 介面定義於 `src/types/events.ts`（後綴 `*Payload`）。
 
@@ -174,8 +231,8 @@ invoke('play_learned_sound')  → void
 
 | Event                          | 常量名                          | Payload                          |
 | ------------------------------ | ------------------------------- | -------------------------------- |
-| `hotkey:pressed`               | `HOTKEY_PRESSED`                | —                                |
-| `hotkey:released`              | `HOTKEY_RELEASED`               | —                                |
+| `hotkey:pressed`               | `HOTKEY_PRESSED`                | `HotkeyEventPayload`             |
+| `hotkey:released`              | `HOTKEY_RELEASED`               | `HotkeyEventPayload`             |
 | `hotkey:toggled`               | `HOTKEY_TOGGLED`                | `HotkeyEventPayload`             |
 | `hotkey:error`                 | `HOTKEY_ERROR`                  | `HotkeyErrorPayload`             |
 | `hotkey:mode-toggle`           | `HOTKEY_MODE_TOGGLE`            | `()`                             |
@@ -197,9 +254,17 @@ invoke('play_learned_sound')  → void
 | `audio:waveform`       | `AUDIO_WAVEFORM`             | `WaveformPayload { levels: [f32; 6] }`            |
 | `audio:preview-level`  | `AUDIO_PREVIEW_LEVEL`        | `AudioPreviewLevelPayload { level: f32 }`         |
 
+### 3.4 主題類（1 個 · `lib.rs`）
+
+| Event               | 常量名             | Payload                        |
+| ------------------- | ------------------ | ------------------------------ |
+| `theme:os-changed`  | `THEME_OS_CHANGED` | `"dark"` \| `"light"`（字串）  |
+
+> Windows 上透明且隱藏的 HUD 收不到 `WM_THEMECHANGED`，故由 Rust 輪詢登錄檔後主動廣播。
+
 ---
 
-## 四、Frontend-only Events（5 個 · 不經 Rust）
+## 四、Frontend-only Events（8 個 · 不經 Rust）
 
 | Event                          | 常量名                          | 發送方             | 接收方             |
 | ------------------------------ | ------------------------------- | ------------------ | ------------------ |
@@ -208,6 +273,9 @@ invoke('play_learned_sound')  → void
 | `settings:updated`             | `SETTINGS_UPDATED`              | useSettingsStore   | All Windows        |
 | `vocabulary:changed`           | `VOCABULARY_CHANGED`            | useVocabularyStore | All Windows        |
 | `vocabulary:learned`           | `VOCABULARY_LEARNED`            | useVoiceFlowStore  | HUD NotchHud       |
+| `replacements:changed`         | `REPLACEMENTS_CHANGED`          | useReplacementStore（規則 CRUD 後） | HUD（App.vue，重載取代規則） |
+| `database:ready`               | `DATABASE_READY`                | Dashboard（main-window.ts，DB migration 完成後） | HUD（App.vue / `waitForDatabaseReady`） |
+| `database:ready-ping`          | `DATABASE_READY_PING`           | HUD（請 Dashboard 重新廣播，解決競態） | Dashboard（收到後 replay `database:ready`） |
 
 ---
 
@@ -222,18 +290,22 @@ Tauri v2 採 capability-based permission 系統，Frontend 只能呼叫已授權
 | Shell       | `shell:allow-open`（用於開系統設定）                                                                    |
 | SQL         | `sql:default`、`sql:allow-execute`                                                                       |
 | Store       | `store:default`                                                                                          |
-| HTTP        | `http:default` 開放：`api.groq.com/*`、`api.openai.com/*`、`api.anthropic.com/*`、`generativelanguage.googleapis.com/*` |
+| HTTP        | `http:default` 開放：`api.groq.com/*`、`api.openai.com/*`、`api.anthropic.com/*`、`generativelanguage.googleapis.com/*`、`*.openai.azure.com/*`、`*.services.ai.azure.com/*`、`*.cognitiveservices.azure.com/*`、`login.microsoftonline.com/*` |
 | Autostart   | `autostart:default`                                                                                      |
 | Updater     | `updater:default`                                                                                        |
 | Process     | `process:default`                                                                                        |
 
-> **⚠️ 一致性差異**：`http:default` 已開放四家 LLM API，但 `tauri.conf.json` CSP `connect-src` 只列 Groq + Gemini，**缺 OpenAI / Anthropic**。使用者切到這兩家在 production build 可能被 CSP 攔截（dev mode 不受影響）。
+> **⚠️ 注意**：`capabilities/default.json` 的 HTTP allowlist 與 `tauri.conf.json` 的 CSP `connect-src` 必須同步，新增 provider 時**兩處都要改**（只改一處在 production build 會被攔截，dev mode 不受 CSP 影響）。目前兩者已對齊（含 Sentry ingest 端點僅在 CSP）。
+>
+> Rust 端的 `transcription.rs` / `azure_auth.rs` 用 `reqwest` 直連，**不**受此 allowlist 與 CSP 約束。
 
 ---
 
 ## 六、外部 API 契約（節選）
 
-### 6.1 Groq Whisper（Rust 直呼）
+### 6.1 轉錄（Rust 直呼 `reqwest`，不受 CSP／allowlist 約束）
+
+**Groq Whisper**（`provider: 'groq'`，預設）
 
 ```
 POST https://api.groq.com/openai/v1/audio/transcriptions
@@ -246,6 +318,10 @@ POST https://api.groq.com/openai/v1/audio/transcriptions
 ```
 
 ### 6.2 LLM Provider（Frontend 透過 `@tauri-apps/plugin-http`）
+
+> **Azure Whisper**（`provider: 'azure'`）走 `{endpoint}/openai/deployments/{deployment}/audio/transcriptions?api-version=...`，同 multipart 協定並保留 `verbose_json` / `no_speech_prob`；驗證用 `api-key` header 或 Entra ID 的 `Authorization: Bearer`（token 由 `get_azure_entra_token` 取得）。
+>
+> **Gemini**（`provider: 'gemini'`）**不走** Whisper multipart 協定，而是 `POST https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent`（`x-goog-api-key` header + inline base64 WAV + structured output `{ transcript }`）。模型**固定**（Rust `GEMINI_TRANSCRIPTION_MODEL` 與 TS `modelRegistry.ts` 兩端必須一致），**不吃 `WhisperModelId`**；inline 上限 20MB request（raw WAV 約 14 MiB ≈ 7 分 39 秒）；無 `no_speech_prob` → `noSpeechProbability` 回 `null`。
 
 | Provider   | Endpoint                                                                                | Auth Header                       | Body 特例                                                |
 | ---------- | --------------------------------------------------------------------------------------- | --------------------------------- | -------------------------------------------------------- |
@@ -264,8 +340,8 @@ POST https://api.groq.com/openai/v1/audio/transcriptions
 □ Rust 端
   ├─ 寫 #[command] 函式（確認回傳 Result 而非 panic）
   ├─ 在 plugins/<module>.rs（或 lib.rs）內定義
-  ├─ 在 lib.rs::run() 的 invoke_handler! 註冊（lib.rs:416）
-  └─ 若是 event，在 plugin 模組頂部加 pub const NAME = "..."
+  ├─ 在 lib.rs::run() 的 generate_handler! 註冊（lib.rs:613，漏註冊 → 前端 invoke 會 timeout）
+  └─ 若是 event，事件名兩端字串必須一致
 
 □ Frontend 端
   ├─ 在 src/types/events.ts 新增 *Payload 介面
@@ -274,7 +350,7 @@ POST https://api.groq.com/openai/v1/audio/transcriptions
   └─ 若 command 用到，可加型別別名於 src/types/
 
 □ 文件
-  ├─ 更新 AGENTS.md IPC 契約表
+  ├─ 更新 .github/copilot-instructions.md IPC 契約表
   ├─ 更新 docs/api-contracts-backend.md
-  └─ 用 tauri-reviewer subagent 審查兩端對齊
+  └─ 用 ipc-review / tauri-reviewer subagent 審查兩端對齊
 ```
