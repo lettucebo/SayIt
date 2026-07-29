@@ -19,6 +19,7 @@ import {
 import {
   findLlmModelConfig,
   findWhisperModelConfig,
+  getEffectiveGeminiTranscriptionRpd,
 } from "../lib/modelRegistry";
 import DashboardUsageChart from "../components/DashboardUsageChart.vue";
 import {
@@ -49,19 +50,26 @@ const isPaidWhisperProvider = computed(
   () => settingsStore.whisperProviderId === "azure",
 );
 
-// Gemini 轉錄的免費額度依帳號浮動、Google 未公開（只能在 AI Studio 查），
-// 因此不套用內建分母：使用者填了額度才顯示額度條，否則只顯示實際用量。
+/** 目前 Gemini 轉錄模型實際採用的每日額度（使用者覆寫 > 內建預設） */
+const geminiTranscriptionRpd = computed(() =>
+  getEffectiveGeminiTranscriptionRpd(
+    settingsStore.geminiFreeQuotaRequests,
+    settingsStore.geminiTranscriptionModelId,
+  ),
+);
+
+// Gemini 轉錄有內建預設額度，仍算不出分母時（模型無免費額度）才隱藏額度條。
 const isQuotaHiddenWhisperProvider = computed(
   () =>
     settingsStore.whisperProviderId === "gemini" &&
-    settingsStore.geminiFreeQuotaRequests <= 0,
+    geminiTranscriptionRpd.value <= 0,
 );
 
-/** 使用者已為 Gemini 轉錄設定免費額度 → 可顯示真正的額度條 */
+/** Gemini 轉錄有可用額度（內建或使用者自填）→ 顯示額度條 */
 const hasGeminiTranscriptionQuota = computed(
   () =>
     settingsStore.whisperProviderId === "gemini" &&
-    settingsStore.geminiFreeQuotaRequests > 0,
+    geminiTranscriptionRpd.value > 0,
 );
 
 /**
@@ -105,8 +113,8 @@ const quotaDimensionList = computed(() => {
   // 免費 Whisper（Groq）才顯示額度維度；limit 為 0 的維度略過避免誤導
   if (!isPaidWhisperProvider.value && !isQuotaHiddenWhisperProvider.value) {
     if (hasGeminiTranscriptionQuota.value) {
-      // Gemini：使用者自填的額度，依其週期（每日／每月）比對對應視窗的請求數
-      const limit = settingsStore.geminiFreeQuotaRequests;
+      // Gemini：內建預設或使用者自填的額度，依其週期（每日／每月）比對對應視窗
+      const limit = geminiTranscriptionRpd.value;
       const used = geminiQuotaUsage.value.geminiTranscriptionRequestCount;
       dimensionList.push({
         remaining: 1 - used / limit,

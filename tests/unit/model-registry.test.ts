@@ -10,6 +10,7 @@ import {
   WHISPER_MODEL_LIST,
   GEMINI_TRANSCRIPTION_MODEL_LIST,
   getEffectiveGeminiTranscriptionModelId,
+  getEffectiveGeminiTranscriptionRpd,
 } from "../../src/lib/modelRegistry";
 import zhTW from "../../src/i18n/locales/zh-TW.json";
 import zhCN from "../../src/i18n/locales/zh-CN.json";
@@ -76,6 +77,33 @@ describe("modelRegistry — Gemini 轉錄模型", () => {
         }
       }
     }
+  });
+
+  it("[P0] 每個模型都要有內建免費額度預設值（選模型時就有分母可用）", () => {
+    for (const model of GEMINI_TRANSCRIPTION_MODEL_LIST) {
+      expect(
+        model.typicalFreeRpd,
+        `${model.id} 缺少 typicalFreeRpd`,
+      ).toBeGreaterThan(0);
+    }
+  });
+
+  it("[P0] 未覆寫時採用該模型的內建額度", () => {
+    for (const model of GEMINI_TRANSCRIPTION_MODEL_LIST) {
+      expect(getEffectiveGeminiTranscriptionRpd(0, model.id)).toBe(
+        model.typicalFreeRpd,
+      );
+    }
+  });
+
+  it("[P0] 使用者覆寫優先於內建預設", () => {
+    expect(getEffectiveGeminiTranscriptionRpd(1234, "gemini-3.6-flash")).toBe(
+      1234,
+    );
+  });
+
+  it("[P1] 未知模型且未覆寫 → 0（呼叫端據此隱藏額度條，不捏造分母）", () => {
+    expect(getEffectiveGeminiTranscriptionRpd(0, "not-a-model")).toBe(0);
   });
 });
 

@@ -99,9 +99,9 @@
         "flashLite": "免费额度最高（约 500 次/日、15 次/分），官方文档明列「语音转录」为建议用途。日常听写建议用这个",
         "flash": "最新旗舰、多模态理解最强，但免费额度极少（约 20 次/日、5 次/分），适合少量但要求最准的场合"
       },
-      "geminiQuotaLabel": "免费额度（选填）",
-      "geminiQuotaPlaceholder": "例：1500",
-      "geminiQuotaHint": "Google 未在文档公开免费额度，但可在 AI Studio 的 Rate limits 页看到自己的 RPD（每日请求上限）。填入后仪表板才会显示剩余额度，留空则只显示实际用量",
+      "geminiQuotaLabel": "免费额度（可覆写）",
+      "geminiQuotaPlaceholder": "内建预设 {count}",
+      "geminiQuotaHint": "已依模型内建免费额度预设值，数字依账号可能不同。要调整就直接填入，留空即使用内建值",
       "geminiQuotaLink": "到 AI Studio 查看我的额度",
       "geminiQuotaSaved": "免费额度已更新",
       "quotaPeriodDaily": "每日",

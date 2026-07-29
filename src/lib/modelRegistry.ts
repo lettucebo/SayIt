@@ -99,6 +99,19 @@ export function getEffectiveGeminiTranscriptionModelId(
     : GEMINI_TRANSCRIPTION_MODEL;
 }
 
+/**
+ * 解析 Gemini 轉錄實際採用的每日請求額度：
+ * 使用者有填（> 0）就以使用者的為準，否則用該模型的內建預設值。
+ * 內建值來自 AI Studio 的免費層 RPD，會隨帳號/時間變動，故一律可被覆寫。
+ */
+export function getEffectiveGeminiTranscriptionRpd(
+  overrideRequests: number,
+  modelId: string,
+): number {
+  if (overrideRequests > 0) return overrideRequests;
+  return findGeminiTranscriptionModelConfig(modelId)?.typicalFreeRpd ?? 0;
+}
+
 interface BaseModelConfig {
   displayName: string;
   badgeKey: string;
@@ -200,7 +213,9 @@ export const LLM_MODEL_LIST: LlmModelConfig[] = [
     freeQuotaTpd: 200_000,
     isDefault: false,
   },
-  // ── Google Gemini（免費額度依帳號而異，不在此顯示）──
+  // ── Google Gemini（免費額度依帳號浮動、Google 未公開，故不設內建分母）──
+  // 轉錄模型另有可覆寫的內建額度（見 GEMINI_TRANSCRIPTION_MODEL_LIST）；
+  // LLM 側目前沒有覆寫入口，維持「不顯示額度條、只顯示今日用量」的既有行為。
   {
     id: "gemini-3.5-flash",
     providerId: "gemini",

@@ -919,6 +919,16 @@ async function handleGeminiTranscriptionModelChange(
 }
 
 const geminiFreeQuotaInput = ref("");
+
+/** 未填時的提示：顯示目前模型的內建預設額度 */
+const geminiQuotaPlaceholder = computed(() => {
+  const config = findGeminiTranscriptionModelConfig(
+    settingsStore.geminiTranscriptionModelId,
+  );
+  return t("settings.model.geminiQuotaPlaceholder", {
+    count: config?.typicalFreeRpd ?? 0,
+  });
+});
 const geminiFreeQuotaPeriodInput = ref<QuotaPeriod>("daily");
 
 async function handleSaveGeminiFreeQuota() {
@@ -2293,7 +2303,7 @@ onBeforeUnmount(() => {
                 v-model="geminiFreeQuotaInput"
                 type="number"
                 min="0"
-                :placeholder="$t('settings.model.geminiQuotaPlaceholder')"
+                :placeholder="geminiQuotaPlaceholder"
                 class="flex-1"
               />
               <Select

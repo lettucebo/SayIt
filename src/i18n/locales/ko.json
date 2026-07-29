@@ -99,9 +99,9 @@
         "flashLite": "무료 할당량이 가장 큼(약 500회/일, 15회/분). 공식 문서가 전사를 권장 용도로 명시. 일상 받아쓰기에 적합",
         "flash": "최신 플래그십으로 멀티모달 이해력이 가장 뛰어나지만 무료 할당량이 매우 적음(약 20회/일, 5회/분). 정확도가 중요한 소량 작업에 적합"
       },
-      "geminiQuotaLabel": "무료 할당량(선택)",
-      "geminiQuotaPlaceholder": "예: 1500",
-      "geminiQuotaHint": "Google은 문서에 무료 한도를 공개하지 않지만 AI Studio의 Rate limits 페이지에서 자신의 RPD(일일 요청 한도)를 확인할 수 있습니다. 입력하면 대시보드에 잔여량이 표시됩니다",
+      "geminiQuotaLabel": "무료 할당량(재정의 가능)",
+      "geminiQuotaPlaceholder": "기본값 {count}",
+      "geminiQuotaHint": "각 모델의 기본 무료 할당량을 사용합니다(계정에 따라 다를 수 있음). 변경하려면 값을 입력하고, 비워 두면 기본값이 적용됩니다",
       "geminiQuotaLink": "AI Studio에서 내 한도 확인",
       "geminiQuotaSaved": "무료 할당량이 업데이트되었습니다",
       "quotaPeriodDaily": "하루",

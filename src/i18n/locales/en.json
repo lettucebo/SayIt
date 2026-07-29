@@ -99,9 +99,9 @@
         "flashLite": "Highest free quota (~500/day, 15/min); Google's docs list transcription as a recommended use. Best for everyday dictation",
         "flash": "Latest flagship with the strongest multimodal understanding, but a very small free quota (~20/day, 5/min). Use it sparingly when accuracy matters most"
       },
-      "geminiQuotaLabel": "Free quota (optional)",
-      "geminiQuotaPlaceholder": "e.g. 1500",
-      "geminiQuotaHint": "Google doesn't publish free-tier limits in the docs, but AI Studio's Rate limits page shows your own RPD (requests per day). Enter it to see remaining quota on the dashboard; leave empty to show usage only",
+      "geminiQuotaLabel": "Free quota (override)",
+      "geminiQuotaPlaceholder": "Built-in default {count}",
+      "geminiQuotaHint": "Defaults to each model's built-in free quota; the actual number can differ per account. Enter a value to override, or leave empty to use the built-in one",
       "geminiQuotaLink": "Check my limits in AI Studio",
       "geminiQuotaSaved": "Free quota updated",
       "quotaPeriodDaily": "Per day",

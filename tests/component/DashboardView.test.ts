@@ -28,21 +28,25 @@ vi.mock("../../src/stores/useHistoryStore", () => ({
 }));
 
 function makeHistory(usage: Record<string, number> = {}) {
+  const quotaUsage = {
+    whisperRequestCount: 0,
+    whisperBilledAudioMs: 0,
+    geminiTranscriptionRequestCount: 0,
+    geminiTranscriptionTotalTokens: 0,
+    llmRequestCount: 0,
+    llmTotalTokens: 0,
+    vocabularyAnalysisRequestCount: 0,
+    vocabularyAnalysisTotalTokens: 0,
+    ...usage,
+  };
   return {
     dashboardStats: {
       totalRecordingDurationMs: 0,
       totalCharacters: 0,
       estimatedTimeSavedMs: 0,
       totalTranscriptions: 0,
-      dailyQuotaUsage: {
-        whisperRequestCount: 0,
-        whisperBilledAudioMs: 0,
-        llmRequestCount: 0,
-        llmTotalTokens: 0,
-        vocabularyAnalysisRequestCount: 0,
-        vocabularyAnalysisTotalTokens: 0,
-        ...usage,
-      },
+      dailyQuotaUsage: quotaUsage,
+      monthlyQuotaUsage: { ...quotaUsage },
     },
     dailyUsageTrendList: [],
     usageTrendDays: 14,
@@ -57,6 +61,10 @@ function makeSettings(overrides: Record<string, unknown> = {}) {
     selectedLlmProviderId: "groq",
     selectedWhisperModelId: "whisper-large-v3",
     selectedLlmModelId: "qwen/qwen3.6-27b",
+    // Gemini 轉錄額度：0 = 未覆寫（改用模型內建預設）
+    geminiTranscriptionModelId: "gemini-3.5-flash-lite",
+    geminiFreeQuotaRequests: 0,
+    geminiFreeQuotaPeriod: "daily",
     ...overrides,
   };
 }
@@ -115,6 +123,50 @@ describe("DashboardView 額度卡片", () => {
     expect(text).not.toContain("付費方案 — 無免費額度限制");
     expect(text).not.toContain("Infinity");
     expect(text).not.toContain("NaN");
+  });
+
+  it("[P0] Gemini 轉錄：使用模型內建額度顯示剩餘百分比，不需使用者先設定", () => {
+    settingsState = makeSettings({
+      whisperProviderId: "gemini",
+      geminiTranscriptionModelId: "gemini-3.5-flash-lite",
+      geminiFreeQuotaRequests: 0,
+    });
+    historyState = makeHistory({
+      geminiTranscriptionRequestCount: 50,
+      geminiTranscriptionTotalTokens: 96_000,
+    });
+    const text = mountDashboard(true).text();
+
+    // 內建 500/日 → 用掉 50 應顯示額度條與 50/500
+    expect(text).toContain("今日剩餘免費額度");
+    expect(text).toContain("Gemini 轉錄今日 50 / 500 次");
+    // 免費層不得被標成付費方案
+    expect(text).not.toContain("付費方案 — 無免費額度限制");
+    expect(text).not.toContain("NaN");
+  });
+
+  it("[P0] Gemini 轉錄：使用者覆寫額度時以覆寫值為準", () => {
+    settingsState = makeSettings({
+      whisperProviderId: "gemini",
+      geminiTranscriptionModelId: "gemini-3.5-flash-lite",
+      geminiFreeQuotaRequests: 100,
+    });
+    historyState = makeHistory({ geminiTranscriptionRequestCount: 50 });
+    const text = mountDashboard(true).text();
+
+    expect(text).toContain("Gemini 轉錄今日 50 / 100 次");
+  });
+
+  it("[P0] Gemini 轉錄：切到額度較少的模型時分母跟著改變", () => {
+    settingsState = makeSettings({
+      whisperProviderId: "gemini",
+      geminiTranscriptionModelId: "gemini-3.6-flash",
+      geminiFreeQuotaRequests: 0,
+    });
+    historyState = makeHistory({ geminiTranscriptionRequestCount: 10 });
+    const text = mountDashboard(true).text();
+
+    expect(text).toContain("Gemini 轉錄今日 10 / 20 次");
   });
 
   it("[P0] 全計費 provider（Azure）：主體顯示今日用量與計費提示，不顯示百分比", () => {

@@ -99,9 +99,9 @@
         "flashLite": "無料枠が最大（約 500 回/日、15 回/分）。公式ドキュメントが文字起こしを推奨用途として明記。日常の音声入力に最適",
         "flash": "最新フラッグシップでマルチモーダル理解は最強だが、無料枠が非常に少ない（約 20 回/日、5 回/分）。精度重視の少量利用向け"
       },
-      "geminiQuotaLabel": "無料枠（任意）",
-      "geminiQuotaPlaceholder": "例：1500",
-      "geminiQuotaHint": "Google はドキュメントで無料枠を公開していませんが、AI Studio の Rate limits ページで自分の RPD（1日あたりのリクエスト上限）を確認できます。入力するとダッシュボードに残量が表示されます",
+      "geminiQuotaLabel": "無料枠（上書き可）",
+      "geminiQuotaPlaceholder": "組み込み既定値 {count}",
+      "geminiQuotaHint": "各モデルの組み込み無料枠を既定値として使用します（実際の値はアカウントにより異なる場合があります）。変更する場合は入力、空欄なら既定値を使用",
       "geminiQuotaLink": "AI Studio で自分の上限を確認",
       "geminiQuotaSaved": "無料枠を更新しました",
       "quotaPeriodDaily": "1日あたり",
