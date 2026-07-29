@@ -146,13 +146,17 @@ invoke('start_correction_monitor') → void
 ```
 （Rust 端簽章為 `(app: AppHandle)`，由 Tauri 注入，呼叫端不傳。）
 
-### 2.7 文字場讀取（4 個 · `plugins/text_field_reader.rs`，macOS 為主，非 macOS 降級）
+### 2.7 文字場讀取（4 個 · `plugins/text_field_reader.rs`）
+
+macOS 走 AXUIElement、Windows 走 UI Automation（`IUIAutomation` + TextPattern/ValuePattern，
+跑在專用 MTA worker 執行緒）。`read_selection_state` 的選取三態判定目前僅 macOS 有實作，
+Windows 一律回 `unavailable` 而落回剪貼簿後備。
 
 ```ts
 invoke('read_focused_text_field') → Result<string | null, string>
 invoke('read_selected_text')      → Result<string | null, string>
+invoke('read_selection_state')    → { kind: 'selection' | 'noSelection' | 'unavailable'; text: string | null }
 invoke('get_foreground_app_name') → string | null
-invoke('read_selection_state')    → { kind: 'selection' | 'noSelection' | 'unavailable', text: string | null }
 ```
 
 - `read_selection_state` 用於編輯模式偵測。macOS 走 AX worker 執行緒並以 `spawn_blocking` 等待——AX server 卡死時最壞會等 `SELECTION_READ_TIMEOUT_MS`，若阻塞 Tauri 主執行緒會連帶延後緊接其後的 `play_start_sound` / `start_recording`（錄音起點延遲＝開頭語音被吃掉）。

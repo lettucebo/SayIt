@@ -198,7 +198,10 @@ export const LLM_MODEL_LIST: LlmModelConfig[] = [
     id: "openai/gpt-oss-120b",
     providerId: "groq",
     displayName: "GPT OSS 120B",
-    badgeKey: "settings.modelBadge.stableCostly",
+    // badge 是「正式版」而非「成本高」：本模型 $0.15/$0.60 是全 registry 第二便宜
+    // （僅次於 20B），且 Groq 三個模型都有免費額度，成本不是這裡的區分軸。
+    // 真正的差異是預設的 qwen 為 preview（可能無預警下架），本模型是正式版。
+    badgeKey: "settings.modelBadge.stableProduction",
     descriptionKey: "settings.model.llmDescription.oss120b",
     speedTps: 500,
     inputCostPerMillion: 0.15,

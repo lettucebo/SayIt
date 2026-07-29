@@ -142,12 +142,14 @@ SayIt 採典型 **Tauri 雙向 IPC 模式**，沒有外部 message broker，所�
 | `copy_to_clipboard`      | 跨平台 `arboard`                                                    |
 | `capture_target_window`  | 紀錄錄音前焦點視窗（macOS）                                         |
 
-### 3.6 文字場讀取（macOS only）
+### 3.6 文字場讀取（macOS：AXUIElement／Windows：UI Automation）
 
-| Command                  | 用途                                                            |
-| ------------------------ | --------------------------------------------------------------- |
-| `read_focused_text_field`| 取游標所在輸入框內容（給 Edit Mode）                            |
-| `read_selected_text`     | 取選取文字（給 Edit Mode）— 已知問題：Fn 按住期間可能輸入 "c"  |
+| Command                  | 用途                                                                        |
+| ------------------------ | --------------------------------------------------------------------------- |
+| `read_focused_text_field`| 取游標所在輸入框內容（給 Edit Mode 與智慧字典）                             |
+| `read_selection_state`   | 選取三態判定（Edit Mode 主路徑）— 僅 macOS 有實作，Windows 回 `unavailable` |
+| `read_selected_text`     | 剪貼簿後備：模擬 Cmd+C／Ctrl+C 取選取文字，僅在三態回 `unavailable` 時使用   |
+| `get_foreground_app_name`| 取前景 App 名稱（給情境注入）                                               |
 
 ### 3.7 鍵盤監測
 

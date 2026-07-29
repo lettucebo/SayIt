@@ -194,7 +194,7 @@ src-tauri/
         ├── hotkey_listener.rs    # ~2.1k 行 — 全域熱鍵（CGEventTap / Win32 Hook）
         ├── transcription.rs      # ~1.8k 行 — 轉錄（Groq Whisper / Azure Whisper / Gemini generateContent，Rust 直呼）
         ├── audio_recorder.rs     # ~1.1k 行 — cpal 錄音 + WAV 寫檔 + 波形 FFT
-        ├── text_field_reader.rs  #  ~950 行 — AX API 讀取游標文字 / 選取狀態
+        ├── text_field_reader.rs  #  ~950 行 — 讀取游標文字／選取狀態（macOS AXUIElement、Windows UI Automation）
         ├── keyboard_monitor.rs   #  ~600 行 — 品質監測 + 矯正監測
         ├── clipboard_paste.rs    #  ~550 行 — Cmd+V / Ctrl+V 模擬貼上
         ├── audio_control.rs      #  ~450 行 — 系統音量 mute / restore
@@ -214,7 +214,7 @@ src-tauri/
 | `clipboard_paste`     | macOS：CGEvent；Windows：SendInput                | 3 個 Command                                                  |
 | `audio_control`       | macOS：CoreAudio FFI；Windows：IAudioEndpointVolume | 2 個 Command                                                  |
 | `transcription`       | 跨平台 reqwest                                    | 3 個 Command（transcribe / retranscribe_from_file / test_whisper_connection） |
-| `text_field_reader`   | macOS：AX API                                     | 4 個 Command（含 `read_selection_state`）                     |
+| `text_field_reader`   | macOS：AXUIElement；Windows：UI Automation（`IUIAutomation` + TextPattern/ValuePattern，MTA worker 執行緒） | 4 個 Command（含 `read_selection_state`，其選取三態僅 macOS 實作，Windows 回 `unavailable` 落回剪貼簿後備） |
 | `sound_feedback`      | 跨平台 cpal                                       | 4 個 Command                                                  |
 | `logging`             | 跨平台 tauri-plugin-log                           | 3 個 Command（開關 / 開資料夾 / 清理舊檔）                    |
 | `azure_auth`          | 跨平台 reqwest                                    | 1 個 Command（`get_azure_entra_token`，不帶 browser `Origin`）|
