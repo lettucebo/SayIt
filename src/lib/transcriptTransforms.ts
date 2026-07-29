@@ -26,6 +26,25 @@ function escapeRegExp(source: string): string {
 }
 
 /**
+ * 為字面 pattern 組出比對用的正則。
+ *
+ * ASCII 詞界只在**該端點確實是 ASCII 字元**時才加：
+ * - `cat` 兩端都是 ASCII → 兩側都加，才不會命中 category
+ * - `客戶短` 兩端都是中文 → 兩側都不加。若無條件加前瞻，
+ *   「Enjoy客戶短」的「客戶短」會因為前面是 `y` 而永遠比對不到——
+ *   使用者在 UI 建的中文規則會在中英夾雜語句中默默失效。
+ * - `C++` 開頭是 ASCII、結尾是符號 → 只加前側；`.NET` 反之
+ */
+function buildLiteralPattern(pattern: string): RegExp {
+  const lookbehind = /^[A-Za-z0-9_]/.test(pattern) ? "(?<![A-Za-z0-9_])" : "";
+  const lookahead = /[A-Za-z0-9_]$/.test(pattern) ? "(?![A-Za-z0-9_])" : "";
+  return new RegExp(
+    `${lookbehind}${escapeRegExp(pattern)}${lookahead}`,
+    "giu",
+  );
+}
+
+/**
  * #55：套用使用者維護的「取代規則」到單一階段（beforeAI / afterAI）。
  * 純函式——規則由呼叫端（store）提供，不在此讀取，維持依賴方向。
  * - 字面（isRegex=false）：大小寫不敏感 + ASCII identifier 邊界（避免 cat
@@ -51,14 +70,11 @@ export function applyWordReplacements(
           // 正則：保留 $1 等 capture group 語意
           result = result.replace(new RegExp(pattern, "g"), rule.replacement);
         } else {
-          // 字面：ASCII identifier 邊界（支援中文精確子字串、C++、C#、.NET，
-          // 且避免 cat 命中 category）；replacement 以函式回傳，確保完全照
-          // 字面輸出，不被當成 $&、$1 等 replacement 樣板。
+          // 字面：詞界只在 pattern 端點是 ASCII 時才加（見 buildLiteralPattern），
+          // 支援中文精確子字串、C++、C#、.NET，且避免 cat 命中 category；
+          // replacement 以函式回傳，確保完全照字面輸出，不被當成 $&、$1 等樣板。
           result = result.replace(
-            new RegExp(
-              `(?<![A-Za-z0-9_])${escapeRegExp(pattern)}(?![A-Za-z0-9_])`,
-              "giu",
-            ),
+            buildLiteralPattern(pattern),
             () => rule.replacement,
           );
         }
