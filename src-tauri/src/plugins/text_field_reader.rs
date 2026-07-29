@@ -21,7 +21,7 @@ pub fn read_focused_text_field() -> Result<Option<String>, String> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "windows"))]
 mod app_name_tests {
     use super::app_name_from_path;
 
@@ -60,6 +60,10 @@ pub fn get_foreground_app_name() -> Option<String> {
     }
 }
 
+// 僅 Windows 的 UI Automation 路徑會用到（由 exe 路徑取 App 名稱）；
+// macOS 直接取 localizedName，不需要此函式。加 cfg 閘避免 dead_code
+// 在 macOS 建置撞上 clippy -D warnings（同 SelectionState::selection 的處理）。
+#[cfg(target_os = "windows")]
 fn app_name_from_path(path: &str) -> Option<String> {
     let file_name = path.rsplit(['\\', '/']).next()?;
     let stem = file_name
