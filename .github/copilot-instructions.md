@@ -195,10 +195,12 @@ CI（`.github/workflows/ci.yml`）：`vue-tsc --noEmit` → `eslint src` → `pn
 
 ## 自動更新機制
 
-- **定時檢查** — `main-window.ts`：啟動 5 秒後首次檢查，之後每 4 小時（`setInterval`）。
+- **啟動時檢查** — `MainApp.vue` `onMounted`：App 啟動後 5 秒檢查一次，**不做定時輪詢**（Dashboard 關閉時只 hide 不 destroy，故本元件整個 App 生命週期僅 mount 一次 ≒ 每次啟動檢查一次）。排程刻意放在 `onMounted` 最前面，避免前面的 `await` 失敗連帶讓更新永不排程。
+- **失敗重試** — `checkForAppUpdate()` 吞例外回傳 `status: "error"`，故僅在**檢查失敗**時依 `src/lib/updateRetryPolicy.ts` 的 `AUTO_CHECK_RETRY_DELAYS_MS`（1／5／15 分）退避重試，用盡即 `captureError` 回報後停止（開機自啟時網路常未就緒，否則單次失敗＝本次啟動再也不檢查）。重試策略刻意獨立於 `autoUpdater.ts`，因為後者會拉進 updater plugin 而採動態 import，catch 路徑仍須能排重試。
+- **手動檢查與自動重試的關係** — 任何一次**檢查成功**（自動或手動）都會把重試階梯歸零，手動成功另外會取消待執行的重試；手動檢查**失敗**則重新武裝階梯（否則使用者離線時按一下按鈕，就會把自動更新的補救機制整個關掉）。`autoCheckTimeoutId` 是「是否還有排程在等」的權威旗標：階梯觸發時先設 `null`，`scheduleAutoCheckRetry` 見到非 `null` 就讓既有排程跑完，藉此避免重複排程與誤報「已用盡」。
 - **手動檢查** — `MainApp.vue` Sidebar Footer「檢查更新」按鈕，結果用 `useFeedbackMessage` 顯示。
 - **回傳型別** — `checkForAppUpdate()` → `Promise<UpdateCheckResult>`（`up-to-date` | `update-available` | `error`）。
-- **已知限制** — `autoUpdater.ts` 中 `window.confirm` 在 Tauri WKWebView 會被靜默忽略，未來需改用 in-app UI。
+- **勿用 `window.confirm`** — 在 Tauri WKWebView 會被靜默忽略；更新提示一律用 `MainApp.vue` 的 `AlertDialog`。
 
 ## Azure / Microsoft Foundry Provider
 

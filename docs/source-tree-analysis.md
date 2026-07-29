@@ -109,7 +109,8 @@ say-it/
 | `azureAuth.ts`                | ~100 | Entra ID client-credentials token 快取 — 依 API 路徑選 scope，提前 60 秒續期；經 Rust 取 token 以避開 WebView `Origin` 造成的 `AADSTS9002326` |
 | `connectionTest.ts`           | ~100 | 設定頁的 LLM / Whisper 連線診斷，保留 HTTP 狀態碼與回應內文供排錯                                  |
 | `transcriptTransforms.ts`     |  ~90 | 逐字稿落地前的轉換管線 — 依序套用 beforeAI 取代規則與簡→繁轉換                                     |
-| `autoUpdater.ts`              |  ~80 | 自動更新檢查（5 秒首次 + 4 小時間隔）                                                               |
+| `autoUpdater.ts`              |  ~80 | 自動更新檢查（由 `MainApp.vue` 啟動後 5 秒觸發一次，無定時輪詢）                                     |
+| `updateRetryPolicy.ts`        |  ~25 | 啟動檢查失敗時的退避重試階梯（1／5／15 分，用盡回 `null`）；無 updater plugin 相依，故 catch 路徑可用 |
 | `logger.ts`                   |  ~80 | 前端 log 轉送 `tauri-plugin-log`；是否寫檔由 Rust `FILE_LOG_ENABLED` 決定，前端不閘控以免跨視窗狀態不同步 |
 | `formatUtils.ts`              |  ~70 | 時間 / 字數 / 大小格式化                                                                            |
 | `simplifiedToTraditional.ts`  |  ~60 | 簡→繁（台灣）轉換，惰性載入 opencc-js（~1.2MB）；轉換失敗 **fail-open** 回原文，不阻斷貼上         |

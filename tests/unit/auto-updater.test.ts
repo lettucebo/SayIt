@@ -150,4 +150,59 @@ describe("autoUpdater.ts", () => {
     await expect(downloadUpdate()).rejects.toThrow("Download failed");
     expect(mockInvoke).not.toHaveBeenCalled();
   });
+
+  describe("啟動檢查失敗的重試策略", () => {
+    it("[P0] 重試階梯必須維持 1／5／15 分鐘、最多 3 次（防止改回頻繁輪詢）", async () => {
+      const { AUTO_CHECK_RETRY_DELAYS_MS } = await import(
+        "../../src/lib/updateRetryPolicy"
+      );
+
+      // 使用者需求是「啟動時檢查一次就好」，重試只是失敗時的補救，
+      // 這些數值一旦被縮短就會退化成背景輪詢
+      expect(AUTO_CHECK_RETRY_DELAYS_MS).toEqual([60_000, 300_000, 900_000]);
+      expect(AUTO_CHECK_RETRY_DELAYS_MS).toHaveLength(3);
+    });
+
+    it("[P1] 每次重試延遲應遞增（退避），避免離線時密集重試", async () => {
+      const { AUTO_CHECK_RETRY_DELAYS_MS, getAutoCheckRetryDelayMs } =
+        await import("../../src/lib/updateRetryPolicy");
+
+      for (let i = 0; i < AUTO_CHECK_RETRY_DELAYS_MS.length; i += 1) {
+        expect(getAutoCheckRetryDelayMs(i)).toBe(AUTO_CHECK_RETRY_DELAYS_MS[i]);
+      }
+
+      const delays = AUTO_CHECK_RETRY_DELAYS_MS;
+      for (let i = 1; i < delays.length; i += 1) {
+        expect(delays[i]).toBeGreaterThan(delays[i - 1]!);
+      }
+    });
+
+    it("[P0] 重試次數用盡應回傳 null，讓呼叫端停止重試（不得變成無限輪詢）", async () => {
+      const { AUTO_CHECK_RETRY_DELAYS_MS, getAutoCheckRetryDelayMs } =
+        await import("../../src/lib/updateRetryPolicy");
+
+      expect(getAutoCheckRetryDelayMs(AUTO_CHECK_RETRY_DELAYS_MS.length)).toBeNull();
+      expect(getAutoCheckRetryDelayMs(999)).toBeNull();
+    });
+
+    it("[P0] 重試策略不得依賴 updater plugin（catch 路徑也要能排重試）", async () => {
+      const policy = await import("../../src/lib/updateRetryPolicy");
+
+      expect(typeof policy.getAutoCheckRetryDelayMs).toBe("function");
+      expect(mockCheck).not.toHaveBeenCalled();
+    });
+  });
+
+  it("[P0] check 應帶 timeout，避免請求不 settle 導致狀態永久卡在 checking", async () => {
+    mockCheck.mockResolvedValue(null);
+
+    const { checkForAppUpdate } = await import("../../src/lib/autoUpdater");
+    await checkForAppUpdate();
+
+    expect(mockCheck).toHaveBeenCalledWith(
+      expect.objectContaining({ timeout: expect.any(Number) }),
+    );
+    const [options] = mockCheck.mock.calls[0] as [{ timeout: number }];
+    expect(options.timeout).toBeGreaterThan(0);
+  });
 });
