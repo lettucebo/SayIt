@@ -15,6 +15,10 @@ import {
   isCustomTriggerKey,
   isComboTriggerKey,
   isPresetTriggerKey,
+  type AzureAuthMode,
+  type AzureAuthHeaderMode,
+  toAzureAuthMode,
+  toAzureAuthHeaderMode,
 } from "../types/settings";
 import {
   getKeyDisplayName,
@@ -47,8 +51,15 @@ import {
   getHtmlLangForLocale,
   getWhisperCodeForTranscriptionLocale,
 } from "../i18n/languageConfig";
-import { emitEvent, SETTINGS_UPDATED } from "../composables/useTauriEvents";
-import type { SettingsUpdatedPayload } from "../types/events";
+import {
+  emitEvent,
+  SETTINGS_UPDATED,
+  AZURE_AUTH_STATE_CHANGED,
+} from "../composables/useTauriEvents";
+import type {
+  SettingsUpdatedPayload,
+  AzureAuthStateChangedPayload,
+} from "../types/events";
 import { applyTheme, DEFAULT_THEME_MODE, isThemeMode } from "../lib/theme";
 import {
   DEFAULT_LLM_MODEL_ID,
@@ -78,6 +89,16 @@ import {
   clearAzureTokenCache,
   getAzureScopeForApiKind,
 } from "../lib/azureAuth";
+import {
+  type AzureUserAccount,
+  getAzureUserAccount,
+  getAzureUserToken,
+  matchesCredentials,
+  newSignInOperationId,
+  signInAzureUser,
+  signOutAzureUser,
+  cancelAzureUserSignIn,
+} from "../lib/azureUserAuth";
 import {
   EXPORTABLE_SETTING_KEYS,
   stripSensitiveKeys,
@@ -163,11 +184,7 @@ export const useSettingsStore = defineStore("settings", () => {
           azureEnabled.value &&
           azureEndpoint.value !== "" &&
           azureChatDeployment.value !== "" &&
-          (azureAuthMode.value === "key"
-            ? azureApiKey.value !== ""
-            : azureTenantId.value !== "" &&
-              azureClientId.value !== "" &&
-              azureClientSecret.value !== "")
+          hasAzureCredentials.value
         );
       default:
         // exhaustiveness：若 LlmProviderId 新增成員，這行會 type error
@@ -205,7 +222,7 @@ export const useSettingsStore = defineStore("settings", () => {
   // ── Azure / Microsoft Foundry ──
   const azureEnabled = ref<boolean>(false);
   const azureEndpoint = ref<string>("");
-  const azureAuthMode = ref<"key" | "entra">("key");
+  const azureAuthMode = ref<AzureAuthMode>("key");
   const azureApiKey = ref<string>("");
   const azureTenantId = ref<string>("");
   const azureClientId = ref<string>("");
@@ -214,6 +231,42 @@ export const useSettingsStore = defineStore("settings", () => {
   const azureOmitTemperature = ref<boolean>(false);
   const azureChatDeployment = ref<string>("");
   const azureWhisperDeployment = ref<string>("");
+  /**
+   * `entraUser` 模式下目前已登入的帳號。真實來源在 Rust（OS 憑證庫），
+   * 這裡只是給 UI 與 computed 用的快照，由 `refreshAzureUserAccount()` 同步。
+   */
+  const azureUserAccount = ref<AzureUserAccount | null>(null);
+
+  /**
+   * 已登入的帳號是否對應「目前這組」tenant/client。
+   * 只判斷 account 非 null 不夠：使用者改了 Client ID 但快照還是舊帳號時會誤判已登入。
+   */
+  const isAzureUserSignedIn = computed(() =>
+    matchesCredentials(azureUserAccount.value, {
+      tenantId: azureTenantId.value,
+      clientId: azureClientId.value,
+    }),
+  );
+
+  /** 三種驗證模式各自的憑證完整性判斷。 */
+  const hasAzureCredentials = computed(() => {
+    switch (azureAuthMode.value) {
+      case "key":
+        return azureApiKey.value !== "";
+      case "entra":
+        return (
+          azureTenantId.value !== "" &&
+          azureClientId.value !== "" &&
+          azureClientSecret.value !== ""
+        );
+      case "entraUser":
+        return isAzureUserSignedIn.value;
+      default:
+        // exhaustiveness：若 AzureAuthMode 新增成員，這行會 type error
+        azureAuthMode.value satisfies never;
+        return false;
+    }
+  });
   const whisperProviderId = ref<TranscriptionProviderId>("groq");
   /** Gemini 轉錄模型（Flash-Lite 免費額度高、Flash 品質優先） */
   const geminiTranscriptionModelId = ref<GeminiTranscriptionModelId>(
@@ -229,11 +282,7 @@ export const useSettingsStore = defineStore("settings", () => {
       azureEnabled.value &&
       azureEndpoint.value !== "" &&
       azureWhisperDeployment.value !== "" &&
-      (azureAuthMode.value === "key"
-        ? azureApiKey.value !== ""
-        : azureTenantId.value !== "" &&
-          azureClientId.value !== "" &&
-          azureClientSecret.value !== "")
+      hasAzureCredentials.value
     );
   });
   let isLoaded = false;
@@ -268,7 +317,7 @@ export const useSettingsStore = defineStore("settings", () => {
     return {
       endpoint: azureEndpoint.value,
       apiVersion: azureApiVersion.value || undefined,
-      authMode: azureAuthMode.value,
+      authMode: toAzureAuthHeaderMode(azureAuthMode.value),
       authValue,
       omitTemperature: azureOmitTemperature.value,
     };
@@ -303,6 +352,19 @@ export const useSettingsStore = defineStore("settings", () => {
     }
 
     // chat 走 v1 路徑（/openai/v1/）→ ai.azure.com 受眾
+    if (azureAuthMode.value === "entraUser") {
+      const token = await getAzureUserToken(
+        { tenantId: azureTenantId.value, clientId: azureClientId.value },
+        "chat",
+      );
+      return {
+        apiKey: token,
+        provider,
+        modelId: azureChatDeployment.value,
+        azure: getAzureRequestOptions(token),
+      };
+    }
+
     const scope = getAzureScopeForApiKind("chat");
     if (azureAuthMode.value === "entra") {
       const token = await getAzureAccessToken(
@@ -348,7 +410,7 @@ export const useSettingsStore = defineStore("settings", () => {
     endpoint?: string;
     deployment?: string;
     apiVersion?: string;
-    authMode?: "key" | "entra";
+    authMode?: AzureAuthHeaderMode;
   }> {
     // Gemini 走 generateContent，模型固定（沿用 whisper-large-v3 會打到不存在的端點）
     if (whisperProviderId.value === "gemini") {
@@ -388,6 +450,14 @@ export const useSettingsStore = defineStore("settings", () => {
     };
 
     // whisper 走傳統 deployments 路徑 → cognitiveservices 受眾
+    if (azureAuthMode.value === "entraUser") {
+      const token = await getAzureUserToken(
+        { tenantId: azureTenantId.value, clientId: azureClientId.value },
+        "whisper",
+      );
+      return { ...base, apiKey: token, authMode: "bearer" };
+    }
+
     const scope = getAzureScopeForApiKind("whisper");
     if (azureAuthMode.value === "entra") {
       const token = await getAzureAccessToken(
@@ -398,7 +468,7 @@ export const useSettingsStore = defineStore("settings", () => {
         },
         scope,
       );
-      return { ...base, apiKey: token, authMode: "entra" };
+      return { ...base, apiKey: token, authMode: "bearer" };
     }
 
     return { ...base, apiKey: azureApiKey.value, authMode: "key" };
@@ -541,7 +611,7 @@ export const useSettingsStore = defineStore("settings", () => {
       azureEndpoint.value =
         (await store.get<string>("azureEndpoint"))?.trim() ?? "";
       azureAuthMode.value =
-        (await store.get<"key" | "entra">("azureAuthMode")) ?? "key";
+        toAzureAuthMode(await store.get("azureAuthMode"));
       azureApiKey.value = (await store.get<string>("azureApiKey"))?.trim() ?? "";
       azureTenantId.value =
         (await store.get<string>("azureTenantId"))?.trim() ?? "";
@@ -670,6 +740,8 @@ export const useSettingsStore = defineStore("settings", () => {
       console.log(
         `[useSettingsStore] Settings loaded: key=${JSON.stringify(key)}, mode=${mode}`,
       );
+      // tenant/client 已就緒 → 讀出 entraUser 模式的登入狀態供 UI 與 computed 使用
+      await refreshAzureUserAccount();
     } catch (err) {
       console.error(
         "[useSettingsStore] loadSettings failed:",
@@ -1284,7 +1356,7 @@ export const useSettingsStore = defineStore("settings", () => {
   async function saveAzureConnection(cfg: {
     enabled: boolean;
     endpoint: string;
-    authMode: "key" | "entra";
+    authMode: AzureAuthMode;
     apiKey: string;
     tenantId: string;
     clientId: string;
@@ -1294,13 +1366,17 @@ export const useSettingsStore = defineStore("settings", () => {
     try {
       const store = await load(STORE_NAME);
       const normalizedEndpoint = normalizeAzureEndpoint(cfg.endpoint);
+      // 切到使用者登入模式時清掉舊的 client secret：欄位在 UI 上會被隱藏，
+      // 不主動清除的話仍會被原封不動寫回明文 store，也會混進設定備份。
+      const clientSecret =
+        cfg.authMode === "entraUser" ? "" : cfg.clientSecret;
       await store.set("azureEnabled", cfg.enabled);
       await store.set("azureEndpoint", normalizedEndpoint);
       await store.set("azureAuthMode", cfg.authMode);
       await store.set("azureApiKey", cfg.apiKey.trim());
       await store.set("azureTenantId", cfg.tenantId.trim());
       await store.set("azureClientId", cfg.clientId.trim());
-      await store.set("azureClientSecret", cfg.clientSecret);
+      await store.set("azureClientSecret", clientSecret);
       await store.set("azureApiVersion", cfg.apiVersion.trim());
 
       // 停用 Azure 時，把仍指向 azure 的 provider 切回 groq（避免無 UI 可切換而卡死）
@@ -1325,9 +1401,11 @@ export const useSettingsStore = defineStore("settings", () => {
       azureApiKey.value = cfg.apiKey.trim();
       azureTenantId.value = cfg.tenantId.trim();
       azureClientId.value = cfg.clientId.trim();
-      azureClientSecret.value = cfg.clientSecret;
+      azureClientSecret.value = clientSecret;
       azureApiVersion.value = cfg.apiVersion.trim();
       clearAzureTokenCache();
+      // tenant/client 可能剛剛才變更 → 重新確認這組設定底下的登入狀態
+      await refreshAzureUserAccount();
 
       const payload: SettingsUpdatedPayload = {
         key: "azureConnection",
@@ -1347,6 +1425,10 @@ export const useSettingsStore = defineStore("settings", () => {
 
   async function deleteAzureConnection() {
     try {
+      // 先清 OS 憑證庫再刪設定：一旦 tenant/client 從 store 消失就再也算不出
+      // 該用哪個 key 去刪，refresh token 會永久殘留在使用者機器上。
+      await signOutAzureUserSilently();
+
       const store = await load(STORE_NAME);
       const keys = [
         "azureEnabled",
@@ -1387,6 +1469,8 @@ export const useSettingsStore = defineStore("settings", () => {
       azureApiVersion.value = "";
       azureOmitTemperature.value = false;
       clearAzureTokenCache();
+      azureUserAccount.value = null;
+      await emitAzureAuthStateChanged();
 
       const payload: SettingsUpdatedPayload = {
         key: "azureConnection",
@@ -1401,6 +1485,110 @@ export const useSettingsStore = defineStore("settings", () => {
       );
       throw err;
     }
+  }
+
+  // ── Entra 使用者委派登入 ──────────────────────────────────
+  //
+  // token 的真實來源在 Rust（記憶體快取 + OS 憑證庫）。這裡只維護一份給
+  // UI 與 computed 用的帳號快照，並負責跨視窗同步。
+
+  async function emitAzureAuthStateChanged() {
+    const account = azureUserAccount.value;
+    const payload: AzureAuthStateChangedPayload = {
+      signedIn: account !== null,
+      username: account?.username ?? null,
+      accountKey: account
+        ? `${account.tenantId}::${account.clientId}`
+        : null,
+    };
+    await emitEvent(AZURE_AUTH_STATE_CHANGED, payload);
+  }
+
+  /** 依目前的 tenant/client 重讀登入狀態。憑證庫不可用時視為未登入，不中斷流程。 */
+  async function refreshAzureUserAccount() {
+    try {
+      azureUserAccount.value = await getAzureUserAccount({
+        tenantId: azureTenantId.value,
+        clientId: azureClientId.value,
+      });
+    } catch (err) {
+      console.warn(
+        "[useSettingsStore] failed to read Azure user account:",
+        extractErrorMessage(err),
+      );
+      azureUserAccount.value = null;
+    }
+  }
+
+  /** 目前進行中的登入。帶 operationId 才不會取消到下一次登入。 */
+  let pendingSignInOperationId: string | null = null;
+
+  /**
+   * 互動登入。刻意做成單一原子操作：設定頁的輸入框在按下登入前尚未寫入 store，
+   * 若先登入再儲存，Rust 會拿到舊的（或空的）tenant/client。
+   */
+  async function signInAzureUserAccount(credentials: {
+    tenantId: string;
+    clientId: string;
+  }): Promise<AzureUserAccount> {
+    const tenantId = credentials.tenantId.trim();
+    const clientId = credentials.clientId.trim();
+    if (tenantId === "" || clientId === "") {
+      throw new Error("Entra credentials incomplete");
+    }
+
+    // 先落地設定，Rust 與後續 computed 才會用到同一組值
+    azureTenantId.value = tenantId;
+    azureClientId.value = clientId;
+    const store = await load(STORE_NAME);
+    await store.set("azureTenantId", tenantId);
+    await store.set("azureClientId", clientId);
+    await store.save();
+
+    const operationId = newSignInOperationId();
+    pendingSignInOperationId = operationId;
+    try {
+      const account = await signInAzureUser({ tenantId, clientId }, operationId);
+      azureUserAccount.value = account;
+      clearAzureTokenCache();
+      await emitAzureAuthStateChanged();
+      return account;
+    } finally {
+      if (pendingSignInOperationId === operationId) {
+        pendingSignInOperationId = null;
+      }
+    }
+  }
+
+  async function cancelAzureUserSignInFlow() {
+    if (!pendingSignInOperationId) return;
+    await cancelAzureUserSignIn(pendingSignInOperationId);
+  }
+
+  /** 內部用：清掉憑證庫但不動設定，失敗僅記錄（刪設定不該因憑證庫問題卡住）。 */
+  async function signOutAzureUserSilently() {
+    if (azureTenantId.value === "" || azureClientId.value === "") return;
+    try {
+      await signOutAzureUser({
+        tenantId: azureTenantId.value,
+        clientId: azureClientId.value,
+      });
+    } catch (err) {
+      console.warn(
+        "[useSettingsStore] Azure sign-out failed:",
+        extractErrorMessage(err),
+      );
+    }
+  }
+
+  async function signOutAzureUserAccount() {
+    await signOutAzureUser({
+      tenantId: azureTenantId.value,
+      clientId: azureClientId.value,
+    });
+    azureUserAccount.value = null;
+    clearAzureTokenCache();
+    await emitAzureAuthStateChanged();
   }
 
   async function saveAzureChatDeployment(name: string) {
@@ -1514,7 +1702,7 @@ export const useSettingsStore = defineStore("settings", () => {
           azureEndpoint.value =
             (await store.get<string>("azureEndpoint"))?.trim() ?? "";
           azureAuthMode.value =
-            (await store.get<"key" | "entra">("azureAuthMode")) ?? "key";
+            toAzureAuthMode(await store.get("azureAuthMode"));
           azureApiKey.value =
             (await store.get<string>("azureApiKey"))?.trim() ?? "";
           azureTenantId.value =
@@ -2088,7 +2276,7 @@ export const useSettingsStore = defineStore("settings", () => {
       azureEndpoint.value =
         (await store.get<string>("azureEndpoint"))?.trim() ?? "";
       azureAuthMode.value =
-        (await store.get<"key" | "entra">("azureAuthMode")) ?? "key";
+        toAzureAuthMode(await store.get("azureAuthMode"));
       azureApiKey.value = (await store.get<string>("azureApiKey"))?.trim() ?? "";
       azureTenantId.value =
         (await store.get<string>("azureTenantId"))?.trim() ?? "";
@@ -2115,6 +2303,8 @@ export const useSettingsStore = defineStore("settings", () => {
       geminiTranscriptionModelId.value = getEffectiveGeminiTranscriptionModelId(
         await store.get<string>("geminiTranscriptionModelId"),
       );
+      // 兜底：即使漏收 AZURE_AUTH_STATE_CHANGED，跨視窗設定刷新時也會同步登入狀態
+      await refreshAzureUserAccount();
     } catch (err) {
       console.error(
         "[useSettingsStore] refreshCrossWindowSettings failed:",
@@ -2230,6 +2420,13 @@ export const useSettingsStore = defineStore("settings", () => {
       }
       // 防禦：忽略白名單外的未知 key（含內部 migration 旗標）
       if (!EXPORTABLE_KEY_SET.has(key)) continue;
+      // 備份是使用者可任意編輯的 JSON。UI 儲存路徑會經過 normalizeAzureEndpoint
+      // 壓成純 origin，匯入路徑若不做同樣正規化，被污染的 endpoint
+      // （例如夾帶反斜線讓真實 host 落在攻擊者網域）就會直接進到請求。
+      if (key === "azureEndpoint" && typeof value === "string") {
+        await store.set(key, normalizeAzureEndpoint(value));
+        continue;
+      }
       await store.set(key as ExportableSettingKey, value);
     }
     await store.save();
@@ -2245,6 +2442,9 @@ export const useSettingsStore = defineStore("settings", () => {
       );
     }
     clearAzureTokenCache();
+    // 匯入的備份不含 refresh token（在 OS 憑證庫），需重新確認登入狀態；
+    // 換機匯入時這裡會是未登入，UI 應顯示「需要重新登入」而非已連線。
+    await refreshAzureUserAccount();
     if (autoStartDesired !== null) {
       await applyAutoStartImported(autoStartDesired);
     }
@@ -2323,6 +2523,13 @@ export const useSettingsStore = defineStore("settings", () => {
     azureOmitTemperature,
     azureChatDeployment,
     azureWhisperDeployment,
+    azureUserAccount: computed(() => azureUserAccount.value),
+    isAzureUserSignedIn,
+    hasAzureCredentials,
+    signInAzureUserAccount,
+    signOutAzureUserAccount,
+    cancelAzureUserSignInFlow,
+    refreshAzureUserAccount,
     whisperProviderId,
     geminiTranscriptionModelId,
     saveGeminiTranscriptionModel,

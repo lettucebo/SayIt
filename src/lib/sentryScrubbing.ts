@@ -15,6 +15,10 @@ const SENSITIVE_PATTERNS: readonly RegExp[] = [
   /\beyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}/g,
   /\bBearer\s+[A-Za-z0-9._~+/-]{10,}=*/gi,
   /\bapi-key["']?\s*[:=]\s*["']?[A-Za-z0-9._-]{8,}/gi,
+  // OAuth token 欄位。Entra 的 refresh token 不是 JWT、也不帶 Bearer 前綴，
+  // 上面的樣式抓不到，必須針對欄位名稱遮罩（JSON 與 form-encoded 兩種形式）。
+  /"(?:refresh_token|access_token|id_token|code_verifier)"\s*:\s*"[^"]*"/gi,
+  /\b(?:refresh_token|access_token|id_token|code_verifier)=[^&\s"']+/gi,
   /[A-Za-z]:\\Users\\[^\\/\r\n"']+/gi,
   /\/Users\/[^/\r\n"']+/g,
 ];

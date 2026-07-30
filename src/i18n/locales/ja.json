@@ -377,7 +377,20 @@
       "issueEndpoint": "上の接続カードに Endpoint URL を入力して「保存」を押してください。",
       "issueCredentials": "上の接続カードに Tenant ID／Client ID／Client Secret を入力して「保存」を押してください。",
       "issueApiKey": "上の接続カードに API Key を入力して「保存」を押してください。",
-      "issueDeployment": "デプロイ名を入力して「保存」を押してください。"
+      "issueDeployment": "デプロイ名を入力して「保存」を押してください。",
+      "issueNotSignedIn": "上の接続カードで「Microsoft アカウントでサインイン」を実行してください。",
+      "signInWaiting": "ブラウザーを開きました。サインインを完了してください…",
+      "recommended": "推奨",
+      "signOutSuccess": "サインアウトしました",
+      "signInCancelled": "サインインをキャンセルしました",
+      "reauthRequired": "サインインの有効期限が切れました。もう一度サインインしてください。",
+      "authEntraUser": "Microsoft アカウント",
+      "signOut": "サインアウト",
+      "signInSuccess": "サインインしました：{account}",
+      "signedInAs": "サインイン中：{account}",
+      "entraUserDescription": "ご自身の職場アカウントでサインインします。クライアント シークレットは不要です。ご自身の Azure 権限が使われるため「Cognitive Services OpenAI User」ロールが必要です。",
+      "signInCancel": "キャンセル",
+      "signIn": "Microsoft アカウントでサインイン"
     }
   },
   "dashboard": {

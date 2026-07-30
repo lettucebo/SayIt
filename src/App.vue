@@ -13,6 +13,7 @@ import {
   SETTINGS_UPDATED,
   VOCABULARY_CHANGED,
   REPLACEMENTS_CHANGED,
+  AZURE_AUTH_STATE_CHANGED,
   waitForDatabaseReady,
 } from "./composables/useTauriEvents";
 import { useI18n } from "vue-i18n";
@@ -23,6 +24,7 @@ const settingsStore = useSettingsStore();
 const vocabularyStore = useVocabularyStore();
 const replacementStore = useReplacementStore();
 let unlistenSettingsUpdated: UnlistenFn | null = null;
+let unlistenAzureAuthChanged: UnlistenFn | null = null;
 let unlistenVocabularyChanged: UnlistenFn | null = null;
 let unlistenReplacementsChanged: UnlistenFn | null = null;
 
@@ -46,6 +48,12 @@ onMounted(async () => {
   // 設定變更監聽須在任何 await 前註冊，避免啟動期錯過 Dashboard 的主題/設定同步
   unlistenSettingsUpdated = await listenToEvent(SETTINGS_UPDATED, () => {
     void settingsStore.refreshCrossWindowSettings();
+  });
+
+  // Dashboard 完成 Entra 登入/登出後，HUD 必須重讀帳號快照——否則
+  // hasWhisperConfig / hasLlmApiKey 會一直停在登入前的狀態直到 App 重啟。
+  unlistenAzureAuthChanged = await listenToEvent(AZURE_AUTH_STATE_CHANGED, () => {
+    void settingsStore.refreshAzureUserAccount();
   });
 
   // 初始化 DB（供 vocabularyStore 使用）
@@ -112,6 +120,7 @@ function handleRetry() {
 
 onUnmounted(() => {
   unlistenSettingsUpdated?.();
+  unlistenAzureAuthChanged?.();
   unlistenVocabularyChanged?.();
   unlistenReplacementsChanged?.();
   voiceFlowStore.cleanup();

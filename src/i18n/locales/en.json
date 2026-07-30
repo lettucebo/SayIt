@@ -377,7 +377,20 @@
       "issueEndpoint": "Enter the Endpoint URL in the connection card above and click Save.",
       "issueCredentials": "Enter Tenant ID / Client ID / Client Secret in the connection card above and click Save.",
       "issueApiKey": "Enter the API Key in the connection card above and click Save.",
-      "issueDeployment": "Enter the deployment name and click Save."
+      "issueDeployment": "Enter the deployment name and click Save.",
+      "issueNotSignedIn": "Click “Sign in with Microsoft” in the connection card above.",
+      "signInWaiting": "Browser opened — finish signing in…",
+      "recommended": "Recommended",
+      "signOutSuccess": "Signed out",
+      "signInCancelled": "Sign-in cancelled",
+      "reauthRequired": "Your sign-in expired. Please sign in with Microsoft again.",
+      "authEntraUser": "Microsoft account",
+      "signOut": "Sign out",
+      "signInSuccess": "Signed in as {account}",
+      "signedInAs": "Signed in as {account}",
+      "entraUserDescription": "Sign in with your own work account — no client secret needed. Requests use your own Azure permissions, so you need the “Cognitive Services OpenAI User” role.",
+      "signInCancel": "Cancel",
+      "signIn": "Sign in with Microsoft"
     }
   },
   "dashboard": {

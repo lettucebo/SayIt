@@ -377,7 +377,20 @@
       "issueEndpoint": "위 연결 카드에 Endpoint URL을 입력하고 '저장'을 누르세요.",
       "issueCredentials": "위 연결 카드에 Tenant ID / Client ID / Client Secret을 입력하고 '저장'을 누르세요.",
       "issueApiKey": "위 연결 카드에 API Key를 입력하고 '저장'을 누르세요.",
-      "issueDeployment": "배포 이름을 입력하고 '저장'을 누르세요."
+      "issueDeployment": "배포 이름을 입력하고 '저장'을 누르세요.",
+      "issueNotSignedIn": "위 연결 카드에서 \"Microsoft 계정으로 로그인\"을 실행하세요.",
+      "signInWaiting": "브라우저를 열었습니다. 로그인을 완료하세요…",
+      "recommended": "권장",
+      "signOutSuccess": "로그아웃했습니다",
+      "signInCancelled": "로그인을 취소했습니다",
+      "reauthRequired": "로그인이 만료되었습니다. 다시 로그인하세요.",
+      "authEntraUser": "Microsoft 계정",
+      "signOut": "로그아웃",
+      "signInSuccess": "로그인됨: {account}",
+      "signedInAs": "로그인됨: {account}",
+      "entraUserDescription": "본인의 회사 계정으로 로그인합니다. 클라이언트 비밀은 필요 없습니다. 본인의 Azure 권한을 사용하므로 \"Cognitive Services OpenAI User\" 역할이 필요합니다.",
+      "signInCancel": "취소",
+      "signIn": "Microsoft 계정으로 로그인"
     }
   },
   "dashboard": {

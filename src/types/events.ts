@@ -57,6 +57,13 @@ export interface VocabularyChangedPayload {
   term: string;
 }
 
+/** Entra 使用者登入狀態變更。`accountKey` 為 `{tenantId}::{clientId}`。 */
+export interface AzureAuthStateChangedPayload {
+  signedIn: boolean;
+  username: string | null;
+  accountKey: string | null;
+}
+
 export type ReplacementsChangedPayload = void;
 
 export interface HotkeyEventPayload {

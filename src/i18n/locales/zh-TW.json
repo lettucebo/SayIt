@@ -377,7 +377,20 @@
       "issueEndpoint": "請在上方連線卡填寫 Endpoint URL 並按「儲存」。",
       "issueCredentials": "請在上方連線卡填寫 Tenant ID／Client ID／Client Secret 並按「儲存」。",
       "issueApiKey": "請在上方連線卡填寫 API Key 並按「儲存」。",
-      "issueDeployment": "請填寫部署名稱並按「儲存」。"
+      "issueDeployment": "請填寫部署名稱並按「儲存」。",
+      "issueNotSignedIn": "請在上方連線卡點「使用 Microsoft 帳號登入」完成登入。",
+      "signInWaiting": "已開啟瀏覽器，請完成登入…",
+      "recommended": "推薦",
+      "signOutSuccess": "已登出",
+      "signInCancelled": "已取消登入",
+      "reauthRequired": "登入已失效，請重新登入 Microsoft 帳號。",
+      "authEntraUser": "Microsoft 帳號登入",
+      "signOut": "登出",
+      "signInSuccess": "已登入：{account}",
+      "signedInAs": "已登入：{account}",
+      "entraUserDescription": "用你自己的公司帳號登入，不需要 Client Secret。登入後會沿用你在 Azure 上的權限，需要「Cognitive Services OpenAI User」角色。",
+      "signInCancel": "取消",
+      "signIn": "使用 Microsoft 帳號登入"
     }
   },
   "dashboard": {

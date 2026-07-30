@@ -32,6 +32,7 @@ import {
   HOTKEY_RECORDING_CAPTURED,
   HOTKEY_RECORDING_REJECTED,
 } from "../composables/useTauriEvents";
+import { isSignInCancelledError } from "../lib/azureUserAuth";
 import {
   type PresetTriggerKey,
   type ComboTriggerKey,
@@ -71,6 +72,7 @@ import {
 } from "../i18n/languageConfig";
 
 import { PROMPT_MODE_VALUES, type PromptMode, THEME_MODE_VALUES, type ThemeMode } from "../types/settings";
+import { AZURE_AUTH_MODE_VALUES, type AzureAuthMode } from "../types/settings";
 import {
   Card,
   CardContent,
@@ -131,6 +133,8 @@ import {
   Trash2,
   X,
   Upload,
+  CircleCheck,
+  LoaderCircle,
 } from "lucide-vue-next";
 import { openLogFolder } from "../lib/logger";
 import type { AudioInputDeviceInfo } from "../types/audio";
@@ -768,7 +772,7 @@ async function handleProviderChange(providerId: LlmProviderId) {
 const azureFeedback = useFeedbackMessage();
 const azureEnabledInput = ref(false);
 const azureEndpointInput = ref("");
-const azureAuthModeInput = ref<"key" | "entra">("key");
+const azureAuthModeInput = ref<AzureAuthMode>("key");
 const azureApiKeyInput = ref("");
 const azureTenantIdInput = ref("");
 const azureClientIdInput = ref("");
@@ -838,6 +842,68 @@ async function handleDeleteAzureConnection() {
   }
 }
 
+// ── Entra 使用者登入 ────────────────────────────────────────
+const isAzureSigningIn = ref(false);
+
+/**
+ * 登入是單一原子操作：tenant/client 直接從輸入框帶入，由 store 先落地再登入。
+ * 若先儲存再登入會多一次使用者操作，且忘記按儲存就會拿到舊值。
+ */
+async function handleAzureUserSignIn() {
+  try {
+    isAzureSigningIn.value = true;
+    azureFeedback.show("success", t("settings.azure.signInWaiting"));
+    const account = await settingsStore.signInAzureUserAccount({
+      tenantId: azureTenantIdInput.value,
+      clientId: azureClientIdInput.value,
+    });
+    // 登入成功後把其餘連線設定一併存好，避免使用者忘記按儲存
+    await handleSaveAzureConnection();
+    azureFeedback.show(
+      "success",
+      t("settings.azure.signInSuccess", {
+        account: account.username ?? account.name ?? "",
+      }),
+    );
+  } catch (err) {
+    const message = extractErrorMessage(err);
+    azureFeedback.show(
+      "error",
+      isSignInCancelledError(message)
+        ? t("settings.azure.signInCancelled")
+        : message,
+    );
+  } finally {
+    isAzureSigningIn.value = false;
+  }
+}
+
+async function handleAzureUserCancelSignIn() {
+  try {
+    await settingsStore.cancelAzureUserSignInFlow();
+  } catch (err) {
+    azureFeedback.show("error", extractErrorMessage(err));
+  }
+}
+
+async function handleAzureUserSignOut() {
+  try {
+    isSubmittingAzure.value = true;
+    await settingsStore.signOutAzureUserAccount();
+    azureFeedback.show("success", t("settings.azure.signOutSuccess"));
+  } catch (err) {
+    azureFeedback.show("error", extractErrorMessage(err));
+  } finally {
+    isSubmittingAzure.value = false;
+  }
+}
+
+const azureSignedInLabel = computed(() => {
+  const account = settingsStore.azureUserAccount;
+  if (!account) return "";
+  return account.username ?? account.name ?? "";
+});
+
 async function handleSaveAzureChatDeployment() {
   try {
     await settingsStore.saveAzureChatDeployment(azureChatDeploymentInput.value);
@@ -877,7 +943,10 @@ function azureConnectionIssue(deployment: string): string {
   if (!settingsStore.azureEnabled) return t("settings.azure.issueNotEnabled");
   if (settingsStore.azureEndpoint === "")
     return t("settings.azure.issueEndpoint");
-  if (settingsStore.azureAuthMode === "entra") {
+  if (settingsStore.azureAuthMode === "entraUser") {
+    if (!settingsStore.isAzureUserSignedIn)
+      return t("settings.azure.issueNotSignedIn");
+  } else if (settingsStore.azureAuthMode === "entra") {
     if (
       settingsStore.azureTenantId === "" ||
       settingsStore.azureClientId === "" ||
@@ -2069,8 +2138,10 @@ onBeforeUnmount(() => {
           <Label>{{ $t("settings.azure.authModeLabel") }}</Label>
           <RadioGroup
             :model-value="azureAuthModeInput"
-            class="grid grid-cols-2 gap-2"
-            @update:model-value="(v: unknown) => (azureAuthModeInput = v as 'key' | 'entra')"
+            class="grid grid-cols-3 gap-2"
+            @update:model-value="(v: unknown) => {
+              if (AZURE_AUTH_MODE_VALUES.includes(v as AzureAuthMode)) azureAuthModeInput = v as AzureAuthMode;
+            }"
           >
             <Label
               for="azure-auth-key"
@@ -2079,6 +2150,15 @@ onBeforeUnmount(() => {
             >
               <RadioGroupItem id="azure-auth-key" value="key" class="!size-0 !border-0 !shadow-none overflow-hidden" />
               <span class="text-sm font-medium">{{ $t("settings.azure.authKey") }}</span>
+            </Label>
+            <Label
+              for="azure-auth-entra-user"
+              class="flex cursor-pointer items-center gap-2.5 rounded-md border border-border p-3 transition-colors"
+              :class="azureAuthModeInput === 'entraUser' ? 'border-primary bg-primary/5' : 'hover:bg-muted/50'"
+            >
+              <RadioGroupItem id="azure-auth-entra-user" value="entraUser" class="!size-0 !border-0 !shadow-none overflow-hidden" />
+              <span class="text-sm font-medium">{{ $t("settings.azure.authEntraUser") }}</span>
+              <Badge variant="secondary" class="ml-auto">{{ $t("settings.azure.recommended") }}</Badge>
             </Label>
             <Label
               for="azure-auth-entra"
@@ -2104,6 +2184,45 @@ onBeforeUnmount(() => {
               {{ isAzureApiKeyVisible ? $t('settings.apiKey.hide') : $t('settings.apiKey.show') }}
             </Button>
           </div>
+        </div>
+
+        <div v-else-if="azureAuthModeInput === 'entraUser'" class="space-y-2">
+          <p class="text-sm text-muted-foreground leading-relaxed">
+            {{ $t("settings.azure.entraUserDescription") }}
+          </p>
+          <Label for="azure-user-tenant-id">{{ $t("settings.azure.tenantIdLabel") }}</Label>
+          <Input id="azure-user-tenant-id" v-model="azureTenantIdInput" class="font-mono text-xs" />
+          <Label for="azure-user-client-id">{{ $t("settings.azure.clientIdLabel") }}</Label>
+          <Input id="azure-user-client-id" v-model="azureClientIdInput" class="font-mono text-xs" />
+
+          <div
+            v-if="settingsStore.isAzureUserSignedIn"
+            class="flex items-center justify-between rounded-md border border-border bg-muted/30 p-3"
+          >
+            <div class="flex items-center gap-2">
+              <CircleCheck class="size-4 text-green-400" />
+              <span class="text-sm">{{ $t("settings.azure.signedInAs", { account: azureSignedInLabel }) }}</span>
+            </div>
+            <Button variant="outline" size="sm" :disabled="isSubmittingAzure" @click="handleAzureUserSignOut">
+              {{ $t("settings.azure.signOut") }}
+            </Button>
+          </div>
+          <div v-else-if="isAzureSigningIn" class="flex items-center justify-between rounded-md border border-border p-3">
+            <div class="flex items-center gap-2">
+              <LoaderCircle class="size-4 animate-spin text-muted-foreground" />
+              <span class="text-sm text-muted-foreground">{{ $t("settings.azure.signInWaiting") }}</span>
+            </div>
+            <Button variant="outline" size="sm" @click="handleAzureUserCancelSignIn">
+              {{ $t("settings.azure.signInCancel") }}
+            </Button>
+          </div>
+          <Button
+            v-else
+            :disabled="azureTenantIdInput.trim() === '' || azureClientIdInput.trim() === ''"
+            @click="handleAzureUserSignIn"
+          >
+            {{ $t("settings.azure.signIn") }}
+          </Button>
         </div>
 
         <div v-else class="space-y-2">
