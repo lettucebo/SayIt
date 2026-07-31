@@ -32,7 +32,7 @@ reqwest = { version = "0.12", features = ["multipart", "json", "rustls-tls", "ru
 tokio = { version = "1", features = ["time", "net", "io-util", "sync", "rt"] }
 sha2 = "0.10"
 getrandom = "0.3"
-keyring = { version = "4", features = ["v1"] }
+keyring-core = "1"
 tauri-plugin-dialog = "2.7.1"
 tauri-plugin-log = "2.8.0"
 log = "0.4.33"
@@ -42,6 +42,7 @@ base64 = "0.23.0"
 core-graphics = "0.24"
 core-foundation = "0.10"
 objc = "0.2"
+apple-native-keyring-store = "1"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.61", features = [
@@ -56,6 +57,7 @@ windows = { version = "0.61", features = [
     "Win32_System_Registry",
     "Win32_Graphics_Dwm",
 ] }
+windows-native-keyring-store = "1"
 
 [profile.dev]
 incremental = true

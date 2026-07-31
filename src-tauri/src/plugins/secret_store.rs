@@ -21,6 +21,7 @@
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 
 /// 單段大小。低於實測的 2560 bytes 上限，保留餘裕給不同平台的實作差異。
 const CHUNK_SIZE: usize = 2048;
@@ -60,6 +61,39 @@ pub struct OsKeyring {
     service: String,
 }
 
+/// 平台憑證庫只需初始化一次。
+static STORE_INIT: std::sync::OnceLock<Result<(), String>> = std::sync::OnceLock::new();
+
+/// 明確設定 keyring-core 的預設 store。
+///
+/// 不走 `keyring` crate 的 v1 相容層，因為那一層不提供 entry modifier，
+/// 而 Windows 憑證管理員的 persistence 只能逐筆用 modifier 指定
+/// （store 層的 `new_with_configuration` 只支援 prefix/divider/suffix）。
+fn ensure_store() -> Result<(), String> {
+    STORE_INIT
+        .get_or_init(|| {
+            #[cfg(target_os = "windows")]
+            {
+                let store =
+                    windows_native_keyring_store::Store::new().map_err(|e| e.to_string())?;
+                keyring_core::set_default_store(store);
+            }
+            #[cfg(target_os = "macos")]
+            {
+                let store = apple_native_keyring_store::keychain::Store::new()
+                    .map_err(|e| e.to_string())?;
+                keyring_core::set_default_store(store);
+            }
+            #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+            {
+                return Err("no credential store for this platform".to_string());
+            }
+            #[allow(unreachable_code)]
+            Ok(())
+        })
+        .clone()
+}
+
 impl OsKeyring {
     pub fn new(service: impl Into<String>) -> Self {
         Self {
@@ -67,8 +101,16 @@ impl OsKeyring {
         }
     }
 
-    fn entry(&self, account: &str) -> Result<keyring::v1::Entry, String> {
-        keyring::v1::Entry::new(&self.service, account).map_err(|e| e.to_string())
+    fn entry(&self, account: &str) -> Result<keyring_core::Entry, String> {
+        ensure_store()?;
+        let mut modifiers: HashMap<&str, &str> = HashMap::new();
+        // Windows 憑證管理員預設是 Enterprise persistence——那會讓憑證隨
+        // 使用者設定檔漫遊到其他機器。refresh token 不該離開這台裝置，
+        // 因此明確指定 Local。（實測預設值確實是 Enterprise。）
+        #[cfg(target_os = "windows")]
+        modifiers.insert("persistence", "Local");
+        keyring_core::Entry::new_with_modifiers(&self.service, account, &modifiers)
+            .map_err(|e| e.to_string())
     }
 }
 
@@ -76,22 +118,46 @@ impl KeyringBackend for OsKeyring {
     fn get(&self, account: &str) -> Result<Option<Vec<u8>>, String> {
         match self.entry(account)?.get_secret() {
             Ok(v) => Ok(Some(v)),
-            Err(keyring::v1::Error::NoEntry) => Ok(None),
+            Err(keyring_core::Error::NoEntry) => Ok(None),
             Err(e) => Err(e.to_string()),
         }
     }
 
     fn set(&self, account: &str, value: &[u8]) -> Result<(), String> {
-        self.entry(account)?
-            .set_secret(value)
-            .map_err(|e| e.to_string())
+        let entry = self.entry(account)?;
+        // Windows 把 Enterprise（會隨設定檔漫遊）與 Local 的憑證存在**兩個獨立的
+        // 儲存區**，同一個 target_name 可同時存在於兩者；此時寫入會落在 Local，
+        // 讀取卻可能一直拿到舊的 Enterprise 版，造成「寫入看似成功卻讀到舊值」。
+        // 因此先把非 Local 的殘留刪乾淨再寫。用迴圈是因為一次 delete 只會移除
+        // 其中一筆，理論上可能兩邊都有。
+        #[cfg(target_os = "windows")]
+        {
+            for _ in 0..4 {
+                match entry.get_attributes() {
+                    Ok(attrs) if attrs.get("persistence").map(|s| s.as_str()) != Some("Local") => {
+                        if entry.delete_credential().is_err() {
+                            break;
+                        }
+                    }
+                    _ => break,
+                }
+            }
+        }
+        entry.set_secret(value).map_err(|e| e.to_string())
     }
 
     fn delete(&self, account: &str) -> Result<(), String> {
-        match self.entry(account)?.delete_credential() {
-            Ok(()) | Err(keyring::v1::Error::NoEntry) => Ok(()),
-            Err(e) => Err(e.to_string()),
+        let entry = self.entry(account)?;
+        // 同上：同一 target_name 可能在 Enterprise 與 Local 兩區各有一筆，
+        // 只刪一次會留下殘留，之後讀取仍可能拿到舊值。刪到沒有為止（有上限）。
+        for _ in 0..4 {
+            match entry.delete_credential() {
+                Ok(()) => continue,
+                Err(keyring_core::Error::NoEntry) => return Ok(()),
+                Err(e) => return Err(e.to_string()),
+            }
         }
+        Ok(())
     }
 }
 
@@ -215,7 +281,20 @@ impl<B: KeyringBackend> SecretStore<B> {
             .set(&manifest_account(key), &encoded)
             .map_err(SecretStoreError::Unavailable)?;
 
-        // 舊 generation 清理失敗不影響正確性（manifest 已指向新的），僅留下孤兒項目。
+        // 讀回驗證 manifest —— backend 回 Ok **不等於**資料真的落地。
+        // 實例：Windows 憑證管理員無法就地變更既有憑證的 persistence，
+        // CredWrite 會回成功卻不套用，寫入等同靜默失效。若不驗證就往下
+        // 清除舊 generation，manifest 會指向已被刪掉的資料 → 必然損毀。
+        // 驗證失敗就中止並保留舊 generation，讓舊資料仍然完整可讀。
+        let written = self
+            .backend
+            .get(&manifest_account(key))
+            .map_err(SecretStoreError::Unavailable)?;
+        if written.as_deref() != Some(encoded.as_slice()) {
+            return Err(SecretStoreError::Corrupted);
+        }
+
+        // 舊 generation 清理失敗不影響正確性（manifest 已確認指向新的），僅留下孤兒項目。
         if let Some(old) = previous {
             let _ = self.purge_generation(key, &old.generation);
         }
@@ -283,6 +362,9 @@ mod tests {
         set_calls: Mutex<usize>,
         /// true 時所有 `delete` 都失敗——用來模擬憑證庫拒絕刪除。
         fail_delete: Mutex<bool>,
+        /// 命中此 account 時，`set` 回 Ok 但**不真的寫入**——重現 Windows
+        /// 無法就地變更 persistence 時 CredWrite「回成功卻沒生效」的行為。
+        silently_ignore_set: Mutex<Option<String>>,
     }
 
     impl FakeKeyring {
@@ -295,6 +377,12 @@ mod tests {
         fn failing_delete() -> Self {
             let f = Self::default();
             *f.fail_delete.lock().unwrap() = true;
+            f
+        }
+
+        fn silently_ignoring(account_suffix: &str) -> Self {
+            let f = Self::default();
+            *f.silently_ignore_set.lock().unwrap() = Some(account_suffix.to_string());
             f
         }
     }
@@ -310,6 +398,12 @@ mod tests {
             if let Some(limit) = *self.fail_set_after.lock().unwrap() {
                 if *calls > limit {
                     return Err("simulated keyring failure".to_string());
+                }
+            }
+            // 回 Ok 但不寫入：重現 CredWrite 靜默失效
+            if let Some(suffix) = self.silently_ignore_set.lock().unwrap().as_deref() {
+                if account.ends_with(suffix) {
+                    return Ok(());
                 }
             }
             self.data
@@ -467,5 +561,36 @@ mod tests {
             store.save("acct", &huge),
             Err(SecretStoreError::TooLarge(_))
         ));
+    }
+
+    #[test]
+    fn silently_ignored_manifest_write_does_not_destroy_previous_value() {
+        // 真實事故重現：Windows 無法就地變更既有憑證的 persistence，
+        // CredWrite 回報成功卻沒有生效。若不驗證 manifest 就清除舊 generation，
+        // manifest 會指向已被刪掉的資料 —— 使用者的登入狀態直接損毀。
+        let backend = FakeKeyring::default();
+        let store = SecretStore::new(backend);
+        store.save("acct", "original-secret").unwrap();
+        let data = store.backend.data.lock().unwrap().clone();
+        let before = store.load("acct").unwrap();
+        assert_eq!(before.as_deref(), Some("original-secret"));
+
+        // 換一個「meta 寫入會被靜默忽略」的 backend
+        let ignoring = FakeKeyring::silently_ignoring("::meta");
+        *ignoring.data.lock().unwrap() = data;
+        let store2 = SecretStore::new(ignoring);
+
+        // 寫入必須失敗，而不是回報成功後留下損毀狀態
+        assert!(
+            store2.save("acct", "rotated-secret").is_err(),
+            "manifest write that did not land must be reported as an error"
+        );
+
+        // 關鍵：舊值必須仍然完整可讀（沒有被清掉）
+        assert_eq!(
+            store2.load("acct").unwrap().as_deref(),
+            Some("original-secret"),
+            "previous generation must survive a failed manifest update"
+        );
     }
 }
