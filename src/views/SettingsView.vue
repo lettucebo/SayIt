@@ -32,7 +32,7 @@ import {
   HOTKEY_RECORDING_CAPTURED,
   HOTKEY_RECORDING_REJECTED,
 } from "../composables/useTauriEvents";
-import { isSignInCancelledError } from "../lib/azureUserAuth";
+import { isSignInCancelledError, isPolicyDeniedError } from "../lib/azureUserAuth";
 import {
   type PresetTriggerKey,
   type ComboTriggerKey,
@@ -806,22 +806,27 @@ function loadAzureInputsFromStore() {
 async function handleSaveAzureConnection() {
   try {
     isSubmittingAzure.value = true;
-    await settingsStore.saveAzureConnection({
-      enabled: azureEnabledInput.value,
-      endpoint: azureEndpointInput.value,
-      authMode: azureAuthModeInput.value,
-      apiKey: azureApiKeyInput.value,
-      tenantId: azureTenantIdInput.value,
-      clientId: azureClientIdInput.value,
-      clientSecret: azureClientSecretInput.value,
-      apiVersion: azureApiVersionInput.value,
-    });
+    await handleSaveAzureConnectionOrThrow();
     azureFeedback.show("success", t("settings.azure.saved"));
   } catch (err) {
     azureFeedback.show("error", extractErrorMessage(err));
   } finally {
     isSubmittingAzure.value = false;
   }
+}
+
+/** 儲存連線設定但**不**吞錯——供需要「失敗就中止」的呼叫端使用（例如登入前置）。 */
+async function handleSaveAzureConnectionOrThrow() {
+  await settingsStore.saveAzureConnection({
+    enabled: azureEnabledInput.value,
+    endpoint: azureEndpointInput.value,
+    authMode: azureAuthModeInput.value,
+    apiKey: azureApiKeyInput.value,
+    tenantId: azureTenantIdInput.value,
+    clientId: azureClientIdInput.value,
+    clientSecret: azureClientSecretInput.value,
+    apiVersion: azureApiVersionInput.value,
+  });
 }
 
 async function handleToggleAzureEnabled(value: boolean) {
@@ -846,19 +851,21 @@ async function handleDeleteAzureConnection() {
 const isAzureSigningIn = ref(false);
 
 /**
- * 登入是單一原子操作：tenant/client 直接從輸入框帶入，由 store 先落地再登入。
- * 若先儲存再登入會多一次使用者操作，且忘記按儲存就會拿到舊值。
+ * 登入前先把連線設定落地，再開瀏覽器登入。
+ *
+ * 順序刻意是「先存後登入」：若反過來，儲存失敗時登入已經成功，UI 會顯示
+ * 已登入但持久化的 endpoint/deployment 其實沒寫進去，狀態不一致。先存的話
+ * 任一步失敗都只會停在「設定已存、尚未登入」這個一致且可重試的狀態。
  */
 async function handleAzureUserSignIn() {
   try {
     isAzureSigningIn.value = true;
+    await handleSaveAzureConnectionOrThrow();
     azureFeedback.show("success", t("settings.azure.signInWaiting"));
     const account = await settingsStore.signInAzureUserAccount({
       tenantId: azureTenantIdInput.value,
       clientId: azureClientIdInput.value,
     });
-    // 登入成功後把其餘連線設定一併存好，避免使用者忘記按儲存
-    await handleSaveAzureConnection();
     azureFeedback.show(
       "success",
       t("settings.azure.signInSuccess", {
@@ -867,12 +874,17 @@ async function handleAzureUserSignIn() {
     );
   } catch (err) {
     const message = extractErrorMessage(err);
-    azureFeedback.show(
-      "error",
-      isSignInCancelledError(message)
-        ? t("settings.azure.signInCancelled")
-        : message,
-    );
+    if (isSignInCancelledError(message)) {
+      azureFeedback.show("error", t("settings.azure.signInCancelled"));
+    } else if (isPolicyDeniedError(message)) {
+      // 保留 AADSTS 原文：使用者需要它去跟 IT 說明是哪條政策擋下的
+      azureFeedback.show(
+        "error",
+        `${t("settings.azure.signInPolicyDenied")} ${message}`,
+      );
+    } else {
+      azureFeedback.show("error", message);
+    }
   } finally {
     isAzureSigningIn.value = false;
   }

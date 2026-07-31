@@ -390,7 +390,8 @@
       "signedInAs": "サインイン中：{account}",
       "entraUserDescription": "ご自身の職場アカウントでサインインします。クライアント シークレットは不要です。ご自身の Azure 権限が使われるため「Cognitive Services OpenAI User」ロールが必要です。",
       "signInCancel": "キャンセル",
-      "signIn": "Microsoft アカウントでサインイン"
+      "signIn": "Microsoft アカウントでサインイン",
+      "signInPolicyDenied": "組織のアクセス ポリシーによりサインインがブロックされました。次のメッセージを添えて IT にご連絡ください："
     }
   },
   "dashboard": {

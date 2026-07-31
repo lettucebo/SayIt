@@ -390,7 +390,8 @@
       "signedInAs": "로그인됨: {account}",
       "entraUserDescription": "본인의 회사 계정으로 로그인합니다. 클라이언트 비밀은 필요 없습니다. 본인의 Azure 권한을 사용하므로 \"Cognitive Services OpenAI User\" 역할이 필요합니다.",
       "signInCancel": "취소",
-      "signIn": "Microsoft 계정으로 로그인"
+      "signIn": "Microsoft 계정으로 로그인",
+      "signInPolicyDenied": "조직의 액세스 정책에 의해 로그인이 차단되었습니다. 다음 메시지와 함께 IT에 문의하세요:"
     }
   },
   "dashboard": {

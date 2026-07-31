@@ -139,7 +139,9 @@ impl<B: KeyringBackend> SecretStore<B> {
         let Some(manifest) = self.read_manifest(key)? else {
             return Ok(None);
         };
-        if manifest.chunks > MAX_CHUNKS {
+        // 上限檢查同時涵蓋段數與總長：損壞或被竄改的 manifest 若宣稱一個
+        // 巨大的 len，`with_capacity` 會直接吃掉大量記憶體甚至讓程序被 OOM 終止。
+        if manifest.chunks > MAX_CHUNKS || manifest.len > CHUNK_SIZE * MAX_CHUNKS {
             return Err(SecretStoreError::Corrupted);
         }
 

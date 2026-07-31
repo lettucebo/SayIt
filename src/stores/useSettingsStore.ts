@@ -313,11 +313,14 @@ export const useSettingsStore = defineStore("settings", () => {
     }
   }
 
-  function getAzureRequestOptions(authValue: string): AzureRequestOptions {
+  function getAzureRequestOptions(
+    authValue: string,
+    authMode: AzureAuthHeaderMode = toAzureAuthHeaderMode(azureAuthMode.value),
+  ): AzureRequestOptions {
     return {
       endpoint: azureEndpoint.value,
       apiVersion: azureApiVersion.value || undefined,
-      authMode: toAzureAuthHeaderMode(azureAuthMode.value),
+      authMode,
       authValue,
       omitTemperature: azureOmitTemperature.value,
     };
@@ -357,11 +360,13 @@ export const useSettingsStore = defineStore("settings", () => {
         { tenantId: azureTenantId.value, clientId: azureClientId.value },
         "chat",
       );
+      // 明確固定成 "bearer"：等待 token 期間另一個視窗可能已把 authMode 改掉，
+      // 若回頭再讀 reactive 值，這個 bearer token 會被塞進 api-key header。
       return {
         apiKey: token,
         provider,
         modelId: azureChatDeployment.value,
-        azure: getAzureRequestOptions(token),
+        azure: getAzureRequestOptions(token, "bearer"),
       };
     }
 
@@ -379,7 +384,7 @@ export const useSettingsStore = defineStore("settings", () => {
         apiKey: token,
         provider,
         modelId: azureChatDeployment.value,
-        azure: getAzureRequestOptions(token),
+        azure: getAzureRequestOptions(token, "bearer"),
       };
     }
 
@@ -387,7 +392,7 @@ export const useSettingsStore = defineStore("settings", () => {
       apiKey: azureApiKey.value,
       provider,
       modelId: azureChatDeployment.value,
-      azure: getAzureRequestOptions(azureApiKey.value),
+      azure: getAzureRequestOptions(azureApiKey.value, "key"),
     };
   }
 
@@ -1370,12 +1375,22 @@ export const useSettingsStore = defineStore("settings", () => {
       // 不主動清除的話仍會被原封不動寫回明文 store，也會混進設定備份。
       const clientSecret =
         cfg.authMode === "entraUser" ? "" : cfg.clientSecret;
+      const nextTenantId = cfg.tenantId.trim();
+      const nextClientId = cfg.clientId.trim();
+      // 換掉 tenant/client 等於換一個登入身分：舊的 refresh token 若不清掉會
+      // 長期留在 OS 憑證庫，日後切回舊值還會「自動已登入」。
+      const identityChanged =
+        nextTenantId !== azureTenantId.value ||
+        nextClientId !== azureClientId.value;
+      if (identityChanged) {
+        await signOutAzureUserSilently();
+      }
       await store.set("azureEnabled", cfg.enabled);
       await store.set("azureEndpoint", normalizedEndpoint);
       await store.set("azureAuthMode", cfg.authMode);
       await store.set("azureApiKey", cfg.apiKey.trim());
-      await store.set("azureTenantId", cfg.tenantId.trim());
-      await store.set("azureClientId", cfg.clientId.trim());
+      await store.set("azureTenantId", nextTenantId);
+      await store.set("azureClientId", nextClientId);
       await store.set("azureClientSecret", clientSecret);
       await store.set("azureApiVersion", cfg.apiVersion.trim());
 

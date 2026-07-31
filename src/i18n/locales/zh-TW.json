@@ -390,7 +390,8 @@
       "signedInAs": "已登入：{account}",
       "entraUserDescription": "用你自己的公司帳號登入，不需要 Client Secret。登入後會沿用你在 Azure 上的權限，需要「Cognitive Services OpenAI User」角色。",
       "signInCancel": "取消",
-      "signIn": "使用 Microsoft 帳號登入"
+      "signIn": "使用 Microsoft 帳號登入",
+      "signInPolicyDenied": "登入被貴公司的存取政策擋下，請聯絡 IT 並提供以下訊息："
     }
   },
   "dashboard": {

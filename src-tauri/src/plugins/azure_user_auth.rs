@@ -76,10 +76,20 @@ pub enum AzureUserAuthError {
     AlreadyInProgress,
     #[error("sign-in cancelled")]
     Cancelled,
+    /// 被 tenant 政策（Conditional Access 等）拒絕。與使用者自行取消區分開，
+    /// 才能把 AADSTS 說明帶給使用者去找 IT。
+    #[error("sign-in blocked by policy: {0}")]
+    PolicyDenied(String),
     #[error("sign-in timed out")]
     TimedOut,
     #[error("not signed in")]
     NotSignedIn,
+    /// tenant/client 識別碼格式不合法。這是安全檢查而非便利性檢查——見
+    /// `validate_tenant_id` 的說明。
+    #[error("invalid tenant id")]
+    InvalidTenantId,
+    #[error("invalid client id")]
+    InvalidClientId,
     /// refresh token 已失效（撤銷／過期／密碼變更）→ 必須重新互動登入。
     #[error("interaction required: {0}")]
     InteractionRequired(String),
@@ -116,6 +126,64 @@ pub struct StoredSession {
 
 pub fn account_key(tenant_id: &str, client_id: &str) -> String {
     format!("azure-user::{tenant_id}::{client_id}")
+}
+
+// ── 識別碼驗證（安全關鍵）─────────────────────────────────
+
+/// 8-4-4-4-12 的 GUID 形式。
+fn is_guid(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if bytes.len() != 36 {
+        return false;
+    }
+    bytes.iter().enumerate().all(|(i, b)| match i {
+        8 | 13 | 18 | 23 => *b == b'-',
+        _ => b.is_ascii_hexdigit(),
+    })
+}
+
+/// domain 形式的 tenant（例如 `contoso.onmicrosoft.com`）。
+fn is_domain_like_tenant(value: &str) -> bool {
+    if value.is_empty() || value.len() > 253 || !value.contains('.') || value.contains("..") {
+        return false;
+    }
+    if value.starts_with(['-', '.']) || value.ends_with(['-', '.']) {
+        return false;
+    }
+    value
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'.')
+}
+
+/// 驗證 tenant 識別碼。**這是安全檢查，不是輸入便利性檢查。**
+///
+/// `tenant_id` 會被直接拼進 authorize / token URL 的 **path** 段。若允許
+/// `?`、`#`、`/` 等字元，攻擊者可用被竄改的設定備份把整個授權請求改寫成
+/// 自己的 `client_id` / `redirect_uri` / `scope`——而 host 仍然是真正的
+/// `login.microsoftonline.com`（合法憑證、真實的同意畫面），我方原本的參數
+/// 則被推進 fragment 永不送出。使用者恰好在「預期出現 Microsoft 登入」的
+/// 時機看到真實同意畫面，同意後 authorization code 就落到攻擊者手上。
+///
+/// 因此採白名單：GUID、已知別名，或 domain 形式，其餘一律拒絕。
+pub fn validate_tenant_id(value: &str) -> Result<(), AzureUserAuthError> {
+    let ok = is_guid(value)
+        || matches!(value, "common" | "organizations" | "consumers")
+        || is_domain_like_tenant(value);
+    if ok {
+        Ok(())
+    } else {
+        Err(AzureUserAuthError::InvalidTenantId)
+    }
+}
+
+/// client_id 一律要求 GUID。除了同樣避免 URL 注入，也保證它不會撞到
+/// `account_key()` 的 `::` 分隔符而讓不同設定對應到同一筆憑證庫項目。
+pub fn validate_client_id(value: &str) -> Result<(), AzureUserAuthError> {
+    if is_guid(value) {
+        Ok(())
+    } else {
+        Err(AzureUserAuthError::InvalidClientId)
+    }
 }
 
 // ── PKCE ────────────────────────────────────────────────────
@@ -260,6 +328,37 @@ fn response_page(title: &str, body: &str) -> String {
 const NOT_FOUND_RESPONSE: &str =
     "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
 
+/// 讀出 HTTP request line（首行）。
+///
+/// **不能假設一次 `read()` 就拿到完整首行**：TCP 是位元組流，request 被分段
+/// 送達時，只讀一次會拿到半截 URL，於是把真正的 callback 當成無效請求回 404。
+/// 瀏覽器不會重送，使用者就只能乾等五分鐘逾時。因此持續讀到 `\r\n` 為止，
+/// 並以總長與 deadline 雙重設限，避免慢速/惡意連線把流程拖住。
+async fn read_request_line(stream: &mut tokio::net::TcpStream) -> Option<String> {
+    let mut buf = Vec::with_capacity(1024);
+    let mut chunk = [0u8; 1024];
+    let deadline = tokio::time::Instant::now() + SOCKET_READ_TIMEOUT;
+
+    loop {
+        if let Some(pos) = buf.windows(2).position(|w| w == b"\r\n") {
+            return Some(String::from_utf8_lossy(&buf[..pos]).into_owned());
+        }
+        if buf.len() >= MAX_REQUEST_BYTES {
+            return None;
+        }
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return None;
+        }
+        match tokio::time::timeout(remaining, stream.read(&mut chunk)).await {
+            // 對端關閉且尚未讀到 CRLF
+            Ok(Ok(0)) => return None,
+            Ok(Ok(n)) => buf.extend_from_slice(&chunk[..n]),
+            _ => return None,
+        }
+    }
+}
+
 /// 循環接受連線直到收到合法 callback。
 ///
 /// 刻意不在第一個連線就結束：瀏覽器的預連線、favicon 請求或安全軟體的探測
@@ -276,21 +375,11 @@ pub async fn wait_for_callback(
             .await
             .map_err(|e| AzureUserAuthError::Failed(format!("callback accept failed: {e}")))?;
 
-        let mut buf = vec![0u8; MAX_REQUEST_BYTES];
-        let read = tokio::time::timeout(SOCKET_READ_TIMEOUT, stream.read(&mut buf)).await;
-        let Ok(Ok(n)) = read else {
-            // 讀不到就放掉這條連線，繼續等下一個
+        let Some(first_line) = read_request_line(&mut stream).await else {
+            // 讀不到完整首行就放掉這條連線，繼續等下一個
             continue;
         };
-        if n == 0 {
-            continue;
-        }
-
-        let text = String::from_utf8_lossy(&buf[..n]);
-        let Some(first_line) = text.lines().next() else {
-            continue;
-        };
-        let Some(params) = parse_callback_query(first_line) else {
+        let Some(params) = parse_callback_query(&first_line) else {
             let _ = stream.write_all(NOT_FOUND_RESPONSE.as_bytes()).await;
             let _ = stream.shutdown().await;
             continue;
@@ -317,8 +406,14 @@ pub async fn wait_for_callback(
                 .await;
             let _ = stream.shutdown().await;
             let detail = description.lines().next().unwrap_or("").to_string();
-            return Err(if error == "access_denied" {
+            // `access_denied` 同時代表兩件事：使用者自己按了取消，以及
+            // Conditional Access 之類的政策擋下。只有前者沒有 error_description，
+            // 後者會帶 AADSTS 說明——若一律當成「已取消」，被公司政策擋下的
+            // 使用者會以為是自己取消，完全不知道該去找 IT。
+            return Err(if error == "access_denied" && detail.is_empty() {
                 AzureUserAuthError::Cancelled
+            } else if error == "access_denied" {
+                AzureUserAuthError::PolicyDenied(detail)
             } else {
                 AzureUserAuthError::Failed(format!("{error}: {detail}"))
             });
@@ -600,5 +695,136 @@ mod tests {
     fn account_key_binds_tenant_and_client() {
         assert_ne!(account_key("t", "c1"), account_key("t", "c2"));
         assert_ne!(account_key("t1", "c"), account_key("t2", "c"));
+    }
+
+    /// 用真的 TcpStream 把 callback 拆成多段送出，驗證不會因為 TCP 分段而漏掉。
+    async fn callback_over_fragmented_stream(
+        chunks: &[&str],
+        expected_state: &str,
+    ) -> Result<CallbackResult, AzureUserAuthError> {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let owned: Vec<String> = chunks.iter().map(|s| s.to_string()).collect();
+
+        tokio::spawn(async move {
+            let mut client = tokio::net::TcpStream::connect(addr).await.unwrap();
+            for chunk in owned {
+                client.write_all(chunk.as_bytes()).await.unwrap();
+                client.flush().await.unwrap();
+                // 強制分段抵達，而非被合併成一個 segment
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            let mut sink = Vec::new();
+            let _ = client.read_to_end(&mut sink).await;
+        });
+
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            wait_for_callback(&listener, expected_state, "ok", "ok"),
+        )
+        .await
+        .expect("wait_for_callback should not hang on fragmented input")
+    }
+
+    #[tokio::test]
+    async fn accepts_callback_split_across_tcp_segments() {
+        // TCP 不保證一次 read 就拿到完整首行。舊實作只讀一次，分段時會把真正的
+        // callback 當成無效請求回 404——瀏覽器不會重送，使用者只能等五分鐘逾時。
+        let result = callback_over_fragmented_stream(
+            &[
+                "GET /?code=frag",
+                "mented-code&state=st",
+                "ate-value HTTP/1.1\r\n",
+                "Host: 127.0.0.1\r\n\r\n",
+            ],
+            "state-value",
+        )
+        .await
+        .expect("fragmented callback must be accepted");
+        assert_eq!(result.code, "fragmented-code");
+    }
+
+    #[tokio::test]
+    async fn accepts_callback_delivered_byte_by_byte() {
+        let line = "GET /?code=slow&state=s1 HTTP/1.1\r\n\r\n";
+        let chunks: Vec<String> = line.chars().map(|c| c.to_string()).collect();
+        let refs: Vec<&str> = chunks.iter().map(|s| s.as_str()).collect();
+        let result = callback_over_fragmented_stream(&refs, "s1")
+            .await
+            .expect("byte-by-byte callback must be accepted");
+        assert_eq!(result.code, "slow");
+    }
+
+    #[test]
+    fn accepts_legitimate_tenant_and_client_ids() {
+        for tenant in [
+            "2aeb30d9-f0a6-4e27-8c47-f97c5b695eb6",
+            "2AEB30D9-F0A6-4E27-8C47-F97C5B695EB6",
+            "common",
+            "organizations",
+            "consumers",
+            "contoso.onmicrosoft.com",
+            "contoso.com",
+        ] {
+            assert!(
+                validate_tenant_id(tenant).is_ok(),
+                "should accept tenant {tenant}"
+            );
+        }
+        assert!(validate_client_id("1671ffd4-5c2a-44dd-83a2-e1c8267aa51b").is_ok());
+    }
+
+    #[test]
+    fn rejects_tenant_ids_that_could_rewrite_the_authorize_request() {
+        // tenant_id 被拼進 URL 的 path：含 `?` / `#` 就能把整個授權請求換成
+        // 攻擊者的 client_id / redirect_uri / scope，而 host 仍是真的
+        // login.microsoftonline.com（使用者會看到貨真價實的同意畫面）。
+        let payload = "00000000-1111-2222-3333-444444444444/oauth2/v2.0/authorize\
+?client_id=ATTACKER&redirect_uri=https%3A%2F%2Fevil.example%2Fcb#";
+        assert!(validate_tenant_id(payload).is_err());
+
+        for tenant in [
+            "",
+            "tenant/../other",
+            "tenant?x=1",
+            "tenant#frag",
+            "tenant\\evil",
+            "tenant%2F",
+            "tenant with space",
+            "tenant:8080",
+            "tenant@evil",
+            // 未含點的裸字串不是合法 domain 形式，也不是 GUID/別名
+            "nodot",
+            // GUID 長度或分隔符不對
+            "2aeb30d9f0a64e278c47f97c5b695eb6",
+            "2aeb30d9-f0a6-4e27-8c47-f97c5b695eb",
+            "..",
+            ".contoso.com",
+            "contoso..com",
+        ] {
+            assert!(
+                validate_tenant_id(tenant).is_err(),
+                "should reject tenant {tenant:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn client_id_must_be_a_guid() {
+        // 非 GUID 除了 URL 注入風險，也可能撞到 account_key 的 `::` 分隔符，
+        // 讓不同設定對應到同一筆憑證庫項目
+        for client in [
+            "",
+            "not-a-guid",
+            "contoso.com",
+            "common",
+            "a::b",
+            "1671ffd4-5c2a-44dd-83a2-e1c8267aa51",
+        ] {
+            assert!(
+                validate_client_id(client).is_err(),
+                "should reject client {client:?}"
+            );
+        }
     }
 }

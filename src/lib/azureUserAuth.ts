@@ -105,3 +105,12 @@ export function isNotSignedInError(message: string): boolean {
 export function isSignInCancelledError(message: string): boolean {
   return message.includes("sign-in cancelled");
 }
+
+/**
+ * 被 tenant 政策（Conditional Access 等）擋下。
+ * 與「使用者自行取消」分開處理：後者不需要提示，前者要把 AADSTS 說明留給
+ * 使用者拿去找 IT，否則使用者會以為是自己按了取消。
+ */
+export function isPolicyDeniedError(message: string): boolean {
+  return message.includes("sign-in blocked by policy");
+}

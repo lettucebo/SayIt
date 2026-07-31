@@ -14,12 +14,14 @@
 
 use super::azure_user_auth::{
     account_key, bind_loopback, build_authorize_url, generate_pkce, open_in_browser,
-    parse_account_from_id_token, random_url_safe, sign_in_timeout, wait_for_callback,
-    AzureUserAccount, AzureUserAuthError, ScopeKind, StoredSession,
+    parse_account_from_id_token, random_url_safe, sign_in_timeout, validate_client_id,
+    validate_tenant_id, wait_for_callback, AzureUserAccount, AzureUserAuthError, ScopeKind,
+    StoredSession,
 };
 use super::secret_store::{OsKeyring, SecretStore, SecretStoreError};
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 use tauri::command;
@@ -53,7 +55,36 @@ pub struct AzureUserAuthState {
 
 struct PendingSignIn {
     operation_id: String,
-    cancel: Arc<Notify>,
+    cancel: Arc<CancelSignal>,
+}
+
+/// 取消訊號。
+///
+/// 不能只用 `Notify::notify_waiters()`：它不保留 permit，而使用者按下取消的
+/// 時機很可能落在「已建立 pending，但 `tokio::select!` 的取消分支尚未 arm」
+/// 之間（bind loopback、開瀏覽器那段），該次取消會被靜默丟棄，使用者得多等
+/// 五分鐘才等到 timeout。改以「旗標 + notify_one（會保留 permit）」組合，
+/// 讓任何先後順序都能正確收到取消。
+#[derive(Default)]
+struct CancelSignal {
+    cancelled: AtomicBool,
+    notify: Notify,
+}
+
+impl CancelSignal {
+    fn cancel(&self) {
+        self.cancelled.store(true, Ordering::SeqCst);
+        self.notify.notify_one();
+    }
+
+    async fn cancelled(&self) {
+        loop {
+            if self.cancelled.load(Ordering::SeqCst) {
+                return;
+            }
+            self.notify.notified().await;
+        }
+    }
 }
 
 impl AzureUserAuthState {
@@ -92,12 +123,12 @@ impl AzureUserAuthState {
             .retain(|k, _| !k.starts_with(&prefix));
     }
 
-    fn begin_sign_in(&self, operation_id: &str) -> Result<Arc<Notify>, AzureUserAuthError> {
+    fn begin_sign_in(&self, operation_id: &str) -> Result<Arc<CancelSignal>, AzureUserAuthError> {
         let mut pending = self.pending.lock().unwrap();
         if pending.is_some() {
             return Err(AzureUserAuthError::AlreadyInProgress);
         }
-        let cancel = Arc::new(Notify::new());
+        let cancel = Arc::new(CancelSignal::default());
         *pending = Some(PendingSignIn {
             operation_id: operation_id.to_string(),
             cancel: cancel.clone(),
@@ -120,7 +151,7 @@ impl AzureUserAuthState {
         let pending = self.pending.lock().unwrap();
         if let Some(p) = pending.as_ref() {
             if p.operation_id == operation_id {
-                p.cancel.notify_waiters();
+                p.cancel.cancel();
             }
         }
     }
@@ -144,17 +175,35 @@ impl Drop for SignInGuard<'_> {
 
 // ── 憑證庫存取（同步 API → spawn_blocking）───────────────────
 
+/// 憑證庫操作的行程內序列化鎖。
+///
+/// async 端雖已有 per-account mutex，但 `spawn_blocking` 一旦啟動就不會因為
+/// 呼叫端的 future 被 drop（WebView 重載、視窗關閉、command 被取消）而中止。
+/// 那種情況下 async guard 已經釋放，下一個 command 可能在舊的 blocking 任務
+/// 還在寫入時就進入臨界區，造成「刪除後又被舊的 save 寫回」或 refresh 與
+/// sign-out 交錯。因此在 blocking 端再加一道鎖，確保憑證庫操作本身恆為序列化。
+static KEYRING_LOCK: StdMutex<()> = StdMutex::new(());
+
+/// 取得憑證庫鎖。中毒（前一個持有者 panic）時仍繼續使用——憑證庫操作本身
+/// 沒有跨呼叫的不變式會被破壞，硬中斷只會讓使用者無法登入。
+fn keyring_guard() -> std::sync::MutexGuard<'static, ()> {
+    KEYRING_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 fn store() -> SecretStore<OsKeyring> {
     SecretStore::new(OsKeyring::new(KEYRING_SERVICE))
 }
 
 async fn load_session(key: String) -> Result<Option<StoredSession>, AzureUserAuthError> {
-    tokio::task::spawn_blocking(move || match store().load(&key) {
-        Ok(Some(raw)) => Ok(serde_json::from_str::<StoredSession>(&raw).ok()),
-        Ok(None) => Ok(None),
-        // 憑證損毀視為未登入：要求重新登入即可自我修復，比硬錯更好
-        Err(SecretStoreError::Corrupted) => Ok(None),
-        Err(e) => Err(AzureUserAuthError::Failed(e.to_string())),
+    tokio::task::spawn_blocking(move || {
+        let _guard = keyring_guard();
+        match store().load(&key) {
+            Ok(Some(raw)) => Ok(serde_json::from_str::<StoredSession>(&raw).ok()),
+            Ok(None) => Ok(None),
+            // 憑證損毀視為未登入：要求重新登入即可自我修復，比硬錯更好
+            Err(SecretStoreError::Corrupted) => Ok(None),
+            Err(e) => Err(AzureUserAuthError::Failed(e.to_string())),
+        }
     })
     .await
     .map_err(|e| AzureUserAuthError::Failed(e.to_string()))?
@@ -164,6 +213,7 @@ async fn save_session(key: String, session: &StoredSession) -> Result<(), AzureU
     let raw = serde_json::to_string(session)
         .map_err(|e| AzureUserAuthError::Failed(format!("failed to encode session: {e}")))?;
     tokio::task::spawn_blocking(move || {
+        let _guard = keyring_guard();
         store()
             .save(&key, &raw)
             .map_err(|e| AzureUserAuthError::Failed(e.to_string()))
@@ -174,6 +224,7 @@ async fn save_session(key: String, session: &StoredSession) -> Result<(), AzureU
 
 async fn delete_session(key: String) -> Result<(), AzureUserAuthError> {
     tokio::task::spawn_blocking(move || {
+        let _guard = keyring_guard();
         store()
             .delete(&key)
             .map_err(|e| AzureUserAuthError::Failed(e.to_string()))
@@ -212,6 +263,10 @@ async fn post_token(
 ) -> Result<TokenResponse, AzureUserAuthError> {
     let client = reqwest::Client::builder()
         .timeout(TOKEN_REQUEST_TIMEOUT)
+        // 禁止跟隨 redirect：token endpoint 不該重導，若被重導（DNS 汙染、
+        // 中間設備）預設行為會把 client_id / code / refresh_token 這些
+        // form body 一併送到新位址。
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|e| AzureUserAuthError::Failed(e.to_string()))?;
 
@@ -264,6 +319,10 @@ fn require_config(tenant_id: &str, client_id: &str) -> Result<(), AzureUserAuthE
     if tenant_id.is_empty() || client_id.is_empty() {
         return Err(AzureUserAuthError::ConfigIncomplete);
     }
+    // 安全關鍵：tenant_id 會拼進 authorize/token URL 的 path，未驗證即可被
+    // 竄改的設定備份改寫整個授權請求（見 validate_tenant_id 的說明）。
+    validate_tenant_id(tenant_id)?;
+    validate_client_id(client_id)?;
     Ok(())
 }
 
@@ -308,7 +367,7 @@ pub async fn azure_user_sign_in(
             "登入完成",
             "可以關閉這個分頁，回到 SayIt。",
         ) => result?,
-        _ = cancel.notified() => return Err(AzureUserAuthError::Cancelled),
+        _ = cancel.cancelled() => return Err(AzureUserAuthError::Cancelled),
         _ = tokio::time::sleep(sign_in_timeout()) => return Err(AzureUserAuthError::TimedOut),
     };
 
@@ -370,7 +429,13 @@ pub async fn azure_user_sign_out(
     client_id: String,
     state: tauri::State<'_, AzureUserAuthState>,
 ) -> Result<(), AzureUserAuthError> {
-    let key = account_key(&normalize(&tenant_id), &normalize(&client_id));
+    let tenant_id = normalize(&tenant_id);
+    let client_id = normalize(&client_id);
+    // 登出容許格式不合法的舊值：使用者可能就是要清掉那筆壞掉的設定
+    if tenant_id.is_empty() || client_id.is_empty() {
+        return Ok(());
+    }
+    let key = account_key(&tenant_id, &client_id);
     let lock = state.lock_for(&key);
     let _held = lock.lock().await;
     state.clear_tokens(&key);
@@ -385,7 +450,9 @@ pub async fn azure_user_get_account(
 ) -> Result<Option<AzureUserAccount>, AzureUserAuthError> {
     let tenant_id = normalize(&tenant_id);
     let client_id = normalize(&client_id);
-    if tenant_id.is_empty() || client_id.is_empty() {
+    // 查詢類操作：格式不合法視為「沒有這個帳號」，不報錯——設定載入時
+    // 使用者可能還在輸入一半，不該讓整個設定頁噴錯。
+    if require_config(&tenant_id, &client_id).is_err() {
         return Ok(None);
     }
     let key = account_key(&tenant_id, &client_id);
@@ -550,11 +617,32 @@ mod tests {
     }
 
     #[test]
-    fn interaction_required_errors_are_classified() {
-        for code in INTERACTION_REQUIRED_ERRORS {
-            assert!(INTERACTION_REQUIRED_ERRORS.contains(&code));
+    fn classifies_errors_that_require_interactive_sign_in() {
+        // 這幾種錯誤重試 refresh 沒有意義，必須引導使用者重新登入；
+        // 其餘（限流、暫時性故障）則應維持可重試，不可把使用者踢出去。
+        for code in [
+            "invalid_grant",
+            "interaction_required",
+            "consent_required",
+            "login_required",
+        ] {
+            assert!(
+                INTERACTION_REQUIRED_ERRORS.contains(&code),
+                "{code} should require interactive sign-in"
+            );
         }
-        assert!(!INTERACTION_REQUIRED_ERRORS.contains(&"temporarily_unavailable"));
+        for code in [
+            "temporarily_unavailable",
+            "server_error",
+            "invalid_request",
+            "slow_down",
+            "",
+        ] {
+            assert!(
+                !INTERACTION_REQUIRED_ERRORS.contains(&code),
+                "{code} must stay retryable"
+            );
+        }
     }
 
     #[test]
@@ -562,5 +650,52 @@ mod tests {
         // 前端 reject 收到的是字串，不是物件
         let json = serde_json::to_string(&AzureUserAuthError::NotSignedIn).unwrap();
         assert_eq!(json, "\"not signed in\"");
+    }
+
+    #[tokio::test]
+    async fn cancel_before_await_is_not_lost() {
+        // 使用者按取消的時機常落在「已建立 pending、但 select! 尚未 arm」之間
+        //（bind loopback、開瀏覽器那段）。若用 notify_waiters() 這次取消會被
+        // 靜默丟棄，使用者得多等五分鐘 timeout。
+        let signal = CancelSignal::default();
+        signal.cancel();
+        tokio::time::timeout(Duration::from_millis(200), signal.cancelled())
+            .await
+            .expect("cancel issued before await must still be observed");
+    }
+
+    #[tokio::test]
+    async fn cancel_while_awaiting_is_observed() {
+        let signal = Arc::new(CancelSignal::default());
+        let waiter = signal.clone();
+        let handle = tokio::spawn(async move { waiter.cancelled().await });
+        tokio::task::yield_now().await;
+        signal.cancel();
+        tokio::time::timeout(Duration::from_millis(200), handle)
+            .await
+            .expect("cancel during await must wake the waiter")
+            .expect("waiter task should not panic");
+    }
+
+    #[tokio::test]
+    async fn uncancelled_signal_keeps_waiting() {
+        let signal = CancelSignal::default();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), signal.cancelled())
+                .await
+                .is_err(),
+            "signal must not report cancellation before cancel() is called"
+        );
+    }
+
+    #[test]
+    fn cancel_targets_only_the_matching_operation() {
+        let state = AzureUserAuthState::default();
+        let signal = state.begin_sign_in("op-1").unwrap();
+        // 針對別次操作的取消不可影響進行中的這次
+        state.cancel_sign_in("op-2");
+        assert!(!signal.cancelled.load(Ordering::SeqCst));
+        state.cancel_sign_in("op-1");
+        assert!(signal.cancelled.load(Ordering::SeqCst));
     }
 }

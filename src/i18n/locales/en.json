@@ -390,7 +390,8 @@
       "signedInAs": "Signed in as {account}",
       "entraUserDescription": "Sign in with your own work account — no client secret needed. Requests use your own Azure permissions, so you need the “Cognitive Services OpenAI User” role.",
       "signInCancel": "Cancel",
-      "signIn": "Sign in with Microsoft"
+      "signIn": "Sign in with Microsoft",
+      "signInPolicyDenied": "Sign-in was blocked by your organization policy. Contact IT with this message:"
     }
   },
   "dashboard": {
