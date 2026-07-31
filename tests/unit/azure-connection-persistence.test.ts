@@ -72,6 +72,7 @@ describe("saveAzureConnection 的資料保存性", () => {
       "../../src/stores/useSettingsStore"
     );
     const store = useSettingsStore();
+    await store.loadSettings();
 
     await store.saveAzureConnection(baseConfig());
     expect(mockStoreData.get("azureClientSecret")).toBe(SECRET);
@@ -90,6 +91,7 @@ describe("saveAzureConnection 的資料保存性", () => {
       "../../src/stores/useSettingsStore"
     );
     const store = useSettingsStore();
+    await store.loadSettings();
 
     // 登入流程會先呼叫一次儲存，重複登入即重複儲存
     for (let i = 0; i < 3; i++) {
@@ -105,6 +107,7 @@ describe("saveAzureConnection 的資料保存性", () => {
       "../../src/stores/useSettingsStore"
     );
     const store = useSettingsStore();
+    await store.loadSettings();
 
     await store.saveAzureConnection(baseConfig());
     expect(mockStoreData.get("azureClientSecret")).toBe(SECRET);
@@ -118,6 +121,7 @@ describe("saveAzureConnection 的資料保存性", () => {
       "../../src/stores/useSettingsStore"
     );
     const store = useSettingsStore();
+    await store.loadSettings();
 
     mockStoreData.set("groqApiKey", "groq-key");
     mockStoreData.set("geminiApiKey", "gemini-key");
@@ -126,5 +130,39 @@ describe("saveAzureConnection 的資料保存性", () => {
 
     expect(mockStoreData.get("groqApiKey")).toBe("groq-key");
     expect(mockStoreData.get("geminiApiKey")).toBe("gemini-key");
+  });
+
+  it("[P0] 設定尚未載入完成時拒絕儲存，避免空白輸入覆寫既有設定", async () => {
+    // main-window.ts 先 app.mount() 才 await loadSettings()，所以 SettingsView 的
+    // onMounted 可能早於載入完成。此時輸入欄位還是預設空值，存回去會整批清空。
+    const { useSettingsStore } = await import(
+      "../../src/stores/useSettingsStore"
+    );
+    const store = useSettingsStore();
+
+    // 模擬持久層已有使用者資料，但 store 尚未 loadSettings()
+    mockStoreData.set("azureEndpoint", "https://real.openai.azure.com");
+    mockStoreData.set("azureTenantId", TENANT);
+    mockStoreData.set("azureClientId", CLIENT);
+    mockStoreData.set("azureClientSecret", SECRET);
+
+    await expect(
+      store.saveAzureConnection(
+        baseConfig({
+          endpoint: "",
+          tenantId: "",
+          clientId: "",
+          clientSecret: "",
+        }),
+      ),
+    ).rejects.toThrow();
+
+    // 既有資料必須毫髮無傷
+    expect(mockStoreData.get("azureEndpoint")).toBe(
+      "https://real.openai.azure.com",
+    );
+    expect(mockStoreData.get("azureTenantId")).toBe(TENANT);
+    expect(mockStoreData.get("azureClientId")).toBe(CLIENT);
+    expect(mockStoreData.get("azureClientSecret")).toBe(SECRET);
   });
 });

@@ -286,6 +286,17 @@ export const useSettingsStore = defineStore("settings", () => {
     );
   });
   let isLoaded = false;
+  /** reactive 版本的載入旗標，供 UI 停用表單用。 */
+  const settingsLoadedFlag = ref(false);
+  /**
+   * 設定是否已從持久層載入完成。
+   *
+   * `main-window.ts` 是先 `app.mount()` 再 `await loadSettings()`，所以 View 的
+   * `onMounted` 有機會在載入完成前就執行。若此時把（還是預設空值的）輸入欄位
+   * 存回去，就會把使用者的既有設定整批清空——這與先前兩次資料事故是同一類問題，
+   * 因此把防線放在資料層，一次涵蓋所有呼叫端。
+   */
+  const isSettingsLoaded = computed(() => settingsLoadedFlag.value);
 
   /** Resolve which SupportedLocale to use for prompt default (shared logic). */
   function getEffectivePromptLocale(): SupportedLocale {
@@ -742,6 +753,7 @@ export const useSettingsStore = defineStore("settings", () => {
       // Sync saved (or default) config to Rust on startup
       await syncHotkeyConfigToRust(key, mode);
       isLoaded = true;
+      settingsLoadedFlag.value = true;
       console.log(
         `[useSettingsStore] Settings loaded: key=${JSON.stringify(key)}, mode=${mode}`,
       );
@@ -767,6 +779,10 @@ export const useSettingsStore = defineStore("settings", () => {
       isCopyTranscriptionToClipboardEnabled.value =
         DEFAULT_COPY_TRANSCRIPTION_TO_CLIPBOARD;
       contextInjectionEnabled.value = DEFAULT_CONTEXT_INJECTION_ENABLED;
+      // 載入失敗時同樣視為「載入已結束」：此時已明確落到預設值，race 視窗已過。
+      // 若不標記，設定頁會被守門永久鎖住而無從修復。
+      isLoaded = true;
+      settingsLoadedFlag.value = true;
     }
   }
 
@@ -1369,6 +1385,13 @@ export const useSettingsStore = defineStore("settings", () => {
     apiVersion: string;
   }) {
     try {
+      // 守門：設定尚未載入完成時，輸入欄位還是預設空值，把它們存回去等於把
+      // 使用者的既有設定整批清空。成因是 main-window.ts 先 app.mount() 才
+      // await loadSettings()，View 的 onMounted 可能早於載入完成。
+      // 防線放在資料層而非個別 View，才能一次涵蓋所有呼叫端。
+      if (!isLoaded) {
+        throw new Error("SETTINGS_NOT_LOADED");
+      }
       const store = await load(STORE_NAME);
       const normalizedEndpoint = normalizeAzureEndpoint(cfg.endpoint);
       const nextTenantId = cfg.tenantId.trim();
@@ -1442,7 +1465,10 @@ export const useSettingsStore = defineStore("settings", () => {
     try {
       // 先清 OS 憑證庫再刪設定：一旦 tenant/client 從 store 消失就再也算不出
       // 該用哪個 key 去刪，refresh token 會永久殘留在使用者機器上。
-      await signOutAzureUserSilently();
+      // 因此清除失敗時**不繼續**刪設定，讓使用者能重試而不是留下清不掉的殘留。
+      if (!(await signOutAzureUserSilently())) {
+        throw new Error("AZURE_CREDENTIAL_CLEANUP_FAILED");
+      }
 
       const store = await load(STORE_NAME);
       const keys = [
@@ -1581,18 +1607,25 @@ export const useSettingsStore = defineStore("settings", () => {
   }
 
   /** 內部用：清掉憑證庫但不動設定，失敗僅記錄（刪設定不該因憑證庫問題卡住）。 */
-  async function signOutAzureUserSilently() {
-    if (azureTenantId.value === "" || azureClientId.value === "") return;
+  /**
+   * 內部用：清掉憑證庫但不動設定。
+   * 回傳是否成功——呼叫端若接著要刪掉 tenant/client，必須先確認這裡成功，
+   * 否則殘留的 refresh token 會因為算不出 key 而永遠清不掉。
+   */
+  async function signOutAzureUserSilently(): Promise<boolean> {
+    if (azureTenantId.value === "" || azureClientId.value === "") return true;
     try {
       await signOutAzureUser({
         tenantId: azureTenantId.value,
         clientId: azureClientId.value,
       });
+      return true;
     } catch (err) {
       console.warn(
         "[useSettingsStore] Azure sign-out failed:",
         extractErrorMessage(err),
       );
+      return false;
     }
   }
 
@@ -2428,6 +2461,20 @@ export const useSettingsStore = defineStore("settings", () => {
     const store = await load(STORE_NAME);
     let autoStartDesired: boolean | null = null;
 
+    // 匯入會直接覆寫 tenant/client。若不先登出舊身分，舊帳號的 refresh token
+    // 會留在 OS 憑證庫，而覆寫後再也算不出它的 key —— 永久孤兒。
+    // （`saveAzureConnection` 的 identityChanged 分支有做，匯入路徑先前漏了。）
+    const incomingTenant = settings["azureTenantId"];
+    const incomingClient = settings["azureClientId"];
+    const identityChanged =
+      (typeof incomingTenant === "string" &&
+        incomingTenant.trim() !== azureTenantId.value) ||
+      (typeof incomingClient === "string" &&
+        incomingClient.trim() !== azureClientId.value);
+    if (identityChanged) {
+      await signOutAzureUserSilently();
+    }
+
     for (const [key, value] of Object.entries(settings)) {
       if (key === AUTO_START_KEY) {
         if (typeof value === "boolean") autoStartDesired = value;
@@ -2539,6 +2586,7 @@ export const useSettingsStore = defineStore("settings", () => {
     azureChatDeployment,
     azureWhisperDeployment,
     azureUserAccount: computed(() => azureUserAccount.value),
+    isSettingsLoaded,
     isAzureUserSignedIn,
     hasAzureCredentials,
     signInAzureUserAccount,

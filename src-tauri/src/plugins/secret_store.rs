@@ -303,27 +303,35 @@ impl<B: KeyringBackend> SecretStore<B> {
 
     /// 刪除 manifest 與兩個 generation 的所有分段（含可能殘留的孤兒）。
     ///
-    /// 分段刪除失敗會被回報而非吞掉：登出若宣稱成功卻留下可用的 refresh token，
-    /// 使用者會以為已經清乾淨。Microsoft 不會因為輪替就立刻讓舊 token 失效，
-    /// 殘留物仍可能有效。
+    /// **順序刻意是「先清分段、再刪 manifest」**：真正的祕密在分段裡，manifest
+    /// 只是中繼資料。若先刪 manifest 又中途以 `?` 提早返回，最敏感的那批資料
+    /// 反而會因為最不敏感的那筆失敗而留下；而呼叫端接著就會把 tenant/client
+    /// 從設定移除，屆時再也算不出 key，殘留的 refresh token 就永遠清不掉。
+    /// 因此全程收集失敗而不提早返回，manifest 讀不到時退化成掃描兩個 generation。
     pub fn delete(&self, key: &str) -> Result<(), SecretStoreError> {
-        let manifest = self.read_manifest(key)?;
-        self.backend
-            .delete(&manifest_account(key))
-            .map_err(SecretStoreError::Unavailable)?;
-        let mut failures = Vec::new();
+        let mut failures: Vec<String> = Vec::new();
+
+        // manifest 讀不到（損毀／後端暫時失敗）不該中止清除，改為全掃
+        if let Err(e) = self.read_manifest(key) {
+            failures.push(format!("manifest unreadable: {e}"));
+        }
+
         for generation in ["a", "b"] {
             if let Err(e) = self.purge_generation(key, generation) {
                 failures.push(e);
             }
         }
-        drop(manifest);
+
+        if let Err(e) = self.backend.delete(&manifest_account(key)) {
+            failures.push(format!("manifest: {e}"));
+        }
+
         if failures.is_empty() {
             Ok(())
         } else {
             Err(SecretStoreError::Unavailable(format!(
-                "failed to remove {} stored chunk(s)",
-                failures.len()
+                "failed to fully remove stored credential: {}",
+                failures.join("; ")
             )))
         }
     }
@@ -561,6 +569,51 @@ mod tests {
             store.save("acct", &huge),
             Err(SecretStoreError::TooLarge(_))
         ));
+    }
+
+    #[test]
+    fn delete_failure_still_purges_the_actual_secret_chunks() {
+        // 真正的祕密在分段裡，manifest 只是中繼資料。舊實作先刪 manifest 且
+        // 以 `?` 提早返回，最敏感的資料反而會因為最不敏感的那筆失敗而留下；
+        // 呼叫端接著刪掉 tenant/client 後就再也算不出 key 來清除。
+        struct ManifestDeleteFails(FakeKeyring);
+        impl KeyringBackend for ManifestDeleteFails {
+            fn get(&self, a: &str) -> Result<Option<Vec<u8>>, String> {
+                self.0.get(a)
+            }
+            fn set(&self, a: &str, v: &[u8]) -> Result<(), String> {
+                self.0.set(a, v)
+            }
+            fn delete(&self, a: &str) -> Result<(), String> {
+                if a.ends_with("::meta") {
+                    return Err("simulated manifest delete failure".to_string());
+                }
+                self.0.delete(a)
+            }
+        }
+
+        let seed = SecretStore::new(FakeKeyring::default());
+        seed.save("acct", &secret_of(3000)).unwrap();
+        let data = seed.backend.data.lock().unwrap().clone();
+
+        let inner = FakeKeyring::default();
+        *inner.data.lock().unwrap() = data;
+        let store = SecretStore::new(ManifestDeleteFails(inner));
+
+        // 應回報失敗（manifest 沒刪掉）……
+        assert!(store.delete("acct").is_err());
+
+        // ……但真正的祕密分段必須已經清乾淨
+        let left = store.backend.0.data.lock().unwrap();
+        let secret_chunks: Vec<_> = left
+            .keys()
+            .filter(|k| !k.ends_with("::meta"))
+            .cloned()
+            .collect();
+        assert!(
+            secret_chunks.is_empty(),
+            "secret chunks must be purged even when manifest delete fails, left: {secret_chunks:?}"
+        );
     }
 
     #[test]

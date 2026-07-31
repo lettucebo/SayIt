@@ -462,7 +462,14 @@ pub async fn bind_loopback() -> Result<(TcpListener, String), AzureUserAuthError
 pub fn open_in_browser(url: &str) -> Result<(), AzureUserAuthError> {
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("rundll32")
+        // 用絕對路徑而非相對程式名：相對名會走 CreateProcess 的搜尋順序
+        // （含應用程式目錄），屬 binary planting 的可乘之機。
+        let rundll = std::path::Path::new(
+            &std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string()),
+        )
+        .join("System32")
+        .join("rundll32.exe");
+        std::process::Command::new(rundll)
             .arg("url.dll,FileProtocolHandler")
             .arg(url)
             .spawn()
@@ -527,8 +534,12 @@ pub fn parse_account_from_id_token(
             "id_token audience mismatch".to_string(),
         ));
     }
+    // Entra 的 `tid` claim **永遠是 GUID**，但使用者設定的 tenant 可以是
+    // `common` / `organizations` / `contoso.onmicrosoft.com` 等形式。
+    // 若一律要求相等，那些合法設定會在登入最後一步失敗於 tenant mismatch。
+    // 因此只有在設定值本身就是 GUID 時才比對。
     if let Some(tid) = claims.tid.as_deref() {
-        if !tid.eq_ignore_ascii_case(tenant_id) {
+        if is_guid(tenant_id) && !tid.eq_ignore_ascii_case(tenant_id) {
             return Err(AzureUserAuthError::Failed(
                 "id_token tenant mismatch".to_string(),
             ));
@@ -674,21 +685,63 @@ mod tests {
 
     #[test]
     fn rejects_audience_tenant_and_nonce_mismatch() {
-        let wrong_aud = make_id_token(serde_json::json!({ "aud": "other", "tid": "tenant" }));
-        assert!(parse_account_from_id_token(&wrong_aud, "tenant", "client", "n1").is_err());
+        // tid 比對只在設定值本身是 GUID 時進行（Entra 的 tid 永遠是 GUID），
+        // 因此這裡用 GUID 才測得到真正的租戶比對。
+        const TENANT: &str = "2aeb30d9-f0a6-4e27-8c47-f97c5b695eb6";
+        const OTHER: &str = "11111111-1111-1111-1111-111111111111";
 
-        let wrong_tid = make_id_token(serde_json::json!({ "aud": "client", "tid": "other" }));
-        assert!(parse_account_from_id_token(&wrong_tid, "tenant", "client", "n1").is_err());
+        let wrong_aud = make_id_token(serde_json::json!({ "aud": "other", "tid": TENANT }));
+        assert!(parse_account_from_id_token(&wrong_aud, TENANT, "client", "n1").is_err());
+
+        let wrong_tid = make_id_token(serde_json::json!({ "aud": "client", "tid": OTHER }));
+        assert!(parse_account_from_id_token(&wrong_tid, TENANT, "client", "n1").is_err());
 
         let wrong_nonce =
-            make_id_token(serde_json::json!({ "aud": "client", "tid": "tenant", "nonce": "bad" }));
-        assert!(parse_account_from_id_token(&wrong_nonce, "tenant", "client", "n1").is_err());
+            make_id_token(serde_json::json!({ "aud": "client", "tid": TENANT, "nonce": "bad" }));
+        assert!(parse_account_from_id_token(&wrong_nonce, TENANT, "client", "n1").is_err());
     }
 
     #[test]
     fn tenant_comparison_is_case_insensitive() {
         let token = make_id_token(serde_json::json!({ "aud": "client", "tid": "ABC-DEF" }));
         assert!(parse_account_from_id_token(&token, "abc-def", "client", "n1").is_ok());
+    }
+
+    #[test]
+    fn non_guid_tenants_are_not_compared_against_tid() {
+        // Entra 的 tid claim 永遠是 GUID，但設定值可以是 common / organizations /
+        // domain 形式。若一律比對，這些合法設定會在登入最後一步失敗。
+        let token = make_id_token(serde_json::json!({
+            "aud": "client",
+            "tid": "2aeb30d9-f0a6-4e27-8c47-f97c5b695eb6",
+        }));
+        for tenant in [
+            "common",
+            "organizations",
+            "consumers",
+            "contoso.onmicrosoft.com",
+        ] {
+            assert!(
+                parse_account_from_id_token(&token, tenant, "client", "n1").is_ok(),
+                "tenant {tenant} should be accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn guid_tenant_still_rejects_mismatched_tid() {
+        // 設定值是 GUID 時仍必須比對，避免 token 來自別的租戶
+        let token = make_id_token(serde_json::json!({
+            "aud": "client",
+            "tid": "11111111-1111-1111-1111-111111111111",
+        }));
+        assert!(parse_account_from_id_token(
+            &token,
+            "2aeb30d9-f0a6-4e27-8c47-f97c5b695eb6",
+            "client",
+            "n1"
+        )
+        .is_err());
     }
 
     #[test]

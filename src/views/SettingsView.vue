@@ -1753,6 +1753,16 @@ async function applyBackupImport() {
   }
 }
 
+// 設定可能在本 View mount 之後才載入完成（main-window.ts 先 app.mount()
+// 才 await loadSettings()）。載入完成時重新把持久化值同步進輸入欄位，
+// 否則畫面會停在空白，使用者也無從得知那不是真正的設定值。
+watch(
+  () => settingsStore.isSettingsLoaded,
+  (loaded) => {
+    if (loaded) loadAzureInputsFromStore();
+  },
+);
+
 onMounted(async () => {
   await replacementStore.ensureLoaded();
   // F5 fix: 先載入裝置列表，完成後再啟動預覽（避免 cpal 並行 host 查詢）
