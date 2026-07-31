@@ -10,12 +10,20 @@ export interface UpdateCheckResult {
 let pendingUpdate: Update | null = null;
 
 /**
+ * 檢查更新的網路逾時（毫秒）。
+ *
+ * plugin-updater 預設沒有總逾時，請求若一直不 settle，呼叫端的
+ * `checking` 狀態就會永久卡住（連 Sidebar 的手動「檢查更新」也會一直 disabled）。
+ */
+const CHECK_TIMEOUT_MS = 30_000;
+
+/**
  * 檢查 App 更新（僅檢查，不下載）。
  * 找到更新時暫存 Update 物件供後續操作。
  */
 export async function checkForAppUpdate(): Promise<UpdateCheckResult> {
   try {
-    const update = await check();
+    const update = await check({ timeout: CHECK_TIMEOUT_MS });
     if (!update) {
       console.log("[autoUpdater] No update available");
       pendingUpdate = null;

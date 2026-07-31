@@ -637,7 +637,7 @@ src/
 
 - **macOS** — `.dmg`（含 `.app`），Apple Developer ID 簽名 + Notarization
 - **Windows** — NSIS `.exe` + `.msi`
-- **自動更新** — `tauri-plugin-updater` + GitHub Releases endpoint（啟動 5 秒後首次檢查，每 4 小時 `setInterval` 定時檢查 + Sidebar「檢查更新」按鈕顯示 `UpdateCheckResult` 狀態）
+- **自動更新** — `tauri-plugin-updater` + GitHub Releases endpoint（App 啟動後 5 秒檢查一次、無定時輪詢，僅檢查失敗時退避重試 1／5／15 分鐘 + Sidebar「檢查更新」按鈕顯示 `UpdateCheckResult` 狀態）
 
 #### CI/CD
 

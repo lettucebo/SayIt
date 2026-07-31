@@ -602,8 +602,8 @@
     },
     "upgradeNotice": {
       "title": "SayIt Update Summary",
-      "item1": "Smart Dictionary Learning is now on by default on Windows — it used to be off there because SayIt could not yet read the text field under your cursor, which it can now do on Windows through UI Automation. If your settings file does not yet hold a value for this switch, it will be on after this update: SayIt reads the text around your cursor once a paste completes and sends it to the AI service you configured to learn the terms you use. You can turn it off under Settings → Smart Dictionary Learning.",
-      "item2": "The dashboard no longer shows the Recent Transcriptions card — it duplicated the History page, which already lists every record with search, playback and re-transcribe. Nothing was deleted: all records are still in History, and the dashboard now runs one query less on every load.",
+      "item1": "Automatic updates no longer interrupt you — SayIt used to check for updates every 15 minutes, and whenever it found one it downloaded it in the background and then pulled the main window to the front to ask you to install, stealing focus while you might be typing in another app. It now checks once each time SayIt starts. You can check whenever you like with the \"Check for updates\" button at the bottom left. The trade-off: if you never restart SayIt, it will not notice new versions on its own, so use that button.",
+      "item2": "Updates are no longer missed when the network is not ready at boot — with only one check per launch, a single failed check (common when SayIt starts with your session and the network or VPN is not up yet) would mean no further checks for the whole session. Failed checks now retry automatically after 1, 5 and 15 minutes. Checks also have a 30 second timeout, so a stalled connection can no longer leave the \"Check for updates\" button stuck.",
       "dismiss": "Got it"
     }
   },
