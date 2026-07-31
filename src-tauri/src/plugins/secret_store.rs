@@ -217,27 +217,54 @@ impl<B: KeyringBackend> SecretStore<B> {
 
         // 舊 generation 清理失敗不影響正確性（manifest 已指向新的），僅留下孤兒項目。
         if let Some(old) = previous {
-            self.purge_generation(key, &old.generation, old.chunks);
+            let _ = self.purge_generation(key, &old.generation);
         }
         Ok(())
     }
 
     /// 刪除 manifest 與兩個 generation 的所有分段（含可能殘留的孤兒）。
+    ///
+    /// 分段刪除失敗會被回報而非吞掉：登出若宣稱成功卻留下可用的 refresh token，
+    /// 使用者會以為已經清乾淨。Microsoft 不會因為輪替就立刻讓舊 token 失效，
+    /// 殘留物仍可能有效。
     pub fn delete(&self, key: &str) -> Result<(), SecretStoreError> {
         let manifest = self.read_manifest(key)?;
         self.backend
             .delete(&manifest_account(key))
             .map_err(SecretStoreError::Unavailable)?;
-        let known = manifest.map(|m| m.chunks).unwrap_or(MAX_CHUNKS);
+        let mut failures = Vec::new();
         for generation in ["a", "b"] {
-            self.purge_generation(key, generation, known.max(MAX_CHUNKS));
+            if let Err(e) = self.purge_generation(key, generation) {
+                failures.push(e);
+            }
         }
-        Ok(())
+        drop(manifest);
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(SecretStoreError::Unavailable(format!(
+                "failed to remove {} stored chunk(s)",
+                failures.len()
+            )))
+        }
     }
 
-    fn purge_generation(&self, key: &str, generation: &str, chunks: usize) {
-        for i in 0..chunks.min(MAX_CHUNKS) {
-            let _ = self.backend.delete(&chunk_account(key, generation, i));
+    /// 清掉某個 generation 的所有分段。回報失敗數量，呼叫端決定是否視為錯誤。
+    fn purge_generation(&self, key: &str, generation: &str) -> Result<(), String> {
+        let mut failed = 0usize;
+        for i in 0..MAX_CHUNKS {
+            if self
+                .backend
+                .delete(&chunk_account(key, generation, i))
+                .is_err()
+            {
+                failed += 1;
+            }
+        }
+        if failed == 0 {
+            Ok(())
+        } else {
+            Err(format!("{failed} chunk(s) in generation {generation}"))
         }
     }
 }
@@ -254,12 +281,20 @@ mod tests {
         /// 大於 0 時，第 N 次 `set` 會失敗——用來模擬寫到一半中斷。
         fail_set_after: Mutex<Option<usize>>,
         set_calls: Mutex<usize>,
+        /// true 時所有 `delete` 都失敗——用來模擬憑證庫拒絕刪除。
+        fail_delete: Mutex<bool>,
     }
 
     impl FakeKeyring {
         fn fail_after(n: usize) -> Self {
             let f = Self::default();
             *f.fail_set_after.lock().unwrap() = Some(n);
+            f
+        }
+
+        fn failing_delete() -> Self {
+            let f = Self::default();
+            *f.fail_delete.lock().unwrap() = true;
             f
         }
     }
@@ -285,6 +320,9 @@ mod tests {
         }
 
         fn delete(&self, account: &str) -> Result<(), String> {
+            if *self.fail_delete.lock().unwrap() {
+                return Err("simulated delete failure".to_string());
+            }
             self.data.lock().unwrap().remove(account);
             Ok(())
         }
@@ -379,6 +417,46 @@ mod tests {
         store.delete("acct").unwrap();
         assert_eq!(store.load("acct").unwrap(), None);
         assert!(store.backend.data.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn delete_failure_is_reported_not_swallowed() {
+        // 登出若宣稱成功卻留下可用的 refresh token，使用者會以為已經清乾淨。
+        // Microsoft 不會因為輪替就立刻讓舊 token 失效，殘留物仍可能有效。
+        let backend = FakeKeyring::default();
+        let store = SecretStore::new(backend);
+        store.save("acct", "secret-value").unwrap();
+
+        let data = store.backend.data.lock().unwrap().clone();
+        let failing = FakeKeyring::failing_delete();
+        *failing.data.lock().unwrap() = data;
+        let store2 = SecretStore::new(failing);
+
+        assert!(
+            store2.delete("acct").is_err(),
+            "delete failure must surface to the caller"
+        );
+    }
+
+    #[test]
+    fn corrupted_manifest_length_is_rejected() {
+        // 被竄改的 manifest 若宣稱巨大的 len，with_capacity 會吃掉大量記憶體
+        let store = SecretStore::new(FakeKeyring::default());
+        store.save("acct", "small").unwrap();
+        let bogus = serde_json::json!({
+            "generation": "a",
+            "chunks": 1,
+            "len": usize::MAX,
+            "sha256": "deadbeef",
+        });
+        store.backend.data.lock().unwrap().insert(
+            "acct::meta".to_string(),
+            serde_json::to_vec(&bogus).unwrap(),
+        );
+        assert!(matches!(
+            store.load("acct"),
+            Err(SecretStoreError::Corrupted)
+        ));
     }
 
     #[test]

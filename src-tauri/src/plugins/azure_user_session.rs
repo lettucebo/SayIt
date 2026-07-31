@@ -77,9 +77,13 @@ impl CancelSignal {
         self.notify.notify_one();
     }
 
+    fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::SeqCst)
+    }
+
     async fn cancelled(&self) {
         loop {
-            if self.cancelled.load(Ordering::SeqCst) {
+            if self.is_cancelled() {
                 return;
             }
             self.notify.notified().await;
@@ -394,6 +398,13 @@ pub async fn azure_user_sign_in(
     let key = account_key(&tenant_id, &client_id);
     let lock = state.lock_for(&key);
     let _held = lock.lock().await;
+
+    // 取得鎖之後、寫入憑證庫之前再確認一次：使用者可能在瀏覽器登入的那段時間
+    // 就按了取消或「清除連線」。若不檢查就寫回 refresh token，會留下一筆
+    // 使用者已經無法從 UI 對應到、也就清不掉的孤兒憑證。
+    if cancel.is_cancelled() {
+        return Err(AzureUserAuthError::Cancelled);
+    }
 
     // 換了使用者時 cache key 不變，不先清會回傳上一位使用者的 token
     state.clear_tokens(&key);

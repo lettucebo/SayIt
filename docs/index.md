@@ -78,6 +78,7 @@
 
 - [Component Inventory — Frontend](./component-inventory-frontend.md) — 11 自製元件 + 21 shadcn-vue 元件
 - [Development Guide](./development-guide.md) — 環境、指令、常見任務、Hooks、Pitfalls
+- [Azure Entra 使用者登入](./azure-entra-user-sign-in.md) — App Registration 設定、RBAC、疑難排解
 - [Deployment Guide](./deployment-guide.md) — CI/CD、Apple Notarize、發版流程、回滾
 
 ### 3.5 Scan State
