@@ -306,7 +306,7 @@ CREATE TABLE IF NOT EXISTS schema_version (
 - Updater endpoint: `https://github.com/chenjackle45/SayIt/releases/latest/download/latest.json`
 - Public repo: `chenjackle45/SayIt`
 - 使用者體驗：
-  - **定時檢查** — 啟動 5 秒後首次檢查，之後每 4 小時背景檢查
+  - **啟動時檢查** — App 啟動後 5 秒背景檢查一次，不做定時輪詢；僅在檢查失敗時退避重試（1／5／15 分鐘），用盡後回報遙測並停止
   - **手動檢查** — Sidebar Footer 的「檢查更新」按鈕，結果以 inline feedback 顯示（2.5 秒自動消失）
   - **更新流程** — 自動下載 → 提示重啟 → 一鍵完成
 - `checkForAppUpdate()` 回傳 `UpdateCheckResult`（`up-to-date` | `update-available` | `error`），供 UI 顯示結果
@@ -728,7 +728,7 @@ useHistoryStore (save to SQLite) ──→ Main Window Dashboard refresh
 |----------|----------|------|----------|
 | Groq Whisper API | `transcription.rs` | Rust reqwest multipart | HUD 顯示錯誤訊息，使用者可重試 |
 | Groq LLM API | `enhancer.ts` | HTTPS POST JSON | 5 秒 timeout → 跳過 AI，貼上原始文字 |
-| 自動更新 Endpoint | `updater.ts` | HTTPS GET JSON | 靜默失敗，下次啟動再試 |
+| 自動更新 Endpoint | `autoUpdater.ts` | HTTPS GET JSON | 退避重試 3 次（1／5／15 分），仍失敗則遙測回報並停止，改由手動「檢查更新」補救 |
 
 ### File Organization Patterns
 
