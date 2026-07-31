@@ -1371,10 +1371,6 @@ export const useSettingsStore = defineStore("settings", () => {
     try {
       const store = await load(STORE_NAME);
       const normalizedEndpoint = normalizeAzureEndpoint(cfg.endpoint);
-      // 切到使用者登入模式時清掉舊的 client secret：欄位在 UI 上會被隱藏，
-      // 不主動清除的話仍會被原封不動寫回明文 store，也會混進設定備份。
-      const clientSecret =
-        cfg.authMode === "entraUser" ? "" : cfg.clientSecret;
       const nextTenantId = cfg.tenantId.trim();
       const nextClientId = cfg.clientId.trim();
       // 換掉 tenant/client 等於換一個登入身分：舊的 refresh token 若不清掉會
@@ -1391,7 +1387,11 @@ export const useSettingsStore = defineStore("settings", () => {
       await store.set("azureApiKey", cfg.apiKey.trim());
       await store.set("azureTenantId", nextTenantId);
       await store.set("azureClientId", nextClientId);
-      await store.set("azureClientSecret", clientSecret);
+      // 不因切換驗證模式而清掉 client secret：那是不可逆的破壞，使用者要切回
+      // Secret 模式就得回 Azure Portal 重新產生。備份端已有「排除金鑰」選項
+      // （SENSITIVE_SETTING_KEYS 含 azureClientSecret）處理外流疑慮，
+      // 真的要清除請走「清除連線」，那是使用者明確的意圖。
+      await store.set("azureClientSecret", cfg.clientSecret);
       await store.set("azureApiVersion", cfg.apiVersion.trim());
 
       // 停用 Azure 時，把仍指向 azure 的 provider 切回 groq（避免無 UI 可切換而卡死）
@@ -1416,7 +1416,7 @@ export const useSettingsStore = defineStore("settings", () => {
       azureApiKey.value = cfg.apiKey.trim();
       azureTenantId.value = cfg.tenantId.trim();
       azureClientId.value = cfg.clientId.trim();
-      azureClientSecret.value = clientSecret;
+      azureClientSecret.value = cfg.clientSecret;
       azureApiVersion.value = cfg.apiVersion.trim();
       clearAzureTokenCache();
       // tenant/client 可能剛剛才變更 → 重新確認這組設定底下的登入狀態
