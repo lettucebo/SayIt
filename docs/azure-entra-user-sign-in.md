@@ -1,11 +1,11 @@
-# 使用 Microsoft 帳號登入 Azure OpenAI / Foundry
+# 使用 Entra ID 登入 Azure OpenAI / Foundry
 
 SayIt 支援用**你自己的公司帳號**登入 Azure OpenAI / Microsoft Foundry，
 不需要 client secret。適合公司政策禁用長期共享密鑰的環境。
 
 ## 為什麼用這個模式
 
-| | API Key | 服務主體（client secret） | **Microsoft 帳號登入** |
+| | API Key | Entra ID Secret（服務主體） | **Entra ID 登入** |
 |---|---|---|---|
 | 需要長期密鑰 | ✅ 要 | ✅ 要 | ❌ 不用 |
 | 身分 | 資源層級 | 全公司共用一個 | **每個人自己的帳號** |
@@ -130,9 +130,9 @@ echo "Client ID: $APP_ID"
 
 1. 開啟 SayIt → **設定** → 找到 **Azure / Microsoft Foundry** 卡片並啟用
 2. 填入 **Endpoint URL**
-3. 驗證方式選 **Microsoft 帳號登入**
+3. 驗證方式選 **Entra ID 登入**
 4. 填入 IT 給的 **Tenant ID** 與 **Client ID**
-5. 點 **使用 Microsoft 帳號登入** → 系統瀏覽器會開啟
+5. 點 **使用 Entra ID 登入** → 系統瀏覽器會開啟
 6. 完成登入；首次會出現同意畫面，按「接受」
 7. 回到 SayIt，卡片會顯示「已登入：你的帳號」
 8. 往下填入 **Chat 部署名稱** 與 **Whisper 部署名稱**，各按「測試連線」確認

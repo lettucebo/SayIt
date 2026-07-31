@@ -2150,7 +2150,7 @@ onBeforeUnmount(() => {
           <Label>{{ $t("settings.azure.authModeLabel") }}</Label>
           <RadioGroup
             :model-value="azureAuthModeInput"
-            class="grid grid-cols-3 gap-2"
+            class="grid gap-2 sm:grid-cols-3"
             @update:model-value="(v: unknown) => {
               if (AZURE_AUTH_MODE_VALUES.includes(v as AzureAuthMode)) azureAuthModeInput = v as AzureAuthMode;
             }"
@@ -2169,8 +2169,8 @@ onBeforeUnmount(() => {
               :class="azureAuthModeInput === 'entraUser' ? 'border-primary bg-primary/5' : 'hover:bg-muted/50'"
             >
               <RadioGroupItem id="azure-auth-entra-user" value="entraUser" class="!size-0 !border-0 !shadow-none overflow-hidden" />
-              <span class="text-sm font-medium">{{ $t("settings.azure.authEntraUser") }}</span>
-              <Badge variant="secondary" class="ml-auto">{{ $t("settings.azure.recommended") }}</Badge>
+              <span class="min-w-0 truncate text-sm font-medium">{{ $t("settings.azure.authEntraUser") }}</span>
+              <Badge variant="secondary" class="ml-auto shrink-0">{{ $t("settings.azure.recommended") }}</Badge>
             </Label>
             <Label
               for="azure-auth-entra"

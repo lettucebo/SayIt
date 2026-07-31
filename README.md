@@ -38,10 +38,10 @@ SayIt 是一款跨平台桌面語音輸入工具。在任何應用程式中按�
 ### 使用 Azure OpenAI / Microsoft Foundry（選用）
 
 除了 Groq，SayIt 也可接 Azure OpenAI / Microsoft Foundry，並支援三種驗證方式：
-API Key、服務主體（client secret）、以及**用你自己的公司帳號登入**（免密鑰，適合
+API Key、Entra ID Secret（服務主體）、以及 **Entra ID 登入**（用你自己的公司帳號、免密鑰，適合
 公司政策禁用長期共享密鑰的環境）。
 
-設定步驟見 [使用 Microsoft 帳號登入 Azure OpenAI / Foundry](docs/azure-entra-user-sign-in.md)。
+設定步驟見 [使用 Entra ID 登入 Azure OpenAI / Foundry](docs/azure-entra-user-sign-in.md)。
 
 ## 技術架構
 
