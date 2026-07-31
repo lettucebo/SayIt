@@ -286,17 +286,18 @@ export const useSettingsStore = defineStore("settings", () => {
     );
   });
   let isLoaded = false;
-  /** reactive 版本的載入旗標，供 UI 停用表單用。 */
-  const settingsLoadedFlag = ref(false);
   /**
-   * 設定是否已從持久層載入完成。
+   * 設定載入狀態（三態）。
    *
-   * `main-window.ts` 是先 `app.mount()` 再 `await loadSettings()`，所以 View 的
-   * `onMounted` 有機會在載入完成前就執行。若此時把（還是預設空值的）輸入欄位
-   * 存回去，就會把使用者的既有設定整批清空——這與先前兩次資料事故是同一類問題，
-   * 因此把防線放在資料層，一次涵蓋所有呼叫端。
+   * 不能用單一布林：載入**失敗**時若標記為已載入，寫入守門就被解除，
+   * 下一次儲存仍可能用預設空值覆寫使用者原有的 endpoint/tenant/client/secret。
+   * 只有 `ready` 允許寫入；`failed` 需由使用者明確重試或重設。
    */
-  const isSettingsLoaded = computed(() => settingsLoadedFlag.value);
+  const settingsLoadState = ref<"loading" | "ready" | "failed">("loading");
+  const isSettingsLoaded = computed(() => settingsLoadState.value === "ready");
+  const settingsLoadFailed = computed(
+    () => settingsLoadState.value === "failed",
+  );
 
   /** Resolve which SupportedLocale to use for prompt default (shared logic). */
   function getEffectivePromptLocale(): SupportedLocale {
@@ -753,7 +754,7 @@ export const useSettingsStore = defineStore("settings", () => {
       // Sync saved (or default) config to Rust on startup
       await syncHotkeyConfigToRust(key, mode);
       isLoaded = true;
-      settingsLoadedFlag.value = true;
+      settingsLoadState.value = "ready";
       console.log(
         `[useSettingsStore] Settings loaded: key=${JSON.stringify(key)}, mode=${mode}`,
       );
@@ -779,10 +780,10 @@ export const useSettingsStore = defineStore("settings", () => {
       isCopyTranscriptionToClipboardEnabled.value =
         DEFAULT_COPY_TRANSCRIPTION_TO_CLIPBOARD;
       contextInjectionEnabled.value = DEFAULT_CONTEXT_INJECTION_ENABLED;
-      // 載入失敗時同樣視為「載入已結束」：此時已明確落到預設值，race 視窗已過。
-      // 若不標記，設定頁會被守門永久鎖住而無從修復。
-      isLoaded = true;
-      settingsLoadedFlag.value = true;
+      // 載入失敗**不可**視為已載入：此時 reactive 值是預設空值，若解除寫入
+      // 守門，下一次儲存就會用空值覆寫使用者原有的設定。維持 failed，
+      // 由 UI 提示使用者重試（`isLoaded` 保持 false 讓守門繼續生效）。
+      settingsLoadState.value = "failed";
     }
   }
 
@@ -1401,8 +1402,9 @@ export const useSettingsStore = defineStore("settings", () => {
       const identityChanged =
         nextTenantId !== azureTenantId.value ||
         nextClientId !== azureClientId.value;
-      if (identityChanged) {
-        await signOutAzureUserSilently();
+      if (identityChanged && !(await signOutAzureUserSilently())) {
+        // 清除失敗卻仍覆寫 tenant/client，舊憑證就會因為算不出 key 而永久殘留
+        throw new Error("AZURE_CREDENTIAL_CLEANUP_FAILED");
       }
       await store.set("azureEnabled", cfg.enabled);
       await store.set("azureEndpoint", normalizedEndpoint);
@@ -2471,8 +2473,9 @@ export const useSettingsStore = defineStore("settings", () => {
         incomingTenant.trim() !== azureTenantId.value) ||
       (typeof incomingClient === "string" &&
         incomingClient.trim() !== azureClientId.value);
-    if (identityChanged) {
-      await signOutAzureUserSilently();
+    if (identityChanged && !(await signOutAzureUserSilently())) {
+      // 同 saveAzureConnection：清不掉就不可覆寫 locator，否則永久孤兒
+      throw new Error("AZURE_CREDENTIAL_CLEANUP_FAILED");
     }
 
     for (const [key, value] of Object.entries(settings)) {
@@ -2587,6 +2590,7 @@ export const useSettingsStore = defineStore("settings", () => {
     azureWhisperDeployment,
     azureUserAccount: computed(() => azureUserAccount.value),
     isSettingsLoaded,
+    settingsLoadFailed,
     isAzureUserSignedIn,
     hasAzureCredentials,
     signInAzureUserAccount,

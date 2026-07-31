@@ -703,8 +703,17 @@ mod tests {
 
     #[test]
     fn tenant_comparison_is_case_insensitive() {
-        let token = make_id_token(serde_json::json!({ "aud": "client", "tid": "ABC-DEF" }));
-        assert!(parse_account_from_id_token(&token, "abc-def", "client", "n1").is_ok());
+        // 必須用 GUID：非 GUID 的設定值不會走比對分支，那樣這個測試就是空的。
+        let token = make_id_token(
+            serde_json::json!({ "aud": "client", "tid": "2AEB30D9-F0A6-4E27-8C47-F97C5B695EB6" }),
+        );
+        assert!(parse_account_from_id_token(
+            &token,
+            "2aeb30d9-f0a6-4e27-8c47-f97c5b695eb6",
+            "client",
+            "n1"
+        )
+        .is_ok());
     }
 
     #[test]

@@ -128,8 +128,13 @@ impl KeyringBackend for OsKeyring {
         // Windows 把 Enterprise（會隨設定檔漫遊）與 Local 的憑證存在**兩個獨立的
         // 儲存區**，同一個 target_name 可同時存在於兩者；此時寫入會落在 Local，
         // 讀取卻可能一直拿到舊的 Enterprise 版，造成「寫入看似成功卻讀到舊值」。
-        // 因此先把非 Local 的殘留刪乾淨再寫。用迴圈是因為一次 delete 只會移除
-        // 其中一筆，理論上可能兩邊都有。
+        // 因此舊版遷移時必須先刪非 Local 的殘留再寫。
+        //
+        // ⚠️ 這段刪除是**破壞性的**：若隨後的 set_secret 失敗或程序中止，
+        // 舊值就沒了。上層 `save()` 的「保留舊 generation」保證在這條遷移路徑
+        // 上**不成立**。之所以可接受，是因為存的是 refresh token —— 可拋棄，
+        // 最壞情況只是要求使用者重新登入，不會造成不可回復的資料遺失。
+        // （client secret 等不可回復的資料絕不可走這種路徑。）
         #[cfg(target_os = "windows")]
         {
             for _ in 0..4 {
@@ -201,6 +206,12 @@ impl<B: KeyringBackend> SecretStore<B> {
     }
 
     /// 讀出明文。找不到回 `None`；資料殘缺回 `Corrupted`（呼叫端應要求重新登入）。
+    ///
+    /// **設計取捨**：manifest 是唯一的 commit pointer，壞掉就視為損毀。
+    /// 曾嘗試在 manifest 失效時改掃描兩個 generation 當復原路徑，但那樣沒有可比對的
+    /// sha256/len，會靜默回傳**截斷的**祕密——比誠實回報損毀更糟（既有測試
+    /// `missing_chunk_reports_corrupted` 立刻抓到）。存的是可拋棄的 refresh token，
+    /// 重新登入即可復原，因此選擇「壞了就承認」而不是加一層無法驗證的救援。
     pub fn load(&self, key: &str) -> Result<Option<String>, SecretStoreError> {
         let Some(manifest) = self.read_manifest(key)? else {
             return Ok(None);
@@ -213,10 +224,9 @@ impl<B: KeyringBackend> SecretStore<B> {
 
         let mut buf = Vec::with_capacity(manifest.len);
         for i in 0..manifest.chunks {
-            let account = chunk_account(key, &manifest.generation, i);
             let chunk = self
                 .backend
-                .get(&account)
+                .get(&chunk_account(key, &manifest.generation, i))
                 .map_err(SecretStoreError::Unavailable)?
                 .ok_or(SecretStoreError::Corrupted)?;
             buf.extend_from_slice(&chunk);
