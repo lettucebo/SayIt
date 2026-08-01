@@ -21,6 +21,7 @@ use super::azure_user_auth::{
 use super::secret_store::{OsKeyring, SecretStore, SecretStoreError};
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
@@ -313,6 +314,185 @@ async fn post_token(
         .map_err(|e| AzureUserAuthError::Failed(format!("failed to parse token response: {e}")))
 }
 
+// ── 生命週期（可測試）───────────────────────────────────────
+//
+// 登入收尾與 refresh 這兩段是「多步驟且會改動持久化狀態」的流程，也是先前
+// 三次資料事故的同一類風險所在。把外部相依（OS 憑證庫、token endpoint）收斂
+// 成一個 trait，流程本身就能在沒有網路與憑證庫的情況下被完整測試。
+
+trait SessionBackend: Sync {
+    fn load(
+        &self,
+        key: String,
+    ) -> impl Future<Output = Result<Option<StoredSession>, AzureUserAuthError>> + Send;
+
+    fn save(
+        &self,
+        key: String,
+        session: StoredSession,
+    ) -> impl Future<Output = Result<(), AzureUserAuthError>> + Send;
+
+    fn post_token(
+        &self,
+        tenant_id: String,
+        params: Vec<(&'static str, String)>,
+    ) -> impl Future<Output = Result<TokenResponse, AzureUserAuthError>> + Send;
+}
+
+struct RealBackend;
+
+impl SessionBackend for RealBackend {
+    async fn load(&self, key: String) -> Result<Option<StoredSession>, AzureUserAuthError> {
+        load_session(key).await
+    }
+
+    async fn save(&self, key: String, session: StoredSession) -> Result<(), AzureUserAuthError> {
+        save_session(key, &session).await
+    }
+
+    async fn post_token(
+        &self,
+        tenant_id: String,
+        params: Vec<(&'static str, String)>,
+    ) -> Result<TokenResponse, AzureUserAuthError> {
+        let borrowed: Vec<(&str, &str)> = params.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        post_token(&tenant_id, &borrowed).await
+    }
+}
+
+/// 登入的收尾：換 token → 驗 id_token → 確認未被取消 → 落地憑證庫。
+///
+/// 取得 per-account 鎖之後、寫入之前會再確認一次取消旗標：使用者可能在
+/// 瀏覽器登入的那段時間就按了取消或「清除連線」。若不檢查就寫回 refresh
+/// token，會留下一筆使用者已經無法從 UI 對應到、也就清不掉的孤兒憑證。
+#[allow(clippy::too_many_arguments)]
+async fn finalize_sign_in<B: SessionBackend>(
+    backend: &B,
+    state: &AzureUserAuthState,
+    cancel: &CancelSignal,
+    tenant_id: &str,
+    client_id: &str,
+    redirect_uri: &str,
+    code: &str,
+    code_verifier: &str,
+    nonce: &str,
+) -> Result<AzureUserAccount, AzureUserAuthError> {
+    let token = backend
+        .post_token(
+            tenant_id.to_string(),
+            vec![
+                ("client_id", client_id.to_string()),
+                ("grant_type", "authorization_code".to_string()),
+                ("code", code.to_string()),
+                ("redirect_uri", redirect_uri.to_string()),
+                ("code_verifier", code_verifier.to_string()),
+            ],
+        )
+        .await?;
+
+    let refresh_token = token
+        .refresh_token
+        .ok_or_else(|| AzureUserAuthError::Failed("no refresh_token in response".to_string()))?;
+    let id_token = token
+        .id_token
+        .ok_or_else(|| AzureUserAuthError::Failed("no id_token in response".to_string()))?;
+    let account = parse_account_from_id_token(&id_token, tenant_id, client_id, nonce)?;
+
+    let key = account_key(tenant_id, client_id);
+    let lock = state.lock_for(&key);
+    let _held = lock.lock().await;
+
+    if cancel.is_cancelled() {
+        return Err(AzureUserAuthError::Cancelled);
+    }
+
+    // 換了使用者時 cache key 不變，不先清會回傳上一位使用者的 token
+    state.clear_tokens(&key);
+    backend
+        .save(
+            key.clone(),
+            StoredSession {
+                refresh_token,
+                account: account.clone(),
+            },
+        )
+        .await?;
+
+    if let (Some(access_token), Some(expires_in)) = (token.access_token, token.expires_in) {
+        // 授權時要的是 cognitiveservices scope，只有 Whisper 這一份能直接放進快取
+        state.store_token(&key, ScopeKind::Whisper, access_token, expires_in);
+    }
+
+    Ok(account)
+}
+
+/// 取得指定用途的 access token：快取 → per-account 鎖 → 重查 → refresh。
+async fn acquire_token<B: SessionBackend>(
+    backend: &B,
+    state: &AzureUserAuthState,
+    tenant_id: &str,
+    client_id: &str,
+    scope: ScopeKind,
+) -> Result<String, AzureUserAuthError> {
+    let key = account_key(tenant_id, client_id);
+
+    if let Some(token) = state.cached(&key, scope) {
+        return Ok(token);
+    }
+
+    let lock = state.lock_for(&key);
+    let _held = lock.lock().await;
+
+    // 取得鎖之後重查：等鎖期間可能已有其他呼叫完成 refresh
+    if let Some(token) = state.cached(&key, scope) {
+        return Ok(token);
+    }
+
+    let session = backend
+        .load(key.clone())
+        .await?
+        .ok_or(AzureUserAuthError::NotSignedIn)?;
+
+    let token = backend
+        .post_token(
+            tenant_id.to_string(),
+            vec![
+                ("client_id", client_id.to_string()),
+                ("grant_type", "refresh_token".to_string()),
+                ("refresh_token", session.refresh_token.clone()),
+                ("scope", scope.scope().to_string()),
+            ],
+        )
+        .await?;
+
+    let access_token = token
+        .access_token
+        .ok_or_else(|| AzureUserAuthError::Failed("no access_token in response".to_string()))?;
+
+    // refresh token 會輪替；沒拿到新的就沿用舊的（Entra 不保證每次都回）。
+    // 寫入失敗必須讓整個呼叫失敗：此時舊的 refresh token 已被 Entra 消耗，
+    // 若還回傳 access token，使用者會在下次過期時才發現已經無法續期。
+    if let Some(rotated) = token.refresh_token {
+        backend
+            .save(
+                key.clone(),
+                StoredSession {
+                    refresh_token: rotated,
+                    account: session.account,
+                },
+            )
+            .await?;
+    }
+
+    state.store_token(
+        &key,
+        scope,
+        access_token.clone(),
+        token.expires_in.unwrap_or(3600),
+    );
+    Ok(access_token)
+}
+
 // ── Commands ────────────────────────────────────────────────
 
 fn normalize(value: &str) -> String {
@@ -375,54 +555,18 @@ pub async fn azure_user_sign_in(
         _ = tokio::time::sleep(sign_in_timeout()) => return Err(AzureUserAuthError::TimedOut),
     };
 
-    let token = post_token(
+    finalize_sign_in(
+        &RealBackend,
+        &state,
+        &cancel,
         &tenant_id,
-        &[
-            ("client_id", client_id.as_str()),
-            ("grant_type", "authorization_code"),
-            ("code", callback.code.as_str()),
-            ("redirect_uri", redirect_uri.as_str()),
-            ("code_verifier", pkce.verifier.as_str()),
-        ],
+        &client_id,
+        &redirect_uri,
+        &callback.code,
+        &pkce.verifier,
+        &nonce,
     )
-    .await?;
-
-    let refresh_token = token
-        .refresh_token
-        .ok_or_else(|| AzureUserAuthError::Failed("no refresh_token in response".to_string()))?;
-    let id_token = token
-        .id_token
-        .ok_or_else(|| AzureUserAuthError::Failed("no id_token in response".to_string()))?;
-    let account = parse_account_from_id_token(&id_token, &tenant_id, &client_id, &nonce)?;
-
-    let key = account_key(&tenant_id, &client_id);
-    let lock = state.lock_for(&key);
-    let _held = lock.lock().await;
-
-    // 取得鎖之後、寫入憑證庫之前再確認一次：使用者可能在瀏覽器登入的那段時間
-    // 就按了取消或「清除連線」。若不檢查就寫回 refresh token，會留下一筆
-    // 使用者已經無法從 UI 對應到、也就清不掉的孤兒憑證。
-    if cancel.is_cancelled() {
-        return Err(AzureUserAuthError::Cancelled);
-    }
-
-    // 換了使用者時 cache key 不變，不先清會回傳上一位使用者的 token
-    state.clear_tokens(&key);
-    save_session(
-        key.clone(),
-        &StoredSession {
-            refresh_token,
-            account: account.clone(),
-        },
-    )
-    .await?;
-
-    if let (Some(access_token), Some(expires_in)) = (token.access_token, token.expires_in) {
-        // 授權時要的是 cognitiveservices scope，只有 Whisper 這一份能直接放進快取
-        state.store_token(&key, ScopeKind::Whisper, access_token, expires_in);
-    }
-
-    Ok(account)
+    .await
 }
 
 /// 取消進行中的登入。帶 operation_id 是為了避免取消到「下一次」登入。
@@ -487,58 +631,7 @@ pub async fn azure_user_get_token(
     let scope = ScopeKind::parse(&scope_kind)
         .ok_or_else(|| AzureUserAuthError::Failed(format!("unknown scope kind: {scope_kind}")))?;
 
-    let key = account_key(&tenant_id, &client_id);
-
-    if let Some(token) = state.cached(&key, scope) {
-        return Ok(token);
-    }
-
-    let lock = state.lock_for(&key);
-    let _held = lock.lock().await;
-
-    // 取得鎖之後重查：等鎖期間可能已有其他呼叫完成 refresh
-    if let Some(token) = state.cached(&key, scope) {
-        return Ok(token);
-    }
-
-    let session = load_session(key.clone())
-        .await?
-        .ok_or(AzureUserAuthError::NotSignedIn)?;
-
-    let token = post_token(
-        &tenant_id,
-        &[
-            ("client_id", client_id.as_str()),
-            ("grant_type", "refresh_token"),
-            ("refresh_token", session.refresh_token.as_str()),
-            ("scope", scope.scope()),
-        ],
-    )
-    .await?;
-
-    let access_token = token
-        .access_token
-        .ok_or_else(|| AzureUserAuthError::Failed("no access_token in response".to_string()))?;
-
-    // refresh token 會輪替；沒拿到新的就沿用舊的（Entra 不保證每次都回）
-    if let Some(rotated) = token.refresh_token {
-        save_session(
-            key.clone(),
-            &StoredSession {
-                refresh_token: rotated,
-                account: session.account,
-            },
-        )
-        .await?;
-    }
-
-    state.store_token(
-        &key,
-        scope,
-        access_token.clone(),
-        token.expires_in.unwrap_or(3600),
-    );
-    Ok(access_token)
+    acquire_token(&RealBackend, &state, &tenant_id, &client_id, scope).await
 }
 
 #[cfg(test)]
@@ -708,5 +801,483 @@ mod tests {
         assert!(!signal.cancelled.load(Ordering::SeqCst));
         state.cancel_sign_in("op-1");
         assert!(signal.cancelled.load(Ordering::SeqCst));
+    }
+
+    // ── 生命週期（finalize_sign_in / acquire_token）─────────────
+    //
+    // 這兩段是唯一會改動持久化狀態的流程，也是先前三次資料事故的同一類風險
+    // 所在。以假的 backend 取代 OS 憑證庫與 token endpoint，驗證整段順序與
+    // 各個失敗分支，而不是只驗證周邊的小元件。
+
+    const TENANT: &str = "2aeb30d9-f0a6-4e27-8c47-f97c5b695eb6";
+    const CLIENT: &str = "1671ffd4-1234-4321-9876-0123456789ab";
+    const NONCE: &str = "nonce-value";
+
+    type TokenParams = Vec<(&'static str, String)>;
+    type TokenCall = (String, TokenParams);
+
+    #[derive(Default)]
+    struct FakeBackend {
+        session: StdMutex<Option<StoredSession>>,
+        saves: StdMutex<Vec<StoredSession>>,
+        token_calls: StdMutex<Vec<TokenCall>>,
+        responses: StdMutex<std::collections::VecDeque<Result<TokenResponse, AzureUserAuthError>>>,
+        fail_save: AtomicBool,
+        fail_load: AtomicBool,
+    }
+
+    impl FakeBackend {
+        fn with_session(refresh_token: &str) -> Self {
+            let fake = Self::default();
+            *fake.session.lock().unwrap() = Some(StoredSession {
+                refresh_token: refresh_token.to_string(),
+                account: account_fixture(),
+            });
+            fake
+        }
+
+        fn queue(&self, response: Result<TokenResponse, AzureUserAuthError>) -> &Self {
+            self.responses.lock().unwrap().push_back(response);
+            self
+        }
+
+        fn stored_refresh(&self) -> Option<String> {
+            self.session
+                .lock()
+                .unwrap()
+                .as_ref()
+                .map(|s| s.refresh_token.clone())
+        }
+
+        fn save_count(&self) -> usize {
+            self.saves.lock().unwrap().len()
+        }
+
+        fn token_call_count(&self) -> usize {
+            self.token_calls.lock().unwrap().len()
+        }
+
+        fn param(&self, call: usize, name: &str) -> Option<String> {
+            self.token_calls
+                .lock()
+                .unwrap()
+                .get(call)
+                .and_then(|(_, params)| {
+                    params
+                        .iter()
+                        .find(|(k, _)| *k == name)
+                        .map(|(_, v)| v.clone())
+                })
+        }
+    }
+
+    impl SessionBackend for FakeBackend {
+        async fn load(&self, _key: String) -> Result<Option<StoredSession>, AzureUserAuthError> {
+            if self.fail_load.load(Ordering::SeqCst) {
+                return Err(AzureUserAuthError::Failed("keyring locked".to_string()));
+            }
+            let session = self.session.lock().unwrap().clone();
+            Ok(session)
+        }
+
+        async fn save(
+            &self,
+            _key: String,
+            session: StoredSession,
+        ) -> Result<(), AzureUserAuthError> {
+            if self.fail_save.load(Ordering::SeqCst) {
+                return Err(AzureUserAuthError::Failed(
+                    "keyring write failed".to_string(),
+                ));
+            }
+            self.saves.lock().unwrap().push(session.clone());
+            *self.session.lock().unwrap() = Some(session);
+            Ok(())
+        }
+
+        async fn post_token(
+            &self,
+            tenant_id: String,
+            params: Vec<(&'static str, String)>,
+        ) -> Result<TokenResponse, AzureUserAuthError> {
+            self.token_calls.lock().unwrap().push((tenant_id, params));
+            let canned = self.responses.lock().unwrap().pop_front();
+            canned.unwrap_or_else(|| {
+                Err(AzureUserAuthError::Failed("no canned response".to_string()))
+            })
+        }
+    }
+
+    fn account_fixture() -> AzureUserAccount {
+        AzureUserAccount {
+            username: Some("user@contoso.com".to_string()),
+            name: Some("Test User".to_string()),
+            tenant_id: TENANT.to_string(),
+            client_id: CLIENT.to_string(),
+        }
+    }
+
+    fn token_response(
+        access: Option<&str>,
+        refresh: Option<&str>,
+        id: Option<String>,
+        expires_in: Option<u64>,
+    ) -> TokenResponse {
+        TokenResponse {
+            access_token: access.map(str::to_string),
+            refresh_token: refresh.map(str::to_string),
+            id_token: id,
+            expires_in,
+        }
+    }
+
+    /// 只需要 payload 段能解出 claim——簽章驗證不在這層（見 parse_account_from_id_token）
+    fn id_token(aud: &str, tid: &str, nonce: &str) -> String {
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+        let claims = serde_json::json!({
+            "aud": aud,
+            "tid": tid,
+            "nonce": nonce,
+            "preferred_username": "user@contoso.com",
+            "name": "Test User",
+        });
+        format!(
+            "header.{}.signature",
+            URL_SAFE_NO_PAD.encode(claims.to_string())
+        )
+    }
+
+    async fn finalize(
+        backend: &FakeBackend,
+        state: &AzureUserAuthState,
+        cancel: &CancelSignal,
+    ) -> Result<AzureUserAccount, AzureUserAuthError> {
+        finalize_sign_in(
+            backend,
+            state,
+            cancel,
+            TENANT,
+            CLIENT,
+            "http://127.0.0.1:1234",
+            "auth-code",
+            "verifier",
+            NONCE,
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn sign_in_persists_session_and_seeds_only_the_whisper_cache() {
+        let backend = FakeBackend::default();
+        backend.queue(Ok(token_response(
+            Some("access-1"),
+            Some("refresh-1"),
+            Some(id_token(CLIENT, TENANT, NONCE)),
+            Some(3600),
+        )));
+        let state = AzureUserAuthState::default();
+
+        let account = finalize(&backend, &state, &CancelSignal::default())
+            .await
+            .expect("sign-in should succeed");
+
+        assert_eq!(account.username.as_deref(), Some("user@contoso.com"));
+        assert_eq!(backend.stored_refresh().as_deref(), Some("refresh-1"));
+        assert_eq!(
+            backend.param(0, "grant_type").as_deref(),
+            Some("authorization_code")
+        );
+        assert_eq!(
+            backend.param(0, "code_verifier").as_deref(),
+            Some("verifier")
+        );
+
+        // 授權時要的是 cognitiveservices scope，chat 那份必須另外換
+        let key = account_key(TENANT, CLIENT);
+        assert_eq!(
+            state.cached(&key, ScopeKind::Whisper).as_deref(),
+            Some("access-1")
+        );
+        assert!(state.cached(&key, ScopeKind::Chat).is_none());
+    }
+
+    #[tokio::test]
+    async fn sign_in_clears_the_previous_users_cached_tokens() {
+        // 同一組 tenant/client 換另一位使用者時 cache key 不變，
+        // 不先清就會繼續回傳上一位使用者的 token。
+        let backend = FakeBackend::default();
+        backend.queue(Ok(token_response(
+            None,
+            Some("refresh-1"),
+            Some(id_token(CLIENT, TENANT, NONCE)),
+            None,
+        )));
+        let state = AzureUserAuthState::default();
+        let key = account_key(TENANT, CLIENT);
+        state.store_token(&key, ScopeKind::Chat, "old-chat".into(), 3600);
+        state.store_token(&key, ScopeKind::Whisper, "old-whisper".into(), 3600);
+
+        finalize(&backend, &state, &CancelSignal::default())
+            .await
+            .expect("sign-in should succeed");
+
+        assert!(state.cached(&key, ScopeKind::Chat).is_none());
+        assert!(state.cached(&key, ScopeKind::Whisper).is_none());
+    }
+
+    #[tokio::test]
+    async fn sign_in_cancelled_during_the_browser_step_persists_nothing() {
+        // 使用者在瀏覽器登入的期間按了取消／清除連線：此時寫回 refresh token
+        // 會留下一筆 UI 再也對應不到、也清不掉的孤兒憑證。
+        let backend = FakeBackend::default();
+        backend.queue(Ok(token_response(
+            Some("access-1"),
+            Some("refresh-1"),
+            Some(id_token(CLIENT, TENANT, NONCE)),
+            Some(3600),
+        )));
+        let state = AzureUserAuthState::default();
+        let cancel = CancelSignal::default();
+        cancel.cancel();
+
+        let result = finalize(&backend, &state, &cancel).await;
+
+        assert!(matches!(result, Err(AzureUserAuthError::Cancelled)));
+        assert_eq!(backend.save_count(), 0);
+        assert!(backend.stored_refresh().is_none());
+    }
+
+    #[tokio::test]
+    async fn sign_in_without_refresh_token_aborts_before_persisting() {
+        let backend = FakeBackend::default();
+        backend.queue(Ok(token_response(
+            Some("access-1"),
+            None,
+            Some(id_token(CLIENT, TENANT, NONCE)),
+            Some(3600),
+        )));
+        let state = AzureUserAuthState::default();
+
+        assert!(finalize(&backend, &state, &CancelSignal::default())
+            .await
+            .is_err());
+        assert_eq!(backend.save_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn sign_in_with_foreign_audience_aborts_before_persisting() {
+        let backend = FakeBackend::default();
+        backend.queue(Ok(token_response(
+            Some("access-1"),
+            Some("refresh-1"),
+            Some(id_token("some-other-app", TENANT, NONCE)),
+            Some(3600),
+        )));
+        let state = AzureUserAuthState::default();
+
+        assert!(finalize(&backend, &state, &CancelSignal::default())
+            .await
+            .is_err());
+        assert_eq!(backend.save_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn sign_in_reports_failure_when_the_credential_store_rejects_the_write() {
+        // 憑證庫寫不進去卻回報成功，使用者會以為已登入，下次啟動才發現沒有
+        let backend = FakeBackend::default();
+        backend.fail_save.store(true, Ordering::SeqCst);
+        backend.queue(Ok(token_response(
+            Some("access-1"),
+            Some("refresh-1"),
+            Some(id_token(CLIENT, TENANT, NONCE)),
+            Some(3600),
+        )));
+        let state = AzureUserAuthState::default();
+
+        assert!(finalize(&backend, &state, &CancelSignal::default())
+            .await
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn cached_token_short_circuits_before_any_backend_access() {
+        let backend = FakeBackend::with_session("refresh-1");
+        let state = AzureUserAuthState::default();
+        let key = account_key(TENANT, CLIENT);
+        state.store_token(&key, ScopeKind::Chat, "cached".into(), 3600);
+
+        let token = acquire_token(&backend, &state, TENANT, CLIENT, ScopeKind::Chat)
+            .await
+            .expect("cached token should be returned");
+
+        assert_eq!(token, "cached");
+        assert_eq!(backend.token_call_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn refresh_sends_the_refresh_grant_and_caches_the_result() {
+        let backend = FakeBackend::with_session("refresh-1");
+        backend.queue(Ok(token_response(Some("access-1"), None, None, Some(3600))));
+        let state = AzureUserAuthState::default();
+
+        let token = acquire_token(&backend, &state, TENANT, CLIENT, ScopeKind::Chat)
+            .await
+            .expect("refresh should succeed");
+
+        assert_eq!(token, "access-1");
+        assert_eq!(
+            backend.param(0, "grant_type").as_deref(),
+            Some("refresh_token")
+        );
+        assert_eq!(
+            backend.param(0, "refresh_token").as_deref(),
+            Some("refresh-1")
+        );
+        assert_eq!(backend.param(0, "client_id").as_deref(), Some(CLIENT));
+        assert_eq!(
+            backend.param(0, "scope").as_deref(),
+            Some(ScopeKind::Chat.scope())
+        );
+
+        // 第二次必須走快取，不可再打一次 token endpoint
+        acquire_token(&backend, &state, TENANT, CLIENT, ScopeKind::Chat)
+            .await
+            .unwrap();
+        assert_eq!(backend.token_call_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn rotated_refresh_token_replaces_the_stored_one() {
+        let backend = FakeBackend::with_session("refresh-1");
+        backend.queue(Ok(token_response(
+            Some("access-1"),
+            Some("refresh-2"),
+            None,
+            Some(3600),
+        )));
+        let state = AzureUserAuthState::default();
+
+        acquire_token(&backend, &state, TENANT, CLIENT, ScopeKind::Whisper)
+            .await
+            .unwrap();
+
+        assert_eq!(backend.stored_refresh().as_deref(), Some("refresh-2"));
+    }
+
+    #[tokio::test]
+    async fn absent_rotation_leaves_the_stored_refresh_token_untouched() {
+        // Entra 不保證每次都回新的 refresh token；沒回就必須沿用舊的，
+        // 不可寫入空值把使用者的登入狀態毀掉。
+        let backend = FakeBackend::with_session("refresh-1");
+        backend.queue(Ok(token_response(Some("access-1"), None, None, Some(3600))));
+        let state = AzureUserAuthState::default();
+
+        acquire_token(&backend, &state, TENANT, CLIENT, ScopeKind::Chat)
+            .await
+            .unwrap();
+
+        assert_eq!(backend.save_count(), 0);
+        assert_eq!(backend.stored_refresh().as_deref(), Some("refresh-1"));
+    }
+
+    #[tokio::test]
+    async fn missing_session_reports_not_signed_in_without_calling_the_token_endpoint() {
+        let backend = FakeBackend::default();
+        let state = AzureUserAuthState::default();
+
+        let result = acquire_token(&backend, &state, TENANT, CLIENT, ScopeKind::Chat).await;
+
+        assert!(matches!(result, Err(AzureUserAuthError::NotSignedIn)));
+        assert_eq!(backend.token_call_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn failing_to_persist_the_rotated_token_fails_the_whole_call() {
+        // 舊的 refresh token 此時已被 Entra 消耗，若還回傳 access token，
+        // 使用者要等到下次過期才會發現已經無法續期。
+        let backend = FakeBackend::with_session("refresh-1");
+        backend.fail_save.store(true, Ordering::SeqCst);
+        backend.queue(Ok(token_response(
+            Some("access-1"),
+            Some("refresh-2"),
+            None,
+            Some(3600),
+        )));
+        let state = AzureUserAuthState::default();
+
+        let result = acquire_token(&backend, &state, TENANT, CLIENT, ScopeKind::Chat).await;
+
+        assert!(result.is_err());
+        // 不可留下一個「拿得到 token 但續期鏈已斷」的快取
+        assert!(state
+            .cached(&account_key(TENANT, CLIENT), ScopeKind::Chat)
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn interaction_required_propagates_and_caches_nothing() {
+        let backend = FakeBackend::with_session("refresh-1");
+        backend.queue(Err(AzureUserAuthError::InteractionRequired(
+            "AADSTS50173".to_string(),
+        )));
+        let state = AzureUserAuthState::default();
+
+        let result = acquire_token(&backend, &state, TENANT, CLIENT, ScopeKind::Chat).await;
+
+        assert!(matches!(
+            result,
+            Err(AzureUserAuthError::InteractionRequired(_))
+        ));
+        assert!(state
+            .cached(&account_key(TENANT, CLIENT), ScopeKind::Chat)
+            .is_none());
+        assert_eq!(backend.save_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn credential_store_failure_is_not_reported_as_signed_out() {
+        // 憑證庫暫時讀不到（鎖住／權限）不等於沒登入——回 NotSignedIn 會讓
+        // UI 把使用者踢出去，但實際上憑證還在。
+        let backend = FakeBackend::with_session("refresh-1");
+        backend.fail_load.store(true, Ordering::SeqCst);
+        let state = AzureUserAuthState::default();
+
+        let result = acquire_token(&backend, &state, TENANT, CLIENT, ScopeKind::Chat).await;
+
+        assert!(matches!(result, Err(AzureUserAuthError::Failed(_))));
+        assert_eq!(backend.token_call_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn chat_and_whisper_are_refreshed_and_cached_independently() {
+        let backend = FakeBackend::with_session("refresh-1");
+        backend
+            .queue(Ok(token_response(
+                Some("chat-token"),
+                None,
+                None,
+                Some(3600),
+            )))
+            .queue(Ok(token_response(
+                Some("whisper-token"),
+                None,
+                None,
+                Some(3600),
+            )));
+        let state = AzureUserAuthState::default();
+
+        let chat = acquire_token(&backend, &state, TENANT, CLIENT, ScopeKind::Chat)
+            .await
+            .unwrap();
+        let whisper = acquire_token(&backend, &state, TENANT, CLIENT, ScopeKind::Whisper)
+            .await
+            .unwrap();
+
+        assert_eq!(chat, "chat-token");
+        assert_eq!(whisper, "whisper-token");
+        assert_ne!(
+            backend.param(0, "scope").unwrap(),
+            backend.param(1, "scope").unwrap()
+        );
     }
 }

@@ -118,7 +118,7 @@ pub struct AzureUserAccount {
 }
 
 /// 存進 OS 憑證庫的內容。
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct StoredSession {
     pub refresh_token: String,
     pub account: AzureUserAccount,
