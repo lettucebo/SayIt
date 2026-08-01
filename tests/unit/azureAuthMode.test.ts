@@ -9,7 +9,12 @@ import {
 } from "../../src/types/settings";
 import { sanitizeSettingsPayload } from "../../src/lib/settingsTransfer";
 import { redactSensitiveString } from "../../src/lib/sentryScrubbing";
-import { matchesCredentials } from "../../src/lib/azureUserAuth";
+import { matchesCredentials, findSignInErrorKey } from "../../src/lib/azureUserAuth";
+import zhTW from "../../src/i18n/locales/zh-TW.json";
+import zhCN from "../../src/i18n/locales/zh-CN.json";
+import en from "../../src/i18n/locales/en.json";
+import ja from "../../src/i18n/locales/ja.json";
+import ko from "../../src/i18n/locales/ko.json";
 
 // 這組測試守住一個關鍵不變式：
 //   「使用者選的驗證模式」與「HTTP 要送哪種 header」是兩件事。
@@ -142,5 +147,55 @@ describe("exhaustiveness", () => {
     // 提醒同步更新 llmProvider header 分支與 Rust 的 parse_auth_header_mode。
     const expected: AzureAuthMode[] = ["key", "entra", "entraUser"];
     expect([...AZURE_AUTH_MODE_VALUES]).toEqual(expected);
+  });
+});
+
+describe("登入錯誤訊息", () => {
+  // Rust 端的錯誤原文是給開發者看的英文，直接顯示在設定頁只會讓使用者
+  // 不知道下一步該做什麼。訊息固定的變體必須有對應的 i18n key。
+  const localeMessages: Record<string, { settings: { azure: unknown } }> = {
+    "zh-TW": zhTW,
+    "zh-CN": zhCN,
+    en,
+    ja,
+    ko,
+  };
+
+  it.each([
+    ["sign-in timed out", "settings.azure.signInTimedOut"],
+    ["sign-in already in progress", "settings.azure.signInInProgress"],
+    ["Entra configuration incomplete", "settings.azure.signInConfigIncomplete"],
+    ["invalid tenant id", "settings.azure.invalidTenantId"],
+    ["invalid client id", "settings.azure.invalidClientId"],
+  ])("[P1] %s 對應到可讀的說明", (message, key) => {
+    expect(findSignInErrorKey(message)).toBe(key);
+  });
+
+  it("[P0] 帶 AADSTS 說明的錯誤必須保留原文", () => {
+    // 那串原文是使用者拿去找 IT 的唯一依據，不可被翻譯蓋掉
+    expect(
+      findSignInErrorKey("interaction required: AADSTS50173 something"),
+    ).toBeNull();
+    expect(findSignInErrorKey("token request failed: dns error")).toBeNull();
+  });
+
+  it("[P1] 五個語系都有對應字串", () => {
+    const keys = [
+      "signInTimedOut",
+      "signInInProgress",
+      "signInConfigIncomplete",
+      "invalidTenantId",
+      "invalidClientId",
+    ];
+    for (const [locale, json] of Object.entries(localeMessages)) {
+      const azure = json.settings.azure as Record<string, unknown>;
+      for (const key of keys) {
+        const value = azure[key];
+        expect(
+          typeof value === "string" && value.length > 0,
+          `${locale} 缺少 settings.azure.${key}`,
+        ).toBe(true);
+      }
+    }
   });
 });

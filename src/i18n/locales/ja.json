@@ -391,7 +391,12 @@
       "entraUserDescription": "ご自身の職場アカウントでサインインします。クライアント シークレットは不要です。ご自身の Azure 権限が使われるため「Cognitive Services OpenAI User」ロールが必要です。",
       "signInCancel": "キャンセル",
       "signIn": "Entra ID でサインイン",
-      "signInPolicyDenied": "組織のアクセス ポリシーによりサインインがブロックされました。次のメッセージを添えて IT にご連絡ください："
+      "signInPolicyDenied": "組織のアクセス ポリシーによりサインインがブロックされました。次のメッセージを添えて IT にご連絡ください：",
+      "signInTimedOut": "サインインがタイムアウトしました。ブラウザーでのサインインは 5 分以内に完了してください。",
+      "signInInProgress": "サインインが進行中です。完了するかキャンセルしてください。",
+      "signInConfigIncomplete": "先に テナント ID と クライアント ID を入力してください。",
+      "invalidTenantId": "テナント ID の形式が正しくありません。Azure ポータルのディレクトリ (テナント) ID を貼り付けてください。",
+      "invalidClientId": "クライアント ID の形式が正しくありません。アプリケーション (クライアント) ID を貼り付けてください。"
     }
   },
   "dashboard": {

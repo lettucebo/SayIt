@@ -296,4 +296,38 @@ describe("saveAzureConnection 的資料保存性", () => {
     await expect(store.getLlmRequestConfig()).rejects.toThrow();
     expect(store.azureUserAccount).not.toBeNull();
   });
+
+  it("[P1] 輸入框改成別組身分時不可再顯示為已登入", async () => {
+    // 否則設定頁會一邊顯示上一組帳號的「已登入」、一邊把登入按鈕藏起來，
+    // 使用者會以為新填的 Client ID 已經生效。
+    const { useSettingsStore } = await import(
+      "../../src/stores/useSettingsStore"
+    );
+    const store = useSettingsStore();
+    await store.loadSettings();
+
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "azure_user_get_account") {
+        return {
+          username: "user@contoso.com",
+          name: "User",
+          tenantId: TENANT,
+          clientId: CLIENT,
+        };
+      }
+      return undefined;
+    });
+    await store.saveAzureConnection(baseConfig({ authMode: "entraUser" }));
+    await store.refreshAzureUserAccount();
+
+    // 已儲存的那組 → 已登入（前後空白不影響）
+    expect(store.matchesSignedInAccount(TENANT, CLIENT)).toBe(true);
+    expect(store.matchesSignedInAccount(` ${TENANT} `, ` ${CLIENT} `)).toBe(
+      true,
+    );
+
+    // 使用者在輸入框換了 Client ID（尚未儲存）→ 不可算已登入
+    const OTHER_CLIENT = "99999999-9999-9999-9999-999999999999";
+    expect(store.matchesSignedInAccount(TENANT, OTHER_CLIENT)).toBe(false);
+  });
 });

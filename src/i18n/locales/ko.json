@@ -391,7 +391,12 @@
       "entraUserDescription": "본인의 회사 계정으로 로그인합니다. 클라이언트 비밀은 필요 없습니다. 본인의 Azure 권한을 사용하므로 \"Cognitive Services OpenAI User\" 역할이 필요합니다.",
       "signInCancel": "취소",
       "signIn": "Entra ID로 로그인",
-      "signInPolicyDenied": "조직의 액세스 정책에 의해 로그인이 차단되었습니다. 다음 메시지와 함께 IT에 문의하세요:"
+      "signInPolicyDenied": "조직의 액세스 정책에 의해 로그인이 차단되었습니다. 다음 메시지와 함께 IT에 문의하세요:",
+      "signInTimedOut": "로그인 시간이 초과되었습니다. 브라우저 로그인은 5분 이내에 완료해야 합니다.",
+      "signInInProgress": "로그인이 이미 진행 중입니다. 완료하거나 취소해 주세요.",
+      "signInConfigIncomplete": "먼저 테넌트 ID와 클라이언트 ID를 입력하세요.",
+      "invalidTenantId": "테넌트 ID 형식이 올바르지 않습니다. Azure Portal의 디렉터리(테넌트) ID를 붙여넣으세요.",
+      "invalidClientId": "클라이언트 ID 형식이 올바르지 않습니다. 애플리케이션(클라이언트) ID를 붙여넣으세요."
     }
   },
   "dashboard": {

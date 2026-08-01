@@ -32,7 +32,11 @@ import {
   HOTKEY_RECORDING_CAPTURED,
   HOTKEY_RECORDING_REJECTED,
 } from "../composables/useTauriEvents";
-import { isSignInCancelledError, isPolicyDeniedError } from "../lib/azureUserAuth";
+import {
+  isSignInCancelledError,
+  isPolicyDeniedError,
+  findSignInErrorKey,
+} from "../lib/azureUserAuth";
 import {
   type PresetTriggerKey,
   type ComboTriggerKey,
@@ -883,7 +887,10 @@ async function handleAzureUserSignIn() {
         `${t("settings.azure.signInPolicyDenied")} ${message}`,
       );
     } else {
-      azureFeedback.show("error", message);
+      // 訊息固定的錯誤翻成使用者看得懂的說明；其餘（含帶 AADSTS 說明的）
+      // 保留原文，那才是使用者拿去找 IT 的依據。
+      const key = findSignInErrorKey(message);
+      azureFeedback.show("error", key === null ? message : t(key));
     }
   } finally {
     isAzureSigningIn.value = false;
@@ -915,6 +922,18 @@ const azureSignedInLabel = computed(() => {
   if (!account) return "";
   return account.username ?? account.name ?? "";
 });
+
+/**
+ * 「已登入」區塊只在輸入框與已登入帳號一致時顯示。
+ * 否則使用者改了 Tenant/Client ID 之後，畫面仍顯示上一組帳號的「已登入」，
+ * 而登入按鈕被藏起來，會誤以為新的設定已經生效。
+ */
+const isSignedInForCurrentInput = computed(() =>
+  settingsStore.matchesSignedInAccount(
+    azureTenantIdInput.value,
+    azureClientIdInput.value,
+  ),
+);
 
 async function handleSaveAzureChatDeployment() {
   try {
@@ -2218,7 +2237,7 @@ onBeforeUnmount(() => {
           <Input id="azure-user-client-id" v-model="azureClientIdInput" class="font-mono text-xs" />
 
           <div
-            v-if="settingsStore.isAzureUserSignedIn"
+            v-if="isSignedInForCurrentInput"
             class="flex items-center justify-between rounded-md border border-border bg-muted/30 p-3"
           >
             <div class="flex items-center gap-2">

@@ -391,7 +391,12 @@
       "entraUserDescription": "用你自己的公司账号登录，不需要 Client Secret。登录后会沿用你在 Azure 上的权限，需要「Cognitive Services OpenAI User」角色。",
       "signInCancel": "取消",
       "signIn": "使用 Entra ID 登录",
-      "signInPolicyDenied": "登录被贵公司的访问策略拦截，请联系 IT 并提供以下信息："
+      "signInPolicyDenied": "登录被贵公司的访问策略拦截，请联系 IT 并提供以下信息：",
+      "signInTimedOut": "登录超时，请重试（需在五分钟内于浏览器窗口完成登录）。",
+      "signInInProgress": "已有一个登录正在进行中，请先完成或取消。",
+      "signInConfigIncomplete": "请先填写 Tenant ID 与 Client ID。",
+      "invalidTenantId": "Tenant ID 格式不正确，请粘贴 Azure 门户上的目录（租户）ID。",
+      "invalidClientId": "Client ID 格式不正确，请粘贴应用程序（客户端）ID。"
     }
   },
   "dashboard": {

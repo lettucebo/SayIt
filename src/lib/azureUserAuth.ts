@@ -114,3 +114,25 @@ export function isSignInCancelledError(message: string): boolean {
 export function isPolicyDeniedError(message: string): boolean {
   return message.includes("sign-in blocked by policy");
 }
+
+/**
+ * Rust `AzureUserAuthError` 的固定訊息 → i18n key。
+ *
+ * 這些錯誤原文是給開發者看的英文，直接丟到設定頁只會讓使用者不知道下一步。
+ * 只對「訊息完全固定」的變體做對應——`Failed(String)` 與帶 AADSTS 說明的
+ * 變體必須保留原文，那才是使用者拿去找 IT 的依據。
+ */
+const SIGN_IN_ERROR_KEYS: ReadonlyArray<readonly [string, string]> = [
+  ["sign-in timed out", "settings.azure.signInTimedOut"],
+  ["sign-in already in progress", "settings.azure.signInInProgress"],
+  ["Entra configuration incomplete", "settings.azure.signInConfigIncomplete"],
+  ["invalid tenant id", "settings.azure.invalidTenantId"],
+  ["invalid client id", "settings.azure.invalidClientId"],
+];
+
+/** 找不到對應時回 null，呼叫端須保留原始訊息。 */
+export function findSignInErrorKey(message: string): string | null {
+  return (
+    SIGN_IN_ERROR_KEYS.find(([needle]) => message.includes(needle))?.[1] ?? null
+  );
+}

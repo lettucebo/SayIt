@@ -391,7 +391,12 @@
       "entraUserDescription": "Sign in with your own work account — no client secret needed. Requests use your own Azure permissions, so you need the “Cognitive Services OpenAI User” role.",
       "signInCancel": "Cancel",
       "signIn": "Sign in with Entra ID",
-      "signInPolicyDenied": "Sign-in was blocked by your organization policy. Contact IT with this message:"
+      "signInPolicyDenied": "Sign-in was blocked by your organization policy. Contact IT with this message:",
+      "signInTimedOut": "Sign-in timed out. Please try again — the browser sign-in must be completed within five minutes.",
+      "signInInProgress": "A sign-in is already in progress. Finish or cancel it first.",
+      "signInConfigIncomplete": "Enter the Tenant ID and Client ID first.",
+      "invalidTenantId": "That Tenant ID looks wrong. Paste the Directory (tenant) ID from the Azure portal.",
+      "invalidClientId": "That Client ID looks wrong. Paste the Application (client) ID from the Azure portal."
     }
   },
   "dashboard": {

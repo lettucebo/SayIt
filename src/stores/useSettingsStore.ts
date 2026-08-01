@@ -249,6 +249,20 @@ export const useSettingsStore = defineStore("settings", () => {
     }),
   );
 
+  /**
+   * 給設定頁用：**輸入框裡**的這組身分是不是目前已登入的帳號。
+   *
+   * `isAzureUserSignedIn` 比對的是「已儲存」的值，使用者在輸入框改了
+   * Tenant/Client ID 但還沒按儲存時，畫面會一邊顯示上一組帳號的「已登入」、
+   * 一邊把登入按鈕藏起來，讓人以為新設定已經生效。
+   */
+  function matchesSignedInAccount(tenantId: string, clientId: string) {
+    return matchesCredentials(azureUserAccount.value, {
+      tenantId: tenantId.trim(),
+      clientId: clientId.trim(),
+    });
+  }
+
   /** 三種驗證模式各自的憑證完整性判斷。 */
   const hasAzureCredentials = computed(() => {
     switch (azureAuthMode.value) {
@@ -2651,6 +2665,7 @@ export const useSettingsStore = defineStore("settings", () => {
     isSettingsLoaded,
     settingsLoadFailed,
     isAzureUserSignedIn,
+    matchesSignedInAccount,
     hasAzureCredentials,
     signInAzureUserAccount,
     signOutAzureUserAccount,

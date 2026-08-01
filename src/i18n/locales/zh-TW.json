@@ -391,7 +391,12 @@
       "entraUserDescription": "用你自己的公司帳號登入，不需要 Client Secret。登入後會沿用你在 Azure 上的權限，需要「Cognitive Services OpenAI User」角色。",
       "signInCancel": "取消",
       "signIn": "使用 Entra ID 登入",
-      "signInPolicyDenied": "登入被貴公司的存取政策擋下，請聯絡 IT 並提供以下訊息："
+      "signInPolicyDenied": "登入被貴公司的存取政策擋下，請聯絡 IT 並提供以下訊息：",
+      "signInTimedOut": "登入逾時，請再試一次（瀏覽器視窗需在五分鐘內完成登入）。",
+      "signInInProgress": "已有一個登入正在進行中，請先完成或取消。",
+      "signInConfigIncomplete": "請先填入 Tenant ID 與 Client ID。",
+      "invalidTenantId": "Tenant ID 格式不正確，請貼上 Azure 入口網站上的目錄 (租用戶) 識別碼。",
+      "invalidClientId": "Client ID 格式不正確，請貼上應用程式 (用戶端) 識別碼。"
     }
   },
   "dashboard": {
