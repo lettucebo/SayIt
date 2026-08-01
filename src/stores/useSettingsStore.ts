@@ -18,7 +18,6 @@ import {
   type AzureAuthMode,
   type AzureAuthHeaderMode,
   toAzureAuthMode,
-  toAzureAuthHeaderMode,
 } from "../types/settings";
 import {
   getKeyDisplayName,
@@ -325,16 +324,43 @@ export const useSettingsStore = defineStore("settings", () => {
     }
   }
 
-  function getAzureRequestOptions(
+  /**
+   * 取一份 Azure 連線設定的 immutable 快照。
+   *
+   * 換 token 是 async 的，等待期間另一個視窗可能改掉 endpoint / deployment /
+   * authMode。若 await 前後各讀一次 reactive 值，就可能把「帳號 A 的 token」
+   * 配上「資源 B 的 endpoint」，把內容送到非預期的 Azure 資源。
+   * 因此在任何 await 之前一次取完，後續只用這份快照。
+   */
+  function snapshotAzureConfig() {
+    return {
+      enabled: azureEnabled.value,
+      endpoint: azureEndpoint.value,
+      apiVersion: azureApiVersion.value,
+      authMode: azureAuthMode.value,
+      apiKey: azureApiKey.value,
+      tenantId: azureTenantId.value,
+      clientId: azureClientId.value,
+      clientSecret: azureClientSecret.value,
+      chatDeployment: azureChatDeployment.value,
+      whisperDeployment: azureWhisperDeployment.value,
+      omitTemperature: azureOmitTemperature.value,
+    };
+  }
+
+  type AzureConfigSnapshot = ReturnType<typeof snapshotAzureConfig>;
+
+  function azureOptionsFromSnapshot(
+    snap: AzureConfigSnapshot,
     authValue: string,
-    authMode: AzureAuthHeaderMode = toAzureAuthHeaderMode(azureAuthMode.value),
+    authMode: AzureAuthHeaderMode,
   ): AzureRequestOptions {
     return {
-      endpoint: azureEndpoint.value,
-      apiVersion: azureApiVersion.value || undefined,
+      endpoint: snap.endpoint,
+      apiVersion: snap.apiVersion || undefined,
       authMode,
       authValue,
-      omitTemperature: azureOmitTemperature.value,
+      omitTemperature: snap.omitTemperature,
     };
   }
 
@@ -357,54 +383,51 @@ export const useSettingsStore = defineStore("settings", () => {
       };
     }
 
+    // 任何 await 之前先定格，之後只用這份快照（見 snapshotAzureConfig 說明）
+    const snap = snapshotAzureConfig();
+
     // Azure 設定不完整 → 回空 apiKey，呼叫端走「未設定」流程（不打 token / 不送請求）
-    if (
-      !azureEnabled.value ||
-      azureEndpoint.value === "" ||
-      azureChatDeployment.value === ""
-    ) {
-      return { apiKey: "", provider, modelId: azureChatDeployment.value };
+    if (!snap.enabled || snap.endpoint === "" || snap.chatDeployment === "") {
+      return { apiKey: "", provider, modelId: snap.chatDeployment };
     }
 
     // chat 走 v1 路徑（/openai/v1/）→ ai.azure.com 受眾
-    if (azureAuthMode.value === "entraUser") {
+    if (snap.authMode === "entraUser") {
       const token = await getAzureUserToken(
-        { tenantId: azureTenantId.value, clientId: azureClientId.value },
+        { tenantId: snap.tenantId, clientId: snap.clientId },
         "chat",
       );
-      // 明確固定成 "bearer"：等待 token 期間另一個視窗可能已把 authMode 改掉，
-      // 若回頭再讀 reactive 值，這個 bearer token 會被塞進 api-key header。
       return {
         apiKey: token,
         provider,
-        modelId: azureChatDeployment.value,
-        azure: getAzureRequestOptions(token, "bearer"),
+        modelId: snap.chatDeployment,
+        azure: azureOptionsFromSnapshot(snap, token, "bearer"),
       };
     }
 
     const scope = getAzureScopeForApiKind("chat");
-    if (azureAuthMode.value === "entra") {
+    if (snap.authMode === "entra") {
       const token = await getAzureAccessToken(
         {
-          tenantId: azureTenantId.value,
-          clientId: azureClientId.value,
-          clientSecret: azureClientSecret.value,
+          tenantId: snap.tenantId,
+          clientId: snap.clientId,
+          clientSecret: snap.clientSecret,
         },
         scope,
       );
       return {
         apiKey: token,
         provider,
-        modelId: azureChatDeployment.value,
-        azure: getAzureRequestOptions(token, "bearer"),
+        modelId: snap.chatDeployment,
+        azure: azureOptionsFromSnapshot(snap, token, "bearer"),
       };
     }
 
     return {
-      apiKey: azureApiKey.value,
+      apiKey: snap.apiKey,
       provider,
-      modelId: azureChatDeployment.value,
-      azure: getAzureRequestOptions(azureApiKey.value, "key"),
+      modelId: snap.chatDeployment,
+      azure: azureOptionsFromSnapshot(snap, snap.apiKey, "key"),
     };
   }
 
@@ -446,11 +469,10 @@ export const useSettingsStore = defineStore("settings", () => {
       };
     }
 
-    if (
-      !azureEnabled.value ||
-      azureEndpoint.value === "" ||
-      azureWhisperDeployment.value === ""
-    ) {
+    // 任何 await 之前先定格（同 getLlmRequestConfig 的理由）
+    const snap = snapshotAzureConfig();
+
+    if (!snap.enabled || snap.endpoint === "" || snap.whisperDeployment === "") {
       return {
         apiKey: "",
         provider: "azure",
@@ -461,34 +483,34 @@ export const useSettingsStore = defineStore("settings", () => {
     const base = {
       provider: "azure" as const,
       modelId: selectedWhisperModelId.value,
-      endpoint: azureEndpoint.value,
-      deployment: azureWhisperDeployment.value,
-      apiVersion: azureApiVersion.value || undefined,
+      endpoint: snap.endpoint,
+      deployment: snap.whisperDeployment,
+      apiVersion: snap.apiVersion || undefined,
     };
 
     // whisper 走傳統 deployments 路徑 → cognitiveservices 受眾
-    if (azureAuthMode.value === "entraUser") {
+    if (snap.authMode === "entraUser") {
       const token = await getAzureUserToken(
-        { tenantId: azureTenantId.value, clientId: azureClientId.value },
+        { tenantId: snap.tenantId, clientId: snap.clientId },
         "whisper",
       );
       return { ...base, apiKey: token, authMode: "bearer" };
     }
 
     const scope = getAzureScopeForApiKind("whisper");
-    if (azureAuthMode.value === "entra") {
+    if (snap.authMode === "entra") {
       const token = await getAzureAccessToken(
         {
-          tenantId: azureTenantId.value,
-          clientId: azureClientId.value,
-          clientSecret: azureClientSecret.value,
+          tenantId: snap.tenantId,
+          clientId: snap.clientId,
+          clientSecret: snap.clientSecret,
         },
         scope,
       );
       return { ...base, apiKey: token, authMode: "bearer" };
     }
 
-    return { ...base, apiKey: azureApiKey.value, authMode: "key" };
+    return { ...base, apiKey: snap.apiKey, authMode: "key" };
   }
 
   async function syncHotkeyConfigToRust(key: TriggerKey, mode: TriggerMode) {
@@ -1608,13 +1630,17 @@ export const useSettingsStore = defineStore("settings", () => {
     await cancelAzureUserSignIn(pendingSignInOperationId);
   }
 
-  /** 內部用：清掉憑證庫但不動設定，失敗僅記錄（刪設定不該因憑證庫問題卡住）。 */
   /**
    * 內部用：清掉憑證庫但不動設定。
    * 回傳是否成功——呼叫端若接著要刪掉 tenant/client，必須先確認這裡成功，
    * 否則殘留的 refresh token 會因為算不出 key 而永遠清不掉。
+   *
+   * **會先取消進行中的登入**：否則使用者在瀏覽器登入的期間按了清除/儲存/匯入，
+   * 稍後回來的 callback 仍會把 refresh token 寫回憑證庫，而此時 locator 已被
+   * 覆寫或刪除，那筆憑證就再也對應不到、也清不掉。
    */
   async function signOutAzureUserSilently(): Promise<boolean> {
+    await cancelAzureUserSignInFlow();
     if (azureTenantId.value === "" || azureClientId.value === "") return true;
     try {
       await signOutAzureUser({
@@ -1632,6 +1658,8 @@ export const useSettingsStore = defineStore("settings", () => {
   }
 
   async function signOutAzureUserAccount() {
+    // 先取消進行中的登入，否則稍後回來的 callback 會把使用者無聲地重新登入
+    await cancelAzureUserSignInFlow();
     await signOutAzureUser({
       tenantId: azureTenantId.value,
       clientId: azureClientId.value,

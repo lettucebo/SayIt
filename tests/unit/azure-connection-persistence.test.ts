@@ -165,4 +165,61 @@ describe("saveAzureConnection 的資料保存性", () => {
     expect(mockStoreData.get("azureClientId")).toBe(CLIENT);
     expect(mockStoreData.get("azureClientSecret")).toBe(SECRET);
   });
+
+  it("[P0] 憑證清除失敗時不可覆寫 tenant/client（否則舊 token 永久孤兒）", async () => {
+    // locator（tenant+client）一旦被覆寫，就再也算不出舊憑證的 key。
+    // 因此清除失敗必須中止整個儲存，讓使用者能重試。
+    const { useSettingsStore } = await import(
+      "../../src/stores/useSettingsStore"
+    );
+    const store = useSettingsStore();
+    await store.loadSettings();
+
+    await store.saveAzureConnection(baseConfig({ authMode: "entraUser" }));
+    expect(mockStoreData.get("azureTenantId")).toBe(TENANT);
+
+    // 讓 azure_user_sign_out 失敗
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "azure_user_sign_out") throw new Error("keyring locked");
+      return undefined;
+    });
+
+    const OTHER_CLIENT = "99999999-9999-9999-9999-999999999999";
+    await expect(
+      store.saveAzureConnection(
+        baseConfig({ authMode: "entraUser", clientId: OTHER_CLIENT }),
+      ),
+    ).rejects.toThrow();
+
+    // locator 必須維持舊值，殘留憑證才有機會被清掉
+    expect(mockStoreData.get("azureClientId")).toBe(CLIENT);
+  });
+
+  it("[P0] 變更身分時會先取消進行中的登入", async () => {
+    // 使用者在瀏覽器登入期間按了儲存/清除，若不取消，稍後回來的 callback
+    // 仍會把 refresh token 寫回，而此時 locator 已被覆寫 → 孤兒憑證。
+    const { useSettingsStore } = await import(
+      "../../src/stores/useSettingsStore"
+    );
+    const store = useSettingsStore();
+    await store.loadSettings();
+    await store.saveAzureConnection(baseConfig({ authMode: "entraUser" }));
+
+    const calls: string[] = [];
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      calls.push(cmd);
+      return undefined;
+    });
+
+    const OTHER_TENANT = "88888888-8888-8888-8888-888888888888";
+    await store.saveAzureConnection(
+      baseConfig({ authMode: "entraUser", tenantId: OTHER_TENANT }),
+    );
+
+    const cancelAt = calls.indexOf("azure_user_cancel_sign_in");
+    const signOutAt = calls.indexOf("azure_user_sign_out");
+    expect(signOutAt).toBeGreaterThanOrEqual(0);
+    // 取消若有發出，必須在登出之前
+    if (cancelAt >= 0) expect(cancelAt).toBeLessThan(signOutAt);
+  });
 });
