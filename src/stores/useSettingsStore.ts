@@ -29,6 +29,7 @@ import {
 } from "../lib/keycodeMap";
 import {
   extractErrorMessage,
+  isAzureUserAuthFailure,
   getHotkeyRecordingTimeoutMessage,
   getHotkeyUnsupportedKeyMessage,
   getHotkeyPresetHint,
@@ -97,6 +98,7 @@ import {
   signInAzureUser,
   signOutAzureUser,
   cancelAzureUserSignIn,
+  type AzureUserScopeKind,
 } from "../lib/azureUserAuth";
 import {
   EXPORTABLE_SETTING_KEYS,
@@ -350,6 +352,35 @@ export const useSettingsStore = defineStore("settings", () => {
 
   type AzureConfigSnapshot = ReturnType<typeof snapshotAzureConfig>;
 
+  /**
+   * 取 Entra 使用者 token，並在登入失效時同步更新兩個視窗的顯示。
+   *
+   * Rust 端已在 refresh token 確定失效時清掉憑證，但那不會反映到已經載入的
+   * 畫面上——設定頁會一邊顯示「已登入」，使用者卻每次使用都被要求重新登入。
+   */
+  async function acquireAzureUserToken(
+    credentials: { tenantId: string; clientId: string },
+    scopeKind: AzureUserScopeKind,
+  ): Promise<string> {
+    try {
+      return await getAzureUserToken(credentials, scopeKind);
+    } catch (err) {
+      if (isAzureUserAuthFailure(extractErrorMessage(err))) {
+        azureUserAccount.value = null;
+        try {
+          await emitAzureAuthStateChanged();
+        } catch (emitErr) {
+          // 廣播失敗不可蓋掉原本的錯誤：使用者要看到的是「請重新登入」
+          console.warn(
+            "[useSettingsStore] failed to broadcast Azure auth state:",
+            extractErrorMessage(emitErr),
+          );
+        }
+      }
+      throw err;
+    }
+  }
+
   function azureOptionsFromSnapshot(
     snap: AzureConfigSnapshot,
     authValue: string,
@@ -393,7 +424,7 @@ export const useSettingsStore = defineStore("settings", () => {
 
     // chat 走 v1 路徑（/openai/v1/）→ ai.azure.com 受眾
     if (snap.authMode === "entraUser") {
-      const token = await getAzureUserToken(
+      const token = await acquireAzureUserToken(
         { tenantId: snap.tenantId, clientId: snap.clientId },
         "chat",
       );
@@ -490,7 +521,7 @@ export const useSettingsStore = defineStore("settings", () => {
 
     // whisper 走傳統 deployments 路徑 → cognitiveservices 受眾
     if (snap.authMode === "entraUser") {
-      const token = await getAzureUserToken(
+      const token = await acquireAzureUserToken(
         { tenantId: snap.tenantId, clientId: snap.clientId },
         "whisper",
       );

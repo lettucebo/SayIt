@@ -222,4 +222,78 @@ describe("saveAzureConnection 的資料保存性", () => {
     // 取消若有發出，必須在登出之前
     if (cancelAt >= 0) expect(cancelAt).toBeLessThan(signOutAt);
   });
+
+  it("[P1] 登入失效時要立刻清掉畫面上的已登入帳號", async () => {
+    // 否則設定頁一邊顯示「已登入 user@…」，使用者卻每次使用都被要求重新登入。
+    const { useSettingsStore } = await import(
+      "../../src/stores/useSettingsStore"
+    );
+    const store = useSettingsStore();
+    await store.loadSettings();
+
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "azure_user_get_account") {
+        return {
+          username: "user@contoso.com",
+          name: "User",
+          tenantId: TENANT,
+          clientId: CLIENT,
+        };
+      }
+      return undefined;
+    });
+    await store.saveAzureConnection(
+      baseConfig({ authMode: "entraUser", chatDeployment: "gpt-4o" }),
+    );
+    await store.saveAzureChatDeployment("gpt-4o");
+    await store.saveLlmProvider("azure");
+    await store.refreshAzureUserAccount();
+    expect(store.azureUserAccount).not.toBeNull();
+
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "azure_user_get_token") {
+        throw new Error("interaction required (sign-in expired): AADSTS50173");
+      }
+      return undefined;
+    });
+
+    await expect(store.getLlmRequestConfig()).rejects.toThrow();
+    expect(store.azureUserAccount).toBeNull();
+  });
+
+  it("[P1] 一般網路錯誤不可把使用者登出", async () => {
+    // 暫時性故障若也清掉帳號，使用者會以為登入掉了而反覆重新登入。
+    const { useSettingsStore } = await import(
+      "../../src/stores/useSettingsStore"
+    );
+    const store = useSettingsStore();
+    await store.loadSettings();
+
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "azure_user_get_account") {
+        return {
+          username: "user@contoso.com",
+          name: "User",
+          tenantId: TENANT,
+          clientId: CLIENT,
+        };
+      }
+      return undefined;
+    });
+    await store.saveAzureConnection(baseConfig({ authMode: "entraUser" }));
+    await store.saveAzureChatDeployment("gpt-4o");
+    await store.saveLlmProvider("azure");
+    await store.refreshAzureUserAccount();
+    expect(store.azureUserAccount).not.toBeNull();
+
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "azure_user_get_token") {
+        throw new Error("token request failed: connection refused");
+      }
+      return undefined;
+    });
+
+    await expect(store.getLlmRequestConfig()).rejects.toThrow();
+    expect(store.azureUserAccount).not.toBeNull();
+  });
 });
