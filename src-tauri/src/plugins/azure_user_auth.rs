@@ -479,7 +479,9 @@ pub fn open_in_browser(url: &str) -> Result<(), AzureUserAuthError> {
 
     #[cfg(target_os = "macos")]
     {
-        std::process::Command::new("open")
+        // 同上，用絕對路徑而非相對程式名，避免 PATH 被污染時被替換掉。
+        // `/usr/bin/open` 是系統二進位，受 SIP 保護。
+        std::process::Command::new("/usr/bin/open")
             .arg(url)
             .spawn()
             .map_err(|e| AzureUserAuthError::Failed(format!("failed to open browser: {e}")))?;
