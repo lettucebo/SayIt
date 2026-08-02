@@ -103,6 +103,10 @@ impl OsKeyring {
 
     fn entry(&self, account: &str) -> Result<keyring_core::Entry, String> {
         ensure_store()?;
+        // 只有 Windows 分支會 insert，其他平台這個 binding 不需要 mut——
+        // 但仍要留著 mut 讓 Windows 能寫入，故在非 Windows 抑制該警告
+        // （clippy 以 -D warnings 跑，不抑制會直接讓 macOS CI 失敗）。
+        #[cfg_attr(not(target_os = "windows"), allow(unused_mut))]
         let mut modifiers: HashMap<&str, &str> = HashMap::new();
         // Windows 憑證管理員預設是 Enterprise persistence——那會讓憑證隨
         // 使用者設定檔漫遊到其他機器。refresh token 不該離開這台裝置，
