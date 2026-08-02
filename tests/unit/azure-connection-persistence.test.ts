@@ -392,4 +392,94 @@ describe("saveAzureConnection 的資料保存性", () => {
     expect(store.azureAuthMode).toBe("key");
     expect(store.azureApiKey).toBe("new-key");
   });
+
+  it("[P1] 登入失效後不可因為跨視窗刷新又變回「已登入」", async () => {
+    // 憑證此時仍在憑證庫裡（invalid_grant 不代表憑證永久失效），
+    // 若靠「憑證是否存在」推論，使用者存個設定綠色勾勾就回來了，
+    // 但每次實際使用還是失敗。
+    const { useSettingsStore } = await import(
+      "../../src/stores/useSettingsStore"
+    );
+    const store = useSettingsStore();
+    await store.loadSettings();
+
+    const account = {
+      username: "user@contoso.com",
+      name: "User",
+      tenantId: TENANT,
+      clientId: CLIENT,
+    };
+    mockInvoke.mockImplementation(async (cmd: string) =>
+      cmd === "azure_user_get_account" ? account : undefined,
+    );
+    await store.saveAzureConnection(baseConfig({ authMode: "entraUser" }));
+    await store.saveAzureChatDeployment("gpt-4o");
+    await store.saveLlmProvider("azure");
+    await store.refreshAzureUserAccount();
+    expect(store.azureUserAccount).not.toBeNull();
+
+    // 登入失效
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "azure_user_get_token") {
+        throw new Error("interaction required: AADSTS50173");
+      }
+      if (cmd === "azure_user_get_account") return account;
+      return undefined;
+    });
+    await expect(store.getLlmRequestConfig()).rejects.toThrow();
+    expect(store.azureUserAccount).toBeNull();
+    expect(store.azureUserReauthRequired).toBe(true);
+
+    // 憑證還在，但跨視窗刷新不可把「已登入」翻回來
+    await store.refreshCrossWindowSettings();
+    expect(store.azureUserAccount).toBeNull();
+
+    // 重新登入後才解除
+    mockInvoke.mockImplementation(async (cmd: string) =>
+      cmd === "azure_user_sign_in" || cmd === "azure_user_get_account"
+        ? account
+        : undefined,
+    );
+    await store.signInAzureUserAccount({
+      tenantId: TENANT,
+      clientId: CLIENT,
+    });
+    expect(store.azureUserReauthRequired).toBe(false);
+    expect(store.azureUserAccount).not.toBeNull();
+  });
+
+  it("[P1] 登入時若身分有變，必須先清掉舊身分的憑證", async () => {
+    // signInAzureUserAccount 會自己覆寫 tenant/client，因此也要自己負責
+    // 舊身分的清理，不能倚賴呼叫端一定先做過 saveAzureConnection。
+    const { useSettingsStore } = await import(
+      "../../src/stores/useSettingsStore"
+    );
+    const store = useSettingsStore();
+    await store.loadSettings();
+    await store.saveAzureConnection(baseConfig({ authMode: "entraUser" }));
+
+    const calls: string[] = [];
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      calls.push(cmd);
+      if (cmd === "azure_user_sign_in") {
+        return {
+          username: "user@contoso.com",
+          name: "User",
+          tenantId: TENANT,
+          clientId: "55555555-5555-5555-5555-555555555555",
+        };
+      }
+      return undefined;
+    });
+
+    await store.signInAzureUserAccount({
+      tenantId: TENANT,
+      clientId: "55555555-5555-5555-5555-555555555555",
+    });
+
+    const signOutAt = calls.indexOf("azure_user_sign_out");
+    const signInAt = calls.indexOf("azure_user_sign_in");
+    expect(signOutAt).toBeGreaterThanOrEqual(0);
+    expect(signOutAt).toBeLessThan(signInAt);
+  });
 });

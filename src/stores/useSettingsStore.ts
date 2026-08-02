@@ -239,6 +239,19 @@ export const useSettingsStore = defineStore("settings", () => {
   const azureUserAccount = ref<AzureUserAccount | null>(null);
 
   /**
+   * 這一輪執行期間偵測到「登入已失效、需要使用者重新互動」。
+   *
+   * 憑證此時**仍在**憑證庫裡（Entra 的 `invalid_grant` 只代表必須改用互動
+   * 模式，不代表憑證永久失效），所以不能靠「憑證是否存在」推論可用性——
+   * 否則使用者只要存個設定或觸發一次跨視窗同步，綠色的「已登入」就會回來，
+   * 但每次實際使用還是失敗。
+   *
+   * 刻意**不持久化**：重開 App 後條件可能已解除（使用者已接受使用條款、
+   * 已符合條件式存取政策等），那時應該讓它再試一次，而不是永久標成過期。
+   */
+  const azureUserReauthRequired = ref(false);
+
+  /**
    * 已登入的帳號是否對應「目前這組」tenant/client。
    * 只判斷 account 非 null 不夠：使用者改了 Client ID 但快照還是舊帳號時會誤判已登入。
    */
@@ -369,17 +382,21 @@ export const useSettingsStore = defineStore("settings", () => {
   /**
    * 取 Entra 使用者 token，並在登入失效時同步更新兩個視窗的顯示。
    *
-   * Rust 端已在 refresh token 確定失效時清掉憑證，但那不會反映到已經載入的
-   * 畫面上——設定頁會一邊顯示「已登入」，使用者卻每次使用都被要求重新登入。
+   * 憑證失效時 Rust **不會**刪掉憑證（Entra 的 `invalid_grant` 只代表
+   * 「必須改用互動模式」，不代表憑證永久失效），所以顯示狀態不能靠
+   * 「憑證是否存在」推論——必須由這裡明確標記。
    */
   async function acquireAzureUserToken(
     credentials: { tenantId: string; clientId: string },
     scopeKind: AzureUserScopeKind,
   ): Promise<string> {
     try {
-      return await getAzureUserToken(credentials, scopeKind);
+      const token = await getAzureUserToken(credentials, scopeKind);
+      azureUserReauthRequired.value = false;
+      return token;
     } catch (err) {
       if (isAzureUserAuthFailure(extractErrorMessage(err))) {
+        azureUserReauthRequired.value = true;
         azureUserAccount.value = null;
         try {
           await emitAzureAuthStateChanged();
@@ -1473,6 +1490,8 @@ export const useSettingsStore = defineStore("settings", () => {
         // 清除失敗卻仍覆寫 tenant/client，舊憑證就會因為算不出 key 而永久殘留
         throw new Error("AZURE_CREDENTIAL_CLEANUP_FAILED");
       }
+      // 換了身分 → 之前那組的「需要重新登入」不再適用
+      if (identityChanged) azureUserReauthRequired.value = false;
       await store.set("azureEnabled", cfg.enabled);
       await store.set("azureEndpoint", normalizedEndpoint);
       await store.set("azureAuthMode", cfg.authMode);
@@ -1587,6 +1606,7 @@ export const useSettingsStore = defineStore("settings", () => {
       azureOmitTemperature.value = false;
       clearAzureTokenCache();
       azureUserAccount.value = null;
+      azureUserReauthRequired.value = false;
       await emitAzureAuthStateChanged();
 
       const payload: SettingsUpdatedPayload = {
@@ -1628,10 +1648,22 @@ export const useSettingsStore = defineStore("settings", () => {
    */
   function clearAzureUserAccountSnapshot() {
     azureUserAccount.value = null;
+    azureUserReauthRequired.value = true;
   }
 
-  /** 依目前的 tenant/client 重讀登入狀態。憑證庫不可用時視為未登入，不中斷流程。 */
+  /** 換了身分／重新登入時呼叫：讓下一次重讀能正常反映憑證庫。 */
+  function clearAzureUserReauthFlag() {
+    azureUserReauthRequired.value = false;
+  }
+
+  /**
+   * 依目前的 tenant/client 重讀登入狀態。憑證庫不可用時視為未登入，不中斷流程。
+   *
+   * 已知需要重新互動時直接跳過：憑證確實還在，重讀會把畫面翻回「已登入」，
+   * 但實際每次使用都失敗（見 azureUserReauthRequired 的說明）。
+   */
   async function refreshAzureUserAccount() {
+    if (azureUserReauthRequired.value) return;
     try {
       azureUserAccount.value = await getAzureUserAccount({
         tenantId: azureTenantId.value,
@@ -1663,6 +1695,16 @@ export const useSettingsStore = defineStore("settings", () => {
       throw new Error("Entra credentials incomplete");
     }
 
+    // 這個函式自己會覆寫 tenant/client，因此也必須自己負責舊身分的清理——
+    // 不能倚賴「呼叫端一定先做過 saveAzureConnection」。目前唯一的呼叫端
+    // 確實有做（於是這裡通常是 no-op），但只要有人新增第二個入口而未先存，
+    // 舊身分的 refresh token 就會因為算不出 key 而變成永久孤兒。
+    const identityChanged =
+      tenantId !== azureTenantId.value || clientId !== azureClientId.value;
+    if (identityChanged && !(await signOutAzureUserSilently())) {
+      throw new Error("AZURE_CREDENTIAL_CLEANUP_FAILED");
+    }
+
     // 先落地設定，Rust 與後續 computed 才會用到同一組值
     azureTenantId.value = tenantId;
     azureClientId.value = clientId;
@@ -1676,6 +1718,7 @@ export const useSettingsStore = defineStore("settings", () => {
     try {
       const account = await signInAzureUser({ tenantId, clientId }, operationId);
       azureUserAccount.value = account;
+      azureUserReauthRequired.value = false;
       clearAzureTokenCache();
       await emitAzureAuthStateChanged();
       return account;
@@ -1726,6 +1769,7 @@ export const useSettingsStore = defineStore("settings", () => {
       clientId: azureClientId.value,
     });
     azureUserAccount.value = null;
+    azureUserReauthRequired.value = false;
     clearAzureTokenCache();
     await emitAzureAuthStateChanged();
   }
@@ -2583,6 +2627,8 @@ export const useSettingsStore = defineStore("settings", () => {
       // 同 saveAzureConnection：清不掉就不可覆寫 locator，否則永久孤兒
       throw new Error("AZURE_CREDENTIAL_CLEANUP_FAILED");
     }
+    // 匯入等於換一組設定 → 舊的「需要重新登入」標記不再適用
+    azureUserReauthRequired.value = false;
 
     for (const [key, value] of Object.entries(settings)) {
       if (key === AUTO_START_KEY) {
@@ -2705,6 +2751,8 @@ export const useSettingsStore = defineStore("settings", () => {
     cancelAzureUserSignInFlow,
     refreshAzureUserAccount,
     clearAzureUserAccountSnapshot,
+    clearAzureUserReauthFlag,
+    azureUserReauthRequired,
     whisperProviderId,
     geminiTranscriptionModelId,
     saveGeminiTranscriptionModel,

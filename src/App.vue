@@ -64,6 +64,8 @@ onMounted(async () => {
         settingsStore.clearAzureUserAccountSnapshot();
         return;
       }
+      // 對方剛登入成功 → 解除本視窗的「需要重新登入」標記再重讀
+      settingsStore.clearAzureUserReauthFlag();
       void settingsStore.refreshAzureUserAccount();
     },
   );
