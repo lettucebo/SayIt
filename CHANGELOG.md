@@ -2,6 +2,24 @@
 
 SayIt 版本更新紀錄。
 
+## [0.15.2] - 2026-08-02
+
+### Added
+
+- 新增「Entra ID 登入」：Azure / Microsoft Foundry 連線原本只能用 API Key 或 Entra client secret，但不少公司的資安政策已把 client secret 視為不安全——它是一段長期有效、可離線外流、到期還得人工輪替的機密，一旦外洩就等於整個應用程式的權限被拿走。現在可以改用**你自己的公司帳號**登入：按下「使用 Entra ID 登入」會開啟系統瀏覽器走 Microsoft 的標準登入畫面（含 MFA、條件式存取都照常生效），完成後 SayIt 只在作業系統的憑證庫（Windows 憑證管理員 / macOS Keychain）保留一份 refresh token，設定檔裡不再有任何長期機密。轉錄與 AI 整理兩條路徑都支援。因為請求是以你的身分發出，權限沿用你自己在 Azure 上的角色，需要事先取得「Cognitive Services OpenAI User」；完整設定步驟（App Registration、API 權限、角色指派與疑難排解）見 `docs/azure-entra-user-sign-in.md`。
+
+- 三種驗證方式的名稱調整：原本的「Microsoft Entra ID」改叫「Entra ID Secret」，新的互動登入叫「Entra ID 登入」。多了第三個選項之後，舊名稱會讓人分不出兩者差別（都是 Entra ID），新名稱直接點出差異在「要不要 client secret」。既有設定不受影響，只有標籤文字改變。
+
+### Fixed
+
+- 設定尚未載入完成時可能被空白值覆寫：Dashboard 原本先把畫面掛載起來、才去讀設定檔，中間這段時間各設定頁的輸入框都還是預設空值，若在此時觸發儲存（視窗剛開就按到、或某個元件掛載時自動寫回），就會把既有的 endpoint、金鑰等設定清成空的——而金鑰這種東西清掉是拿不回來的。現在改為讀完設定才掛載畫面；萬一讀取失敗，畫面仍會出現讓你能操作，但一律拒絕寫入，不會用預設值蓋掉你的設定。
+
+- 跨視窗同步 Azure 設定的瞬間可能用到新舊混合的值：SayIt 的浮動狀態列與主視窗是兩個獨立視窗，其中一邊改了設定會通知另一邊重讀，而重讀是一個欄位一個欄位進行的。若剛好在中途按下快捷鍵開始說話，該次請求就可能拿到「新的 endpoint 配舊的驗證方式」這種不一致的組合，導致請求失敗或送往非預期的資源。現在改為整組讀完才一次套用。
+
+### Improved
+
+- Azure endpoint 加上網域白名單：先前 endpoint 是什麼就往什麼位址送，設定檔（或被竄改的備份檔）若填入外部網址，金鑰與音訊就會跟著送出去。現在轉錄請求前會用與實際發送相同的 URL 解析器檢查，只允許 `*.openai.azure.com`、`*.services.ai.azure.com`、`*.cognitiveservices.azure.com`，並要求 https、拒絕網址內嵌帳密——這樣像 `https://evil.com\.openai.azure.com` 這種靠反斜線讓真實主機落在別處的寫法就會被擋下，而不是靠字串比對誤判為合法。
+
 ## [0.15.1] - 2026-07-31
 
 ### Changed
