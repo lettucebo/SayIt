@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted } from "vue";
 import type { UnlistenFn } from "@tauri-apps/api/event";
+import type { AzureAuthStateChangedPayload } from "./types/events";
 import NotchHud from "./components/NotchHud.vue";
 import { getCurrentWindow, Window } from "@tauri-apps/api/window";
 import { useVoiceFlowStore } from "./stores/useVoiceFlowStore";
@@ -50,11 +51,22 @@ onMounted(async () => {
     void settingsStore.refreshCrossWindowSettings();
   });
 
-  // Dashboard 完成 Entra 登入/登出後，HUD 必須重讀帳號快照——否則
+  // Dashboard 完成 Entra 登入/登出後，HUD 必須同步帳號快照——否則
   // hasWhisperConfig / hasLlmApiKey 會一直停在登入前的狀態直到 App 重啟。
-  unlistenAzureAuthChanged = await listenToEvent(AZURE_AUTH_STATE_CHANGED, () => {
-    void settingsStore.refreshAzureUserAccount();
-  });
+  //
+  // 明確為「未登入」時直接套用 payload，不回頭重讀憑證庫：登入失效
+  //（需要重新互動）時憑證仍然存在，重讀會把帳號又變回「已登入」，
+  // 使用者就會一直看到可用、實際每次都失敗。
+  unlistenAzureAuthChanged = await listenToEvent<AzureAuthStateChangedPayload>(
+    AZURE_AUTH_STATE_CHANGED,
+    (event) => {
+      if (event.payload?.signedIn === false) {
+        settingsStore.clearAzureUserAccountSnapshot();
+        return;
+      }
+      void settingsStore.refreshAzureUserAccount();
+    },
+  );
 
   // 初始化 DB（供 vocabularyStore 使用）
   let isDatabaseReady = false;

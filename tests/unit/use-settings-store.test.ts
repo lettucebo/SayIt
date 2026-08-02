@@ -561,6 +561,8 @@ describe("useSettingsStore", () => {
         "../../src/stores/useSettingsStore"
       );
       const store = useSettingsStore();
+      // 正式流程在 mount 前就 await loadSettings()；未載入完成時清除會被守門擋下
+      await store.loadSettings();
       await store.deleteAzureConnection();
       expect(mockStoreDelete).toHaveBeenCalledWith("azureOmitTemperature");
       expect(store.azureOmitTemperature).toBe(false);

@@ -862,13 +862,17 @@ const isAzureSigningIn = ref(false);
  * 任一步失敗都只會停在「設定已存、尚未登入」這個一致且可重試的狀態。
  */
 async function handleAzureUserSignIn() {
+  // 在第一個 await 之前定格：等待瀏覽器登入期間輸入框仍可編輯，
+  // 若之後再讀一次，就會用「設定 A」的 endpoint 去配「身分 B」的 token。
+  const tenantId = azureTenantIdInput.value;
+  const clientId = azureClientIdInput.value;
   try {
     isAzureSigningIn.value = true;
     await handleSaveAzureConnectionOrThrow();
     azureFeedback.show("success", t("settings.azure.signInWaiting"));
     const account = await settingsStore.signInAzureUserAccount({
-      tenantId: azureTenantIdInput.value,
-      clientId: azureClientIdInput.value,
+      tenantId,
+      clientId,
     });
     azureFeedback.show(
       "success",

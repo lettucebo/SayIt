@@ -90,15 +90,10 @@ pub enum AzureUserAuthError {
     InvalidTenantId,
     #[error("invalid client id")]
     InvalidClientId,
-    /// 需要重新互動登入，但 refresh token 本身**不一定**失效
-    /// （例如某個 scope 需要重新同意）。這種情況不可刪掉憑證。
+    /// refresh token 已失效或本次要求需要使用者互動 → 必須重新互動登入。
+    /// 這**不代表** refresh token 一定已永久失效（見 INTERACTION_REQUIRED_ERRORS）。
     #[error("interaction required: {0}")]
     InteractionRequired(String),
-    /// refresh token 本身已失效（撤銷／過期／密碼變更）——`invalid_grant`。
-    /// 這筆憑證已無任何用處，可以安全清除。
-    /// 訊息刻意保留 `interaction required` 前綴，前端既有的比對才能沿用。
-    #[error("interaction required (sign-in expired): {0}")]
-    SignInExpired(String),
     #[error("{0}")]
     Failed(String),
 }

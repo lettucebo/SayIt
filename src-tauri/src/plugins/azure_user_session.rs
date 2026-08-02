@@ -56,6 +56,10 @@ pub struct AzureUserAuthState {
 
 struct PendingSignIn {
     operation_id: String,
+    /// 這次登入最終會寫到哪個帳號。登出／清除必須能找出「同一個帳號」的
+    /// 進行中登入並取消它，否則晚回來的 callback 會把 refresh token 寫進
+    /// 一個 locator 已被刪掉的位置，變成永遠清不掉的孤兒憑證。
+    account_key: String,
     cancel: Arc<CancelSignal>,
 }
 
@@ -128,7 +132,11 @@ impl AzureUserAuthState {
             .retain(|k, _| !k.starts_with(&prefix));
     }
 
-    fn begin_sign_in(&self, operation_id: &str) -> Result<Arc<CancelSignal>, AzureUserAuthError> {
+    fn begin_sign_in(
+        &self,
+        operation_id: &str,
+        account_key: &str,
+    ) -> Result<Arc<CancelSignal>, AzureUserAuthError> {
         let mut pending = self.pending.lock().unwrap();
         if pending.is_some() {
             return Err(AzureUserAuthError::AlreadyInProgress);
@@ -136,6 +144,7 @@ impl AzureUserAuthState {
         let cancel = Arc::new(CancelSignal::default());
         *pending = Some(PendingSignIn {
             operation_id: operation_id.to_string(),
+            account_key: account_key.to_string(),
             cancel: cancel.clone(),
         });
         Ok(cancel)
@@ -156,6 +165,18 @@ impl AzureUserAuthState {
         let pending = self.pending.lock().unwrap();
         if let Some(p) = pending.as_ref() {
             if p.operation_id == operation_id {
+                p.cancel.cancel();
+            }
+        }
+    }
+
+    /// 取消「寫到同一個帳號」的進行中登入。登出／清除連線必須呼叫：
+    /// 呼叫端可能是另一個 WebView（或 reload 後的同一個），它並不知道
+    /// 目前的 operation_id，但那次登入的 callback 一樣會寫進同一把 key。
+    fn cancel_sign_in_for_account(&self, account_key: &str) {
+        let pending = self.pending.lock().unwrap();
+        if let Some(p) = pending.as_ref() {
+            if p.account_key == account_key {
                 p.cancel.cancel();
             }
         }
@@ -254,18 +275,21 @@ struct TokenErrorResponse {
     error_description: Option<String>,
 }
 
-/// 需要重新互動登入的 OAuth 錯誤碼。這些情況不該只是重試 refresh。
+/// 需要重新互動登入的 OAuth 錯誤碼。這些情況重試 refresh 沒有意義。
 ///
-/// 刻意與 `invalid_grant` 分開：這三種錯誤代表「這一次要求需要使用者互動」，
-/// 但 refresh token 本身可能還是好的（例如只是某個 scope 要重新同意）。
-/// 若把它們也當成憑證失效而刪除，使用者重新登入拿到的同意範圍完全一樣，
-/// 下一次還是會失敗——變成登出／登入的無限迴圈。
-const INTERACTION_REQUIRED_ERRORS: [&str; 3] =
-    ["interaction_required", "consent_required", "login_required"];
-
-/// refresh token 本身已失效。Entra 對「撤銷、過期、密碼變更、裝置不再合規」
-/// 一律回這個碼，重試沒有意義，該憑證也不會再被任何流程使用。
-const DEAD_REFRESH_TOKEN_ERROR: &str = "invalid_grant";
+/// ⚠️ 這些碼**不代表 refresh token 必然已永久失效**。Microsoft 的 MSAL 指引
+/// 明載：refresh 流程回 `invalid_grant` 的意思是「必須改用互動模式再取得一次
+/// token」，成因可能只是租戶套用了更嚴格的登入政策、或使用者需要接受使用條款
+/// 之類一次性的動作（見 MSAL.NET「Handle errors and exceptions」）。
+/// 因此這裡**不刪除憑證**——把使用者的登入狀態砍掉是不可逆的，
+/// 而換來的只是設定頁的顯示更即時，不成比例。顯示層的同步改由前端在收到
+/// 這類錯誤時清掉畫面上的帳號快照處理。
+const INTERACTION_REQUIRED_ERRORS: [&str; 4] = [
+    "invalid_grant",
+    "interaction_required",
+    "consent_required",
+    "login_required",
+];
 
 async fn post_token(
     tenant_id: &str,
@@ -308,9 +332,7 @@ async fn post_token(
             .chars()
             .take(300)
             .collect::<String>();
-        return Err(if code == DEAD_REFRESH_TOKEN_ERROR {
-            AzureUserAuthError::SignInExpired(detail)
-        } else if INTERACTION_REQUIRED_ERRORS.contains(&code.as_str()) {
+        return Err(if INTERACTION_REQUIRED_ERRORS.contains(&code.as_str()) {
             AzureUserAuthError::InteractionRequired(detail)
         } else {
             AzureUserAuthError::Failed(format!("{}: {detail}", status.as_u16()))
@@ -339,13 +361,13 @@ trait SessionBackend: Sync {
         session: StoredSession,
     ) -> impl Future<Output = Result<(), AzureUserAuthError>> + Send;
 
+    fn delete(&self, key: String) -> impl Future<Output = Result<(), AzureUserAuthError>> + Send;
+
     fn post_token(
         &self,
         tenant_id: String,
         params: Vec<(&'static str, String)>,
     ) -> impl Future<Output = Result<TokenResponse, AzureUserAuthError>> + Send;
-
-    fn delete(&self, key: String) -> impl Future<Output = Result<(), AzureUserAuthError>> + Send;
 }
 
 struct RealBackend;
@@ -359,6 +381,10 @@ impl SessionBackend for RealBackend {
         save_session(key, &session).await
     }
 
+    async fn delete(&self, key: String) -> Result<(), AzureUserAuthError> {
+        delete_session(key).await
+    }
+
     async fn post_token(
         &self,
         tenant_id: String,
@@ -366,10 +392,6 @@ impl SessionBackend for RealBackend {
     ) -> Result<TokenResponse, AzureUserAuthError> {
         let borrowed: Vec<(&str, &str)> = params.iter().map(|(k, v)| (*k, v.as_str())).collect();
         post_token(&tenant_id, &borrowed).await
-    }
-
-    async fn delete(&self, key: String) -> Result<(), AzureUserAuthError> {
-        delete_session(key).await
     }
 }
 
@@ -431,6 +453,18 @@ async fn finalize_sign_in<B: SessionBackend>(
         )
         .await?;
 
+    // 寫入完成後再檢查一次。取消可能落在「上面的檢查通過」到「save 完成」
+    // 之間——那段時間鎖還在我們手上，登出／清除會排在後面，於是它刪完之後
+    // 我們才把 token 寫回去，留下一筆 UI 再也對應不到的孤兒憑證。
+    // 這裡自己收回剛寫入的內容，讓「取消」在任何時序下都不留殘骸。
+    if cancel.is_cancelled() {
+        if let Err(cleanup) = backend.delete(key.clone()).await {
+            log::warn!("failed to roll back cancelled sign-in: {cleanup}");
+        }
+        state.clear_tokens(&key);
+        return Err(AzureUserAuthError::Cancelled);
+    }
+
     if let (Some(access_token), Some(expires_in)) = (token.access_token, token.expires_in) {
         // 授權時要的是 cognitiveservices scope，只有 Whisper 這一份能直接放進快取
         state.store_token(&key, ScopeKind::Whisper, access_token, expires_in);
@@ -466,7 +500,7 @@ async fn acquire_token<B: SessionBackend>(
         .await?
         .ok_or(AzureUserAuthError::NotSignedIn)?;
 
-    let token = match backend
+    let token = backend
         .post_token(
             tenant_id.to_string(),
             vec![
@@ -476,25 +510,7 @@ async fn acquire_token<B: SessionBackend>(
                 ("scope", scope.scope().to_string()),
             ],
         )
-        .await
-    {
-        Ok(token) => token,
-        Err(err) => {
-            // refresh token 已被 Entra 判定失效時順手清掉：留著只會讓設定頁
-            // 持續顯示「已登入」，使用者卻每次使用都被要求重新登入。
-            // 只在 `invalid_grant` 才清——其餘 interaction_required 類錯誤
-            // 的憑證可能仍然有效（見 INTERACTION_REQUIRED_ERRORS 的說明）。
-            if matches!(err, AzureUserAuthError::SignInExpired(_)) {
-                state.clear_tokens(&key);
-                if let Err(cleanup) = backend.delete(key.clone()).await {
-                    // 清理失敗不改變回傳的錯誤：使用者該看到的是「請重新登入」，
-                    // 而不是憑證庫的內部問題。
-                    log::warn!("failed to remove expired Entra session: {cleanup}");
-                }
-            }
-            return Err(err);
-        }
-    };
+        .await?;
 
     let access_token = token
         .access_token
@@ -553,7 +569,7 @@ pub async fn azure_user_sign_in(
     let client_id = normalize(&client_id);
     require_config(&tenant_id, &client_id)?;
 
-    let cancel = state.begin_sign_in(&operation_id)?;
+    let cancel = state.begin_sign_in(&operation_id, &account_key(&tenant_id, &client_id))?;
     let _guard = SignInGuard {
         state: &state,
         operation_id: operation_id.clone(),
@@ -622,6 +638,10 @@ pub async fn azure_user_sign_out(
         return Ok(());
     }
     let key = account_key(&tenant_id, &client_id);
+    // 先取消寫向同一個帳號的進行中登入：呼叫端可能是另一個 WebView，
+    // 不知道 operation_id，但那次登入的 callback 會寫進同一把 key。
+    // 取消後它會在拿到下面這把鎖時自行收回已寫入的內容。
+    state.cancel_sign_in_for_account(&key);
     let lock = state.lock_for(&key);
     let _held = lock.lock().await;
     state.clear_tokens(&key);
@@ -718,25 +738,25 @@ mod tests {
     #[test]
     fn only_one_sign_in_at_a_time() {
         let state = AzureUserAuthState::default();
-        assert!(state.begin_sign_in("op-1").is_ok());
+        assert!(state.begin_sign_in("op-1", "acct").is_ok());
         assert!(matches!(
-            state.begin_sign_in("op-2"),
+            state.begin_sign_in("op-2", "acct"),
             Err(AzureUserAuthError::AlreadyInProgress)
         ));
         state.end_sign_in("op-1");
-        assert!(state.begin_sign_in("op-2").is_ok());
+        assert!(state.begin_sign_in("op-2", "acct").is_ok());
     }
 
     #[test]
     fn stale_end_sign_in_does_not_clear_newer_operation() {
         let state = AzureUserAuthState::default();
-        state.begin_sign_in("op-1").unwrap();
+        state.begin_sign_in("op-1", "acct").unwrap();
         state.end_sign_in("op-1");
-        state.begin_sign_in("op-2").unwrap();
+        state.begin_sign_in("op-2", "acct").unwrap();
         // 遲來的 op-1 清理不可影響進行中的 op-2
         state.end_sign_in("op-1");
         assert!(matches!(
-            state.begin_sign_in("op-3"),
+            state.begin_sign_in("op-3", "acct"),
             Err(AzureUserAuthError::AlreadyInProgress)
         ));
     }
@@ -755,15 +775,17 @@ mod tests {
     fn classifies_errors_that_require_interactive_sign_in() {
         // 這幾種錯誤重試 refresh 沒有意義，必須引導使用者重新登入；
         // 其餘（限流、暫時性故障）則應維持可重試，不可把使用者踢出去。
-        for code in ["interaction_required", "consent_required", "login_required"] {
+        for code in [
+            "invalid_grant",
+            "interaction_required",
+            "consent_required",
+            "login_required",
+        ] {
             assert!(
                 INTERACTION_REQUIRED_ERRORS.contains(&code),
                 "{code} should require interactive sign-in"
             );
         }
-        // invalid_grant 另外分類：只有它代表 refresh token 本身已死，
-        // 可以安全清除；其餘三種清了會造成登出／登入的無限迴圈。
-        assert!(!INTERACTION_REQUIRED_ERRORS.contains(&DEAD_REFRESH_TOKEN_ERROR));
         for code in [
             "temporarily_unavailable",
             "server_error",
@@ -775,15 +797,16 @@ mod tests {
                 !INTERACTION_REQUIRED_ERRORS.contains(&code),
                 "{code} must stay retryable"
             );
-            assert_ne!(code, DEAD_REFRESH_TOKEN_ERROR, "{code} must stay retryable");
         }
     }
 
     #[test]
-    fn expired_sign_in_still_matches_the_frontend_interaction_required_check() {
+    fn interaction_required_matches_the_frontend_check() {
         // 前端用 message.includes("interaction required") 判斷要不要引導重新登入
-        let json = serde_json::to_string(&AzureUserAuthError::SignInExpired("AADSTS50173".into()))
-            .unwrap();
+        let json = serde_json::to_string(&AzureUserAuthError::InteractionRequired(
+            "AADSTS50173".into(),
+        ))
+        .unwrap();
         assert!(json.contains("interaction required"), "{json}");
     }
 
@@ -833,7 +856,7 @@ mod tests {
     #[test]
     fn cancel_targets_only_the_matching_operation() {
         let state = AzureUserAuthState::default();
-        let signal = state.begin_sign_in("op-1").unwrap();
+        let signal = state.begin_sign_in("op-1", "acct").unwrap();
         // 針對別次操作的取消不可影響進行中的這次
         state.cancel_sign_in("op-2");
         assert!(!signal.cancelled.load(Ordering::SeqCst));
@@ -1287,46 +1310,93 @@ mod tests {
             .cached(&account_key(TENANT, CLIENT), ScopeKind::Chat)
             .is_none());
         assert_eq!(backend.save_count(), 0);
-        // 憑證可能仍然有效（只是這個 scope 要重新同意）——刪掉會讓使用者
-        // 重新登入後拿到一模一樣的同意範圍，陷入登出／登入迴圈
+        // refresh 失敗**不可**刪憑證：Microsoft 的指引明載 refresh 流程回
+        // invalid_grant 只代表「必須改用互動模式再取得一次 token」，成因可能
+        // 只是租戶套用了更嚴格的登入政策，憑證本身不一定已永久失效。
         assert_eq!(backend.delete_count(), 0);
         assert_eq!(backend.stored_refresh().as_deref(), Some("refresh-1"));
     }
 
     #[tokio::test]
-    async fn dead_refresh_token_is_removed_so_the_ui_stops_claiming_signed_in() {
-        // invalid_grant = refresh token 本身已死。留著只會讓設定頁一直顯示
-        // 「已登入」，使用者卻每次使用都被要求重新登入。
-        let backend = FakeBackend::with_session("refresh-1");
-        backend.queue(Err(AzureUserAuthError::SignInExpired(
-            "AADSTS50173".to_string(),
+    async fn cancelled_sign_in_rolls_back_what_it_already_wrote() {
+        // 取消可能落在「寫入前的檢查通過」與「save 完成」之間。若不收回，
+        // 隨後（或已完成）的登出／清除就對應不到這筆憑證，變成永久孤兒。
+        struct CancelOnSave<'a> {
+            inner: FakeBackend,
+            cancel: &'a CancelSignal,
+        }
+        impl SessionBackend for CancelOnSave<'_> {
+            async fn load(&self, key: String) -> Result<Option<StoredSession>, AzureUserAuthError> {
+                self.inner.load(key).await
+            }
+            async fn save(
+                &self,
+                key: String,
+                session: StoredSession,
+            ) -> Result<(), AzureUserAuthError> {
+                // 模擬「寫入期間使用者按下清除連線」
+                self.cancel.cancel();
+                self.inner.save(key, session).await
+            }
+            async fn delete(&self, key: String) -> Result<(), AzureUserAuthError> {
+                self.inner.delete(key).await
+            }
+            async fn post_token(
+                &self,
+                tenant_id: String,
+                params: Vec<(&'static str, String)>,
+            ) -> Result<TokenResponse, AzureUserAuthError> {
+                self.inner.post_token(tenant_id, params).await
+            }
+        }
+
+        let cancel = CancelSignal::default();
+        let backend = CancelOnSave {
+            inner: FakeBackend::default(),
+            cancel: &cancel,
+        };
+        backend.inner.queue(Ok(token_response(
+            Some("access-1"),
+            Some("refresh-1"),
+            Some(id_token(CLIENT, TENANT, NONCE)),
+            Some(3600),
         )));
         let state = AzureUserAuthState::default();
-        let key = account_key(TENANT, CLIENT);
-        state.store_token(&key, ScopeKind::Whisper, "stale".into(), 3600);
 
-        let result = acquire_token(&backend, &state, TENANT, CLIENT, ScopeKind::Chat).await;
+        let result = finalize_sign_in(
+            &backend,
+            &state,
+            &cancel,
+            TENANT,
+            CLIENT,
+            "http://127.0.0.1:1234",
+            "auth-code",
+            "verifier",
+            NONCE,
+        )
+        .await;
 
-        assert!(matches!(result, Err(AzureUserAuthError::SignInExpired(_))));
-        assert_eq!(backend.delete_count(), 1);
-        assert!(backend.stored_refresh().is_none());
-        // 另一個 scope 的快取同樣要清掉，否則會繼續發出已無法續期的 token
-        assert!(state.cached(&key, ScopeKind::Whisper).is_none());
+        assert!(matches!(result, Err(AzureUserAuthError::Cancelled)));
+        assert_eq!(backend.inner.delete_count(), 1);
+        assert!(backend.inner.stored_refresh().is_none());
+        assert!(state
+            .cached(&account_key(TENANT, CLIENT), ScopeKind::Whisper)
+            .is_none());
     }
 
-    #[tokio::test]
-    async fn cleanup_failure_does_not_mask_the_reauth_error() {
-        // 使用者該看到的是「請重新登入」，不是憑證庫的內部問題
-        let backend = FakeBackend::with_session("refresh-1");
-        backend.fail_delete.store(true, Ordering::SeqCst);
-        backend.queue(Err(AzureUserAuthError::SignInExpired(
-            "AADSTS50173".to_string(),
-        )));
+    #[test]
+    fn sign_out_cancels_a_pending_sign_in_for_the_same_account() {
+        // 登出／清除的呼叫端可能是另一個 WebView，不知道 operation_id，
+        // 但那次登入的 callback 會寫進同一把 key。
         let state = AzureUserAuthState::default();
+        let key = account_key(TENANT, CLIENT);
+        let signal = state.begin_sign_in("op-1", &key).unwrap();
 
-        let result = acquire_token(&backend, &state, TENANT, CLIENT, ScopeKind::Chat).await;
+        state.cancel_sign_in_for_account(&account_key(TENANT, "other-client"));
+        assert!(!signal.cancelled.load(Ordering::SeqCst));
 
-        assert!(matches!(result, Err(AzureUserAuthError::SignInExpired(_))));
+        state.cancel_sign_in_for_account(&key);
+        assert!(signal.cancelled.load(Ordering::SeqCst));
     }
 
     #[tokio::test]

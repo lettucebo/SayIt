@@ -330,4 +330,66 @@ describe("saveAzureConnection 的資料保存性", () => {
     const OTHER_CLIENT = "99999999-9999-9999-9999-999999999999";
     expect(store.matchesSignedInAccount(TENANT, OTHER_CLIENT)).toBe(false);
   });
+
+  it("[P0] 設定尚未載入完成時拒絕清除連線", async () => {
+    // 載入前 reactive 的 tenant/client 是空值，登出會直接回成功，
+    // 接著就把使用者既有的 endpoint / client secret 全部刪掉，
+    // 而憑證庫那筆 refresh token 反而永遠清不掉。
+    const { useSettingsStore } = await import(
+      "../../src/stores/useSettingsStore"
+    );
+    mockStoreData.set("azureEndpoint", "https://demo.openai.azure.com");
+    mockStoreData.set("azureClientSecret", SECRET);
+    const store = useSettingsStore();
+
+    await expect(store.deleteAzureConnection()).rejects.toThrow(
+      "SETTINGS_NOT_LOADED",
+    );
+    expect(mockStoreData.get("azureClientSecret")).toBe(SECRET);
+    expect(mockStoreData.get("azureEndpoint")).toBe(
+      "https://demo.openai.azure.com",
+    );
+  });
+
+  it("[P0] 設定尚未載入完成時拒絕匯入", async () => {
+    const { useSettingsStore } = await import(
+      "../../src/stores/useSettingsStore"
+    );
+    mockStoreData.set("azureTenantId", TENANT);
+    mockStoreData.set("azureClientId", CLIENT);
+    const store = useSettingsStore();
+
+    await expect(
+      store.importSettings({ azureTenantId: "other-tenant" }),
+    ).rejects.toThrow("SETTINGS_NOT_LOADED");
+    expect(mockStoreData.get("azureTenantId")).toBe(TENANT);
+  });
+
+  it("[P1] 跨視窗刷新後 Azure 設定是同一版，不會新舊混用", async () => {
+    // 語音流程可能在刷新途中呼叫 getLlmRequestConfig；若邊讀邊寫 ref，
+    // 會取到新 endpoint 配舊 tenant 的混合設定，把內容送到非預期的資源。
+    const { useSettingsStore } = await import(
+      "../../src/stores/useSettingsStore"
+    );
+    const store = useSettingsStore();
+    await store.loadSettings();
+    await store.saveAzureConnection(baseConfig());
+
+    // 模擬另一個視窗換了一整組設定
+    const NEW_TENANT = "77777777-7777-7777-7777-777777777777";
+    const NEW_CLIENT = "66666666-6666-6666-6666-666666666666";
+    mockStoreData.set("azureEndpoint", "https://other.openai.azure.com");
+    mockStoreData.set("azureTenantId", NEW_TENANT);
+    mockStoreData.set("azureClientId", NEW_CLIENT);
+    mockStoreData.set("azureAuthMode", "key");
+    mockStoreData.set("azureApiKey", "new-key");
+
+    await store.refreshCrossWindowSettings();
+
+    expect(store.azureEndpoint).toBe("https://other.openai.azure.com");
+    expect(store.azureTenantId).toBe(NEW_TENANT);
+    expect(store.azureClientId).toBe(NEW_CLIENT);
+    expect(store.azureAuthMode).toBe("key");
+    expect(store.azureApiKey).toBe("new-key");
+  });
 });

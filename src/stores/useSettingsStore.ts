@@ -1532,6 +1532,13 @@ export const useSettingsStore = defineStore("settings", () => {
 
   async function deleteAzureConnection() {
     try {
+      // 守門同 saveAzureConnection：設定尚未載入完成時，reactive 的
+      // tenant/client 還是空值，signOutAzureUserSilently() 會直接回成功，
+      // 接著就把使用者既有的 endpoint / client secret 全部刪掉，
+      // 而憑證庫裡那筆 refresh token 反而清不掉。
+      if (!isLoaded) {
+        throw new Error("SETTINGS_NOT_LOADED");
+      }
       // 先清 OS 憑證庫再刪設定：一旦 tenant/client 從 store 消失就再也算不出
       // 該用哪個 key 去刪，refresh token 會永久殘留在使用者機器上。
       // 因此清除失敗時**不繼續**刪設定，讓使用者能重試而不是留下清不掉的殘留。
@@ -1612,6 +1619,15 @@ export const useSettingsStore = defineStore("settings", () => {
         : null,
     };
     await emitEvent(AZURE_AUTH_STATE_CHANGED, payload);
+  }
+
+  /**
+   * 只清掉本視窗的帳號快照，不動憑證庫。
+   * 用於接收「已登出／登入失效」的跨視窗通知：此時憑證可能仍在
+   * （需要重新互動而已），回頭重讀只會把畫面又變回「已登入」。
+   */
+  function clearAzureUserAccountSnapshot() {
+    azureUserAccount.value = null;
   }
 
   /** 依目前的 tenant/client 重讀登入狀態。憑證庫不可用時視為未登入，不中斷流程。 */
@@ -2395,26 +2411,38 @@ export const useSettingsStore = defineStore("settings", () => {
         DEFAULT_COPY_TRANSCRIPTION_TO_CLIPBOARD;
 
       // Azure / Microsoft Foundry（跨視窗同步）
-      azureEnabled.value = (await store.get<boolean>("azureEnabled")) ?? false;
-      azureEndpoint.value =
-        (await store.get<string>("azureEndpoint"))?.trim() ?? "";
-      azureAuthMode.value =
-        toAzureAuthMode(await store.get("azureAuthMode"));
-      azureApiKey.value = (await store.get<string>("azureApiKey"))?.trim() ?? "";
-      azureTenantId.value =
-        (await store.get<string>("azureTenantId"))?.trim() ?? "";
-      azureClientId.value =
-        (await store.get<string>("azureClientId"))?.trim() ?? "";
-      azureClientSecret.value =
-        (await store.get<string>("azureClientSecret")) ?? "";
-      azureApiVersion.value =
-        (await store.get<string>("azureApiVersion"))?.trim() ?? "";
-      azureOmitTemperature.value =
-        (await store.get<boolean>("azureOmitTemperature")) ?? false;
-      azureChatDeployment.value =
-        (await store.get<string>("azureChatDeployment"))?.trim() ?? "";
-      azureWhisperDeployment.value =
-        (await store.get<string>("azureWhisperDeployment"))?.trim() ?? "";
+      //
+      // 這一段刻意「先讀完，再一次套用」：語音流程可能在任何一個 await 之間
+      // 呼叫 snapshotAzureConfig()，若邊讀邊寫 ref，就會取到新 endpoint 配
+      // 舊 authMode／舊 tenant 的混合設定，把內容送到非預期的 Azure 資源。
+      // 下面的賦值區塊沒有 await，對其他協程而言是不可分割的。
+      const nextAzure = {
+        enabled: (await store.get<boolean>("azureEnabled")) ?? false,
+        endpoint: (await store.get<string>("azureEndpoint"))?.trim() ?? "",
+        authMode: toAzureAuthMode(await store.get("azureAuthMode")),
+        apiKey: (await store.get<string>("azureApiKey"))?.trim() ?? "",
+        tenantId: (await store.get<string>("azureTenantId"))?.trim() ?? "",
+        clientId: (await store.get<string>("azureClientId"))?.trim() ?? "",
+        clientSecret: (await store.get<string>("azureClientSecret")) ?? "",
+        apiVersion: (await store.get<string>("azureApiVersion"))?.trim() ?? "",
+        omitTemperature:
+          (await store.get<boolean>("azureOmitTemperature")) ?? false,
+        chatDeployment:
+          (await store.get<string>("azureChatDeployment"))?.trim() ?? "",
+        whisperDeployment:
+          (await store.get<string>("azureWhisperDeployment"))?.trim() ?? "",
+      };
+      azureEnabled.value = nextAzure.enabled;
+      azureEndpoint.value = nextAzure.endpoint;
+      azureAuthMode.value = nextAzure.authMode;
+      azureApiKey.value = nextAzure.apiKey;
+      azureTenantId.value = nextAzure.tenantId;
+      azureClientId.value = nextAzure.clientId;
+      azureClientSecret.value = nextAzure.clientSecret;
+      azureApiVersion.value = nextAzure.apiVersion;
+      azureOmitTemperature.value = nextAzure.omitTemperature;
+      azureChatDeployment.value = nextAzure.chatDeployment;
+      azureWhisperDeployment.value = nextAzure.whisperDeployment;
       whisperProviderId.value = getEffectiveTranscriptionProviderId(
         await store.get<string>("whisperProviderId"),
       );
@@ -2533,6 +2561,11 @@ export const useSettingsStore = defineStore("settings", () => {
    * 4) emit 單一 SETTINGS_UPDATED 通知其他視窗。
    */
   async function importSettings(settings: SettingsPayload): Promise<void> {
+    // 守門同 saveAzureConnection：載入未完成時 reactive 的 tenant/client 是
+    // 空值，identityChanged 會誤判、登出也會直接回成功，舊憑證因此變孤兒。
+    if (!isLoaded) {
+      throw new Error("SETTINGS_NOT_LOADED");
+    }
     const store = await load(STORE_NAME);
     let autoStartDesired: boolean | null = null;
 
@@ -2671,6 +2704,7 @@ export const useSettingsStore = defineStore("settings", () => {
     signOutAzureUserAccount,
     cancelAzureUserSignInFlow,
     refreshAzureUserAccount,
+    clearAzureUserAccountSnapshot,
     whisperProviderId,
     geminiTranscriptionModelId,
     saveGeminiTranscriptionModel,
