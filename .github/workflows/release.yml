@@ -14,7 +14,83 @@ permissions:
   contents: write
 
 jobs:
+  # 先建立唯一的 draft release，再讓三個平台的 build job 上傳到它。
+  #
+  # 先前三個 build job 各自呼叫 tauri-action 且都帶 releaseDraft: true、
+  # 沒有指定 releaseId；tauri-action 的行為是「找同 tag 的 draft，找不到就建一個」，
+  # 三個 job 幾乎同時啟動時都看不到彼此，於是**建出多個同 tag 的 release**。
+  # 資產與 latest.json 因此被拆散到不同 release，publish-release 只發佈其中一個，
+  # 另一個連同 ARM 的 updater 檔案永遠留在 draft ——
+  # Apple Silicon 使用者收不到自動更新（v0.15.2 實際發生過）。
+  create-release:
+    runs-on: ubuntu-24.04-arm
+    outputs:
+      release_id: ${{ steps.create.outputs.release_id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Resolve release metadata
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            RAW_TAG="${{ inputs.tag }}"
+          else
+            RAW_TAG="${GITHUB_REF_NAME}"
+          fi
+
+          RAW_TAG="${RAW_TAG#refs/tags/}"
+          RELEASE_VERSION="${RAW_TAG#v}"
+
+          echo "RELEASE_TAG=$RAW_TAG" >> "$GITHUB_ENV"
+          echo "RELEASE_VERSION=$RELEASE_VERSION" >> "$GITHUB_ENV"
+
+          NOTES=$(awk -v ver="$RELEASE_VERSION" '
+            $0 ~ ("^## \\[" ver "\\]") { flag=1; next }
+            /^## \[/ { flag=0 }
+            flag { print }
+          ' CHANGELOG.md)
+          if [ -z "$NOTES" ]; then
+            NOTES="See the assets to download and install this version."
+          fi
+          printf '%s\n' "$NOTES" > release-notes.md
+
+      - name: Create or reuse draft release
+        id: create
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # 用列表過濾而非 /releases/tags/{tag}：後者查不到 draft release。
+          find_id() {
+            gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+              --jq "[.[] | select(.tag_name==\"$RELEASE_TAG\")] | .[0].id // empty"
+          }
+
+          ID="$(find_id)"
+          if [ -n "$ID" ]; then
+            echo "Reusing existing release $ID for $RELEASE_TAG"
+          else
+            gh release create "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "SayIt v$RELEASE_VERSION" \
+              --notes-file release-notes.md \
+              --draft
+            ID="$(find_id)"
+          fi
+
+          if [ -z "$ID" ]; then
+            echo "Failed to resolve release id for $RELEASE_TAG" >&2
+            exit 1
+          fi
+          echo "release_id=$ID" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: create-release
     strategy:
       fail-fast: false
       matrix:
@@ -61,21 +137,7 @@ jobs:
           echo "RELEASE_VERSION=$RELEASE_VERSION" >> "$GITHUB_ENV"
           echo "SENTRY_RELEASE=sayit@$RELEASE_VERSION" >> "$GITHUB_ENV"
           echo "VITE_SENTRY_RELEASE=sayit@$RELEASE_VERSION" >> "$GITHUB_ENV"
-
-          # Extract this version's section from CHANGELOG.md for the GitHub Release body
-          NOTES=$(awk -v ver="$RELEASE_VERSION" '
-            $0 ~ ("^## \\[" ver "\\]") { flag=1; next }
-            /^## \[/ { flag=0 }
-            flag { print }
-          ' CHANGELOG.md)
-          if [ -z "$NOTES" ]; then
-            NOTES="See the assets to download and install this version."
-          fi
-          {
-            echo "RELEASE_NOTES<<__SAYIT_NOTES_EOF__"
-            echo "$NOTES"
-            echo "__SAYIT_NOTES_EOF__"
-          } >> "$GITHUB_ENV"
+          # Release body 由 create-release job 從 CHANGELOG 產生，這裡不重複。
 
       - uses: actions/setup-node@v4
         with:
@@ -110,11 +172,9 @@ jobs:
           VITE_SENTRY_RELEASE: ${{ env.VITE_SENTRY_RELEASE }}
           VITE_SENTRY_SOURCEMAPS_ENABLED: ${{ matrix.upload_sourcemaps }}
         with:
-          tagName: ${{ env.RELEASE_TAG }}
-          releaseName: "SayIt v${{ env.RELEASE_VERSION }}"
-          releaseBody: ${{ env.RELEASE_NOTES }}
-          releaseDraft: true
-          prerelease: false
+          # 指定既有 release，三個平台才會上傳到同一個（也才會正確合併 latest.json）。
+          # 不可改回 tagName + releaseDraft——那會讓每個 job 各自建 release。
+          releaseId: ${{ needs.create-release.outputs.release_id }}
           args: ${{ matrix.args }}
 
       - name: Sentry release — sourcemaps, commits, deploy
@@ -169,23 +229,48 @@ jobs:
           gh release upload "$env:RELEASE_TAG" "${{ matrix.stable_name }}.sha256" --clobber
 
   publish-release:
-    needs: build
+    needs: [create-release, build]
     runs-on: ubuntu-24.04-arm
     steps:
-      - name: Resolve release metadata
-        shell: bash
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            RAW_TAG="${{ inputs.tag }}"
-          else
-            RAW_TAG="${GITHUB_REF_NAME}"
-          fi
-
-          RAW_TAG="${RAW_TAG#refs/tags/}"
-          echo "RELEASE_TAG=$RAW_TAG" >> "$GITHUB_ENV"
-
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false
+          # 用 release id 而非 tag：tag 查詢在有多個同 tag release 時會挑錯對象。
+          gh api -X PATCH \
+            "repos/$GITHUB_REPOSITORY/releases/${{ needs.create-release.outputs.release_id }}" \
+            -F draft=false
+
+      - name: Verify release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          ID="${{ needs.create-release.outputs.release_id }}"
+
+          # updater manifest 必須涵蓋全部三個平台。缺 darwin-aarch64 時
+          # Apple Silicon 使用者會靜默收不到更新，且不會有任何錯誤訊息。
+          PLATFORMS=$(gh api "repos/$GITHUB_REPOSITORY/releases/$ID/assets" \
+            --jq '.[] | select(.name=="latest.json") | .id' \
+            | xargs -I{} gh api "repos/$GITHUB_REPOSITORY/releases/assets/{}" \
+                -H "Accept: application/octet-stream" \
+            | jq -r '.platforms | keys[]')
+
+          echo "latest.json platforms:"
+          echo "$PLATFORMS"
+
+          for want in darwin-aarch64 darwin-x86_64 windows-x86_64; do
+            if ! echo "$PLATFORMS" | grep -qx "$want"; then
+              echo "::error::latest.json is missing platform '$want'" >&2
+              exit 1
+            fi
+          done
+
+          # 官網固定下載連結所指向的檔案
+          NAMES=$(gh api "repos/$GITHUB_REPOSITORY/releases/$ID/assets" --jq '.[].name')
+          for want in SayIt-mac-arm64.dmg SayIt-mac-x64.dmg SayIt-windows-x64.exe; do
+            if ! echo "$NAMES" | grep -qx "$want"; then
+              echo "::error::release is missing asset '$want'" >&2
+              exit 1
+            fi
+          done
