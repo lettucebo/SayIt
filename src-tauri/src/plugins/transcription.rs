@@ -402,12 +402,77 @@ fn validate_gemini_audio_size(raw_len: usize) -> Result<(), TranscriptionError> 
 
 const DEFAULT_AZURE_WHISPER_API_VERSION: &str = "2024-06-01";
 
+/// bearer 模式下允許的 Azure 資料面網域尾綴。
+///
+/// `transcription.rs` 走 reqwest 直連，**不受** `capabilities/default.json` 的 HTTP
+/// allowlist 約束。若不在這裡把關，惡意的設定備份就能把使用者的 Entra token
+/// 送到攻擊者主機。清單與 `capabilities/default.json` 的 Azure 條目對齊。
+const AZURE_ENDPOINT_HOST_SUFFIXES: [&str; 3] = [
+    ".openai.azure.com",
+    ".services.ai.azure.com",
+    ".cognitiveservices.azure.com",
+];
+
+/// HTTP 層的驗證方式。前端傳的是 wire 值（`key` / `bearer`），不是使用者選的驗證模式；
+/// 服務主體與使用者登入都會送 Bearer，Rust 端不需要知道 token 怎麼來的。
+fn parse_auth_header_mode(auth_mode: Option<&str>) -> Result<bool, TranscriptionError> {
+    match auth_mode {
+        // 未指定時維持既有預設（api-key）
+        None | Some("key") => Ok(false),
+        Some("bearer") => Ok(true),
+        // 舊版設定/備份殘留值；語意等同 bearer
+        Some("entra") => Ok(true),
+        // fail-closed：未知值不可默默降級成 api-key（會把 bearer token 送錯 header）
+        Some(other) => Err(TranscriptionError::RequestFailed(format!(
+            "Unknown Azure auth mode: {other}"
+        ))),
+    }
+}
+
+/// bearer 模式才檢查：endpoint 必須是 https 且落在已知的 Azure 資料面網域。
+///
+/// 刻意用 `reqwest::Url`（即實際送出請求時所用的同一套 parser）而非自行切字串：
+/// WHATWG URL 規格對 https 這類 special scheme 會把 `\` 視同 `/`，因此
+/// `https://evil.com\.openai.azure.com` 的真實 host 是 `evil.com`；用字串比對後綴
+/// 會誤判為合法並把使用者的 Entra token 連同錄音送到攻擊者主機。
+/// 交給 parser 處理也一併涵蓋 IDN/punycode 正規化與各種 authority 變形。
+fn ensure_azure_endpoint_allowed(endpoint: &str) -> Result<(), TranscriptionError> {
+    let url = reqwest::Url::parse(endpoint)
+        .map_err(|e| TranscriptionError::RequestFailed(format!("Invalid Azure endpoint: {e}")))?;
+
+    if url.scheme() != "https" {
+        return Err(TranscriptionError::RequestFailed(
+            "Azure endpoint must use https".to_string(),
+        ));
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err(TranscriptionError::RequestFailed(
+            "Azure endpoint must not contain userinfo".to_string(),
+        ));
+    }
+
+    let host = url
+        .host_str()
+        .unwrap_or_default()
+        .trim_end_matches('.')
+        .to_ascii_lowercase();
+    if AZURE_ENDPOINT_HOST_SUFFIXES
+        .iter()
+        .any(|suffix| host.ends_with(suffix))
+    {
+        return Ok(());
+    }
+    Err(TranscriptionError::RequestFailed(format!(
+        "Azure endpoint host not allowed: {host}"
+    )))
+}
+
 /// Azure OpenAI Whisper（deployment-path）轉錄設定。
 struct AzureWhisperConfig {
     endpoint: String,
     deployment: String,
     api_version: String,
-    /// entra → Authorization: Bearer；key → api-key header
+    /// true → `Authorization: Bearer`；false → `api-key` header
     use_bearer: bool,
 }
 
@@ -436,7 +501,13 @@ fn build_azure_whisper_config(
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| DEFAULT_AZURE_WHISPER_API_VERSION.to_string());
-    let use_bearer = auth_mode.as_deref() == Some("entra");
+    let use_bearer = parse_auth_header_mode(auth_mode.as_deref())?;
+    // 無條件檢查（不分 key / bearer）：轉錄走 reqwest 直連，不受
+    // `capabilities/default.json` 的 HTTP allowlist 約束，而前端 chat 走
+    // plugin-http 早已被同一份 allowlist + CSP 限制在 Azure 網域。
+    // 只擋 bearer 會留下不一致的破口：被竄改的設定備份仍可用 key 模式
+    // 把 API key 與整段錄音送到攻擊者主機。
+    ensure_azure_endpoint_allowed(&endpoint)?;
     Ok(Some(AzureWhisperConfig {
         endpoint,
         deployment,
@@ -1825,5 +1896,108 @@ mod tests {
             DEFAULT_GEMINI_TRANSCRIPTION_MODEL
         );
         assert_eq!(resolve_gemini_model(""), DEFAULT_GEMINI_TRANSCRIPTION_MODEL);
+    }
+
+    #[test]
+    fn parses_wire_auth_modes_and_rejects_unknown() {
+        assert!(!parse_auth_header_mode(None).unwrap());
+        assert!(!parse_auth_header_mode(Some("key")).unwrap());
+        assert!(parse_auth_header_mode(Some("bearer")).unwrap());
+        // 舊設定/備份殘留值，語意等同 bearer
+        assert!(parse_auth_header_mode(Some("entra")).unwrap());
+        // fail-closed：未知值不可默默降級成 api-key（會把 bearer token 送錯 header）
+        assert!(parse_auth_header_mode(Some("entraUser")).is_err());
+        assert!(parse_auth_header_mode(Some("")).is_err());
+    }
+
+    #[test]
+    fn allows_known_azure_endpoint_hosts() {
+        for endpoint in [
+            "https://demo.openai.azure.com",
+            "https://demo.openai.azure.com/",
+            "https://demo.services.ai.azure.com",
+            "https://demo.cognitiveservices.azure.com",
+            "https://DEMO.OpenAI.Azure.Com",
+            "https://demo.openai.azure.com:443/openai/v1",
+        ] {
+            assert!(
+                ensure_azure_endpoint_allowed(endpoint).is_ok(),
+                "should allow {endpoint}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_endpoints_that_could_leak_the_token() {
+        for endpoint in [
+            // 非 https
+            "http://demo.openai.azure.com",
+            // 完全不相干的主機
+            "https://evil.example.com",
+            // 後綴混淆：把 azure 網域塞進自己的網域
+            "https://demo.openai.azure.com.evil.com",
+            // userinfo 混淆
+            "https://demo.openai.azure.com@evil.com",
+            // 路徑偽裝
+            "https://evil.com/demo.openai.azure.com",
+            // 反斜線：WHATWG 對 special scheme 視同 `/`，真實 host 是 evil.com。
+            // 自行切字串的實作會誤放行，必須用同一套 URL parser 才擋得住。
+            "https://evil.com\\.openai.azure.com",
+            "https://evil.com\\.openai.azure.com/openai/v1",
+            // 大小寫變形的反斜線繞過
+            "https://EVIL.com\\.OpenAI.Azure.Com",
+            "",
+            "not-a-url",
+        ] {
+            assert!(
+                ensure_azure_endpoint_allowed(endpoint).is_err(),
+                "should reject {endpoint}"
+            );
+        }
+    }
+
+    #[test]
+    fn endpoint_allowlist_applies_to_every_auth_mode() {
+        // 兩種模式都要擋：被竄改的備份用 key 模式一樣能把 API key 與錄音外送，
+        // 且前端 chat 走 plugin-http 早已被 capabilities allowlist + CSP 限制在
+        // Azure 網域——轉錄若只擋 bearer 就與 chat 的實際政策不一致。
+        for mode in ["key", "bearer"] {
+            assert!(
+                build_azure_whisper_config(
+                    Some("azure".into()),
+                    Some("https://evil.example.com".into()),
+                    Some("whisper".into()),
+                    None,
+                    Some(mode.into()),
+                )
+                .is_err(),
+                "{mode} mode should reject non-Azure endpoint"
+            );
+
+            assert!(
+                build_azure_whisper_config(
+                    Some("azure".into()),
+                    Some("https://demo.openai.azure.com".into()),
+                    Some("whisper".into()),
+                    None,
+                    Some(mode.into()),
+                )
+                .is_ok(),
+                "{mode} mode should allow Azure endpoint"
+            );
+
+            // 反斜線繞過在兩種模式下都必須失效
+            assert!(
+                build_azure_whisper_config(
+                    Some("azure".into()),
+                    Some("https://evil.com\\.openai.azure.com".into()),
+                    Some("whisper".into()),
+                    None,
+                    Some(mode.into()),
+                )
+                .is_err(),
+                "{mode} mode should reject backslash bypass"
+            );
+        }
     }
 }

@@ -1,5 +1,6 @@
 import type { LlmProviderId } from "./modelRegistry";
 import { findLlmModelConfig } from "./modelRegistry";
+import type { AzureAuthHeaderMode } from "../types/settings";
 
 // ── Provider 設定 ─────────────────────────────────────────
 
@@ -122,8 +123,9 @@ export function getProviderIdForModel(modelId: string): LlmProviderId {
 export interface AzureRequestOptions {
   endpoint: string;
   apiVersion?: string;
-  authMode: "key" | "entra";
-  // key 模式：api-key 值；entra 模式：已取得的 bearer token
+  /** HTTP 層的驗證方式——不是使用者選的 AzureAuthMode。服務主體與使用者登入都是 "bearer"。 */
+  authMode: AzureAuthHeaderMode;
+  // key 模式：api-key 值；bearer 模式：已取得的 access token
   authValue: string;
   // 開啟時省略 temperature（Azure GPT-5 系列推理部署送 temperature 會回 400）
   omitTemperature?: boolean;
@@ -195,7 +197,7 @@ function buildAzureFetchParams(
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
-  if (opts.authMode === "entra") {
+  if (opts.authMode === "bearer") {
     headers.Authorization = `Bearer ${opts.authValue}`;
   } else {
     headers["api-key"] = opts.authValue;

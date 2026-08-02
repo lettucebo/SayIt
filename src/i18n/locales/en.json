@@ -350,7 +350,7 @@
       "endpointPlaceholder": "https://your-resource.openai.azure.com",
       "authModeLabel": "Authentication",
       "authKey": "API Key",
-      "authEntra": "Microsoft Entra ID",
+      "authEntra": "Entra ID Secret",
       "apiKeyLabel": "API Key",
       "tenantIdLabel": "Tenant ID",
       "clientIdLabel": "Client ID (App Registration)",
@@ -377,7 +377,26 @@
       "issueEndpoint": "Enter the Endpoint URL in the connection card above and click Save.",
       "issueCredentials": "Enter Tenant ID / Client ID / Client Secret in the connection card above and click Save.",
       "issueApiKey": "Enter the API Key in the connection card above and click Save.",
-      "issueDeployment": "Enter the deployment name and click Save."
+      "issueDeployment": "Enter the deployment name and click Save.",
+      "issueNotSignedIn": "Click \"Sign in with Entra ID\" in the connection card above.",
+      "signInWaiting": "Browser opened — finish signing in…",
+      "recommended": "Recommended",
+      "signOutSuccess": "Signed out",
+      "signInCancelled": "Sign-in cancelled",
+      "reauthRequired": "Your sign-in expired. Please sign in with Entra ID again.",
+      "authEntraUser": "Entra ID Sign-in",
+      "signOut": "Sign out",
+      "signInSuccess": "Signed in as {account}",
+      "signedInAs": "Signed in as {account}",
+      "entraUserDescription": "Sign in with your own work account — no client secret needed. Requests use your own Azure permissions, so you need the “Cognitive Services OpenAI User” role.",
+      "signInCancel": "Cancel",
+      "signIn": "Sign in with Entra ID",
+      "signInPolicyDenied": "Sign-in was blocked by your organization policy. Contact IT with this message:",
+      "signInTimedOut": "Sign-in timed out. Please try again — the browser sign-in must be completed within five minutes.",
+      "signInInProgress": "A sign-in is already in progress. Finish or cancel it first.",
+      "signInConfigIncomplete": "Enter the Tenant ID and Client ID first.",
+      "invalidTenantId": "That Tenant ID looks wrong. Paste the Directory (tenant) ID from the Azure portal.",
+      "invalidClientId": "That Client ID looks wrong. Paste the Application (client) ID from the Azure portal."
     }
   },
   "dashboard": {
@@ -588,8 +607,8 @@
     },
     "upgradeNotice": {
       "title": "SayIt Update Summary",
-      "item1": "Automatic updates no longer interrupt you — SayIt used to check for updates every 15 minutes, and whenever it found one it downloaded it in the background and then pulled the main window to the front to ask you to install, stealing focus while you might be typing in another app. It now checks once each time SayIt starts. You can check whenever you like with the \"Check for updates\" button at the bottom left. The trade-off: if you never restart SayIt, it will not notice new versions on its own, so use that button.",
-      "item2": "Updates are no longer missed when the network is not ready at boot — with only one check per launch, a single failed check (common when SayIt starts with your session and the network or VPN is not up yet) would mean no further checks for the whole session. Failed checks now retry automatically after 1, 5 and 15 minutes. Checks also have a 30 second timeout, so a stalled connection can no longer leave the \"Check for updates\" button stuck.",
+      "item1": "Connect to Azure without a client secret — if your company's security policy rules out client secrets (a long-lived credential that hands over the whole app's permissions if it leaks), you can now sign in with your own work account instead. Under Settings → Azure / Microsoft Foundry, set the auth method to \"Entra ID sign-in\"; the button opens your browser on Microsoft's standard sign-in page, so MFA and Conditional Access still apply. Afterwards no long-lived secret remains in the settings file — only a credential in your OS credential store. You'll need an App Registration and the \"Cognitive Services OpenAI User\" role first; see the setup guide for the steps.",
+      "item2": "Your settings can no longer be overwritten with blanks. The main window used to render before reading the settings file, leaving every input empty in between — and a save triggered in that window would wipe your endpoint and API keys. A wiped key is gone for good. Settings are now loaded before the window renders, and if loading fails the window still opens so you can act, but writes are refused rather than clobbering your settings with defaults.",
       "dismiss": "Got it"
     }
   },

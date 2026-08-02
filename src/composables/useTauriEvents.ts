@@ -9,6 +9,10 @@ export { listen as listenToEvent } from "@tauri-apps/api/event";
 export const VOICE_FLOW_STATE_CHANGED = "voice-flow:state-changed" as const;
 export const TRANSCRIPTION_COMPLETED = "transcription:completed" as const;
 export const SETTINGS_UPDATED = "settings:updated" as const;
+// Entra 使用者登入狀態變更（Frontend-only）。Dashboard 完成登入/登出後廣播，
+// HUD 收到才會重讀帳號——否則 HUD 的快照會一直停在登入前的 null，
+// hasWhisperConfig / hasLlmApiKey 恆為 false 直到 App 重啟。
+export const AZURE_AUTH_STATE_CHANGED = "azure-auth:state-changed" as const;
 export const VOCABULARY_CHANGED = "vocabulary:changed" as const;
 export const REPLACEMENTS_CHANGED = "replacements:changed" as const;
 

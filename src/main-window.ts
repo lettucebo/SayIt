@@ -65,11 +65,24 @@ async function bootstrap() {
     setDatabaseInitError(message);
   }
 
+  const settingsStore = useSettingsStore();
+  // 設定必須在 mount 之前載入完成，否則 View 的 onMounted 會在輸入欄位仍是
+  // 預設空值時就把它們當成使用者設定；曾因此把既有設定整批清空（事故 #3）。
+  // 載入失敗不可阻擋 mount：那會變成白畫面，使用者連重試的 UI 都沒有。
+  // store 內部維持 `failed` 狀態，資料層守門會繼續拒絕寫入。
+  try {
+    await settingsStore.loadSettings();
+  } catch (err) {
+    console.error(
+      "[main-window] loadSettings failed:",
+      extractErrorMessage(err),
+    );
+    captureError(err, { source: "settings-load" });
+  }
+
   app.mount("#app");
   await router.isReady();
 
-  const settingsStore = useSettingsStore();
-  await settingsStore.loadSettings();
   // 套用持久化的檔案 Log 開關到 Rust（即時生效）
   await setFileLoggingEnabled(settingsStore.isDebugLogEnabled);
   await settingsStore.consumeUpgradeNotice();

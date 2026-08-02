@@ -146,6 +146,11 @@ CI（`.github/workflows/ci.yml`）：`vue-tsc --noEmit` → `eslint src` → `pn
 | `retranscribe_from_file` | `plugins/transcription.rs` | useVoiceFlowStore、useHistoryStore（retranscribeRecord） | `file_path, api_key, vocabulary_term_list?, model_id?, language?, provider?（同上）, endpoint?, deployment?, api_version?, auth_mode?` | `Result<TranscriptionResult, TranscriptionError>`（同上） |
 | `test_whisper_connection` | `plugins/transcription.rs` | connectionTest.ts（SettingsView） | `transcription_state, api_key, model_id?, provider?（同上）, endpoint?, deployment?, api_version?, auth_mode?` | `Result<(), TranscriptionError>` |
 | `get_azure_entra_token` | `plugins/azure_auth.rs` | azureAuth.ts（getAzureAccessToken） | `tenant_id, client_id, client_secret, scope` | `Result<AzureTokenResult, String>`（`{ accessToken, expiresIn }`） |
+| `azure_user_sign_in` | `plugins/azure_user_session.rs` | azureUserAuth.ts（signInAzureUser） | `tenant_id, client_id, operation_id, state: State<AzureUserAuthState>` | `Result<AzureUserAccount, AzureUserAuthError>`（PKCE public client，開系統瀏覽器等 loopback callback；同時只允許一個進行中登入） |
+| `azure_user_cancel_sign_in` | `plugins/azure_user_session.rs` | azureUserAuth.ts（cancelAzureUserSignIn） | `operation_id, state: State<AzureUserAuthState>` | `()`（帶 operation_id 才不會取消到下一次登入） |
+| `azure_user_sign_out` | `plugins/azure_user_session.rs` | azureUserAuth.ts（signOutAzureUser） | `tenant_id, client_id, state: State<AzureUserAuthState>` | `Result<(), AzureUserAuthError>`（清 OS 憑證庫 + 該帳號所有 scope 的 token 快取） |
+| `azure_user_get_account` | `plugins/azure_user_session.rs` | azureUserAuth.ts（getAzureUserAccount） | `tenant_id, client_id, state: State<AzureUserAuthState>` | `Result<Option<AzureUserAccount>, AzureUserAuthError>`（`{ username, name, tenantId, clientId }`，身分欄位皆可為 null） |
+| `azure_user_get_token` | `plugins/azure_user_session.rs` | azureUserAuth.ts（getAzureUserToken） | `tenant_id, client_id, scope_kind（`"chat"`/`"whisper"`；scope 由 Rust 固定列舉，前端不可指定任意 audience）, state: State<AzureUserAuthState>` | `Result<String, AzureUserAuthError>`（記憶體快取 + single-flight refresh） |
 | `save_text_file` | `plugins/file_transfer.rs` | SettingsView（備份匯出） | `path: String, content: String` | `Result<(), String>` |
 | `read_text_file` | `plugins/file_transfer.rs` | SettingsView（備份匯入） | `path: String` | `Result<String, String>`（過大回符號錯誤字串 `"FILE_TOO_LARGE"`） |
 | `play_start_sound` | `plugins/sound_feedback.rs` | useVoiceFlowStore | — | `()` |
@@ -178,6 +183,7 @@ CI（`.github/workflows/ci.yml`）：`vue-tsc --noEmit` → `eslint src` → `pn
 | `voice-flow:state-changed` | `VOICE_FLOW_STATE_CHANGED` | useVoiceFlowStore | **目前無接收方**（emit 保留，尚無 listener） |
 | `transcription:completed` | `TRANSCRIPTION_COMPLETED` | useHistoryStore（`emitToWindow("main-window", …)`） | DashboardView、HistoryView |
 | `settings:updated` | `SETTINGS_UPDATED` | useSettingsStore | HUD App.vue（目前唯一 listener） |
+| `azure-auth:state-changed` | `AZURE_AUTH_STATE_CHANGED` | useSettingsStore（登入/登出/清除連線後） | HUD App.vue（重讀 Entra 使用者登入狀態；不重讀的話 HUD 的 `hasWhisperConfig` 會停在登入前狀態） |
 | `vocabulary:changed` | `VOCABULARY_CHANGED` | VocabularyStore | All Windows |
 | `replacements:changed` | `REPLACEMENTS_CHANGED` | ReplacementStore（規則 CRUD 後） | HUD（App.vue，重載取代規則） |
 | `vocabulary:learned` | `VOCABULARY_LEARNED` | VoiceFlowStore | HUD NotchHud |

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted } from "vue";
 import type { UnlistenFn } from "@tauri-apps/api/event";
+import type { AzureAuthStateChangedPayload } from "./types/events";
 import NotchHud from "./components/NotchHud.vue";
 import { getCurrentWindow, Window } from "@tauri-apps/api/window";
 import { useVoiceFlowStore } from "./stores/useVoiceFlowStore";
@@ -13,6 +14,7 @@ import {
   SETTINGS_UPDATED,
   VOCABULARY_CHANGED,
   REPLACEMENTS_CHANGED,
+  AZURE_AUTH_STATE_CHANGED,
   waitForDatabaseReady,
 } from "./composables/useTauriEvents";
 import { useI18n } from "vue-i18n";
@@ -23,6 +25,7 @@ const settingsStore = useSettingsStore();
 const vocabularyStore = useVocabularyStore();
 const replacementStore = useReplacementStore();
 let unlistenSettingsUpdated: UnlistenFn | null = null;
+let unlistenAzureAuthChanged: UnlistenFn | null = null;
 let unlistenVocabularyChanged: UnlistenFn | null = null;
 let unlistenReplacementsChanged: UnlistenFn | null = null;
 
@@ -47,6 +50,25 @@ onMounted(async () => {
   unlistenSettingsUpdated = await listenToEvent(SETTINGS_UPDATED, () => {
     void settingsStore.refreshCrossWindowSettings();
   });
+
+  // Dashboard 完成 Entra 登入/登出後，HUD 必須同步帳號快照——否則
+  // hasWhisperConfig / hasLlmApiKey 會一直停在登入前的狀態直到 App 重啟。
+  //
+  // 明確為「未登入」時直接套用 payload，不回頭重讀憑證庫：登入失效
+  //（需要重新互動）時憑證仍然存在，重讀會把帳號又變回「已登入」，
+  // 使用者就會一直看到可用、實際每次都失敗。
+  unlistenAzureAuthChanged = await listenToEvent<AzureAuthStateChangedPayload>(
+    AZURE_AUTH_STATE_CHANGED,
+    (event) => {
+      if (event.payload?.signedIn === false) {
+        settingsStore.clearAzureUserAccountSnapshot();
+        return;
+      }
+      // 對方剛登入成功 → 解除本視窗的「需要重新登入」標記再重讀
+      settingsStore.clearAzureUserReauthFlag();
+      void settingsStore.refreshAzureUserAccount();
+    },
+  );
 
   // 初始化 DB（供 vocabularyStore 使用）
   let isDatabaseReady = false;
@@ -112,6 +134,7 @@ function handleRetry() {
 
 onUnmounted(() => {
   unlistenSettingsUpdated?.();
+  unlistenAzureAuthChanged?.();
   unlistenVocabularyChanged?.();
   unlistenReplacementsChanged?.();
   voiceFlowStore.cleanup();

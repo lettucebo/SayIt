@@ -4,6 +4,7 @@ import {
 } from "./vocabularyTransfer";
 import type { VocabularyExportFile } from "../types/vocabulary";
 import type { ReplacementRule } from "../types/replacement";
+import { isAzureAuthMode } from "../types/settings";
 
 export const BACKUP_FORMAT = "sayit-backup" as const;
 export const BACKUP_VERSION = 1 as const;
@@ -304,6 +305,9 @@ export function sanitizeSettingsPayload(
     const expected = SETTING_VALUE_TYPES[key];
     if (!expected) continue; // 未知 key
     if (!matchesExpectedType(value, expected)) continue; // 型別不符
+    // 列舉型欄位光靠 typeof 檢查不夠：備份是可任意編輯的 JSON，
+    // 未知的驗證模式會一路帶進 store 並讓下游 header 判斷失準。
+    if (key === "azureAuthMode" && !isAzureAuthMode(value)) continue;
     result[key] = value;
   }
   return result;

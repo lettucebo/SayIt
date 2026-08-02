@@ -5,6 +5,7 @@ import type {
   TranscriptionProviderId,
 } from "./modelRegistry";
 import type { AzureRequestOptions } from "./llmProvider";
+import type { AzureAuthHeaderMode } from "../types/settings";
 
 /**
  * 連線測試專用的錯誤格式化：盡量保留底層真實原因（HTTP 狀態碼 + 服務回應內容），
@@ -67,7 +68,7 @@ export async function testWhisperConnection(
     endpoint?: string;
     deployment?: string;
     apiVersion?: string;
-    authMode?: "key" | "entra";
+    authMode?: AzureAuthHeaderMode;
   },
 ): Promise<TestResult> {
   const start = performance.now();

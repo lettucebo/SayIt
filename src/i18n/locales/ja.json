@@ -350,7 +350,7 @@
       "endpointPlaceholder": "https://your-resource.openai.azure.com",
       "authModeLabel": "認証方式",
       "authKey": "API キー",
-      "authEntra": "Microsoft Entra ID",
+      "authEntra": "Entra ID シークレット",
       "apiKeyLabel": "API キー",
       "tenantIdLabel": "テナント ID",
       "clientIdLabel": "クライアント ID（App Registration）",
@@ -377,7 +377,26 @@
       "issueEndpoint": "上の接続カードに Endpoint URL を入力して「保存」を押してください。",
       "issueCredentials": "上の接続カードに Tenant ID／Client ID／Client Secret を入力して「保存」を押してください。",
       "issueApiKey": "上の接続カードに API Key を入力して「保存」を押してください。",
-      "issueDeployment": "デプロイ名を入力して「保存」を押してください。"
+      "issueDeployment": "デプロイ名を入力して「保存」を押してください。",
+      "issueNotSignedIn": "上の接続カードで「Entra ID でサインイン」を実行してください。",
+      "signInWaiting": "ブラウザーを開きました。サインインを完了してください…",
+      "recommended": "推奨",
+      "signOutSuccess": "サインアウトしました",
+      "signInCancelled": "サインインをキャンセルしました",
+      "reauthRequired": "サインインの有効期限が切れました。Entra ID でもう一度サインインしてください。",
+      "authEntraUser": "Entra ID サインイン",
+      "signOut": "サインアウト",
+      "signInSuccess": "サインインしました：{account}",
+      "signedInAs": "サインイン中：{account}",
+      "entraUserDescription": "ご自身の職場アカウントでサインインします。クライアント シークレットは不要です。ご自身の Azure 権限が使われるため「Cognitive Services OpenAI User」ロールが必要です。",
+      "signInCancel": "キャンセル",
+      "signIn": "Entra ID でサインイン",
+      "signInPolicyDenied": "組織のアクセス ポリシーによりサインインがブロックされました。次のメッセージを添えて IT にご連絡ください：",
+      "signInTimedOut": "サインインがタイムアウトしました。ブラウザーでのサインインは 5 分以内に完了してください。",
+      "signInInProgress": "サインインが進行中です。完了するかキャンセルしてください。",
+      "signInConfigIncomplete": "先に テナント ID と クライアント ID を入力してください。",
+      "invalidTenantId": "テナント ID の形式が正しくありません。Azure ポータルのディレクトリ (テナント) ID を貼り付けてください。",
+      "invalidClientId": "クライアント ID の形式が正しくありません。アプリケーション (クライアント) ID を貼り付けてください。"
     }
   },
   "dashboard": {
@@ -588,8 +607,8 @@
     },
     "upgradeNotice": {
       "title": "SayIt アップデート概要",
-      "item1": "自動アップデートが作業を中断しなくなりました：これまで SayIt は 15 分ごとに更新を確認し、新しいバージョンを見つけると自動的にバックグラウンドでダウンロードしたうえで、メインウィンドウを最前面に呼び出してインストールを求めていました。他のアプリで入力中にフォーカスを奪われることもあります。今後は SayIt の起動時に 1 回だけ確認します。更新したいときは左下の「アップデートを確認」からいつでも実行できます。なお SayIt を長期間再起動しない場合は新しいバージョンを自動では検出しないため、このボタンをご利用ください。",
-      "item2": "起動時にネットワークが未接続でも更新を取りこぼしません：確認が起動時の 1 回だけになると、その 1 回がたまたま失敗した場合（自動起動時はネットワークや VPN が未接続のことがよくあります）、そのセッション中は二度と確認されないことになります。今後は確認に失敗しても 1 分後・5 分後・15 分後に自動で再試行します。また確認に 30 秒のタイムアウトを設けたため、接続が応答しない場合でも「アップデートを確認」ボタンが操作できないままになることはありません。",
+      "item1": "client secret なしで Azure に接続できるようになりました。社内のセキュリティポリシーで client secret（長期間有効で、漏洩するとアプリケーション全体の権限を奪われる資格情報）が使えない場合、ご自身の会社アカウントでのサインインに切り替えられます。「設定 → Azure / Microsoft Foundry」で認証方式を「Entra ID サインイン」に変更してください。ボタンを押すとブラウザーで Microsoft の標準サインイン画面が開き、MFA や条件付きアクセスもそのまま適用されます。完了後、設定ファイルには長期的な機密情報は残らず、OS の資格情報ストアに 1 件だけ保存されます。事前に App Registration と「Cognitive Services OpenAI User」ロールが必要です。詳しい手順はドキュメントをご覧ください。",
+      "item2": "設定が空の値で上書きされなくなりました。これまではメインウィンドウを表示してから設定ファイルを読み込んでいたため、その間はすべての入力欄が空のままで、そのタイミングで保存されると endpoint や API キーが消えてしまう可能性がありました。キーは一度消えると復元できません。今後は設定を読み込んでからウィンドウを表示します。読み込みに失敗した場合もウィンドウは表示されますが、既定値で上書きせず書き込みを拒否します。",
       "dismiss": "了解"
     }
   },

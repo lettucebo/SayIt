@@ -121,6 +121,8 @@ describe("useSettingsStore — exportSettings / importSettings", () => {
   describe("importSettings 副作用（防 raw-set 退化）", () => {
     it("[P0] 寫回白名單 key 並忽略內部旗標與未知 key", async () => {
       const store = useSettingsStore();
+      // 正式流程在 mount 前就 await loadSettings()；未載入完成時匯入會被守門擋下
+      await store.loadSettings();
       const payload: SettingsPayload = {
         hotkeyTriggerKey: "command",
         hotkeyTriggerMode: "toggle",
@@ -139,6 +141,8 @@ describe("useSettingsStore — exportSettings / importSettings", () => {
 
     it("[P0] 匯入後向 Rust 重新註冊熱鍵（update_hotkey_config）", async () => {
       const store = useSettingsStore();
+      // 正式流程在 mount 前就 await loadSettings()；未載入完成時匯入會被守門擋下
+      await store.loadSettings();
       await store.importSettings({
         hotkeyTriggerKey: "command",
         hotkeyTriggerMode: "toggle",
@@ -152,12 +156,16 @@ describe("useSettingsStore — exportSettings / importSettings", () => {
 
     it("[P0] 匯入後清除 Azure token 快取", async () => {
       const store = useSettingsStore();
+      // 正式流程在 mount 前就 await loadSettings()；未載入完成時匯入會被守門擋下
+      await store.loadSettings();
       await store.importSettings({ azureApiKey: "new-key" });
       expect(h.mockClearAzureTokenCache).toHaveBeenCalled();
     });
 
     it("[P0] 匯入後 emit SETTINGS_UPDATED", async () => {
       const store = useSettingsStore();
+      // 正式流程在 mount 前就 await loadSettings()；未載入完成時匯入會被守門擋下
+      await store.loadSettings();
       await store.importSettings({ muteOnRecording: true });
       expect(h.mockEmit).toHaveBeenCalledWith(
         "settings:updated",
@@ -167,6 +175,8 @@ describe("useSettingsStore — exportSettings / importSettings", () => {
 
     it("[P0] autoStartEnabled=true 時呼叫 autostart enable", async () => {
       const store = useSettingsStore();
+      // 正式流程在 mount 前就 await loadSettings()；未載入完成時匯入會被守門擋下
+      await store.loadSettings();
       await store.importSettings({ autoStartEnabled: true });
       expect(h.mockEnable).toHaveBeenCalled();
       expect(h.mockDisable).not.toHaveBeenCalled();
@@ -174,6 +184,8 @@ describe("useSettingsStore — exportSettings / importSettings", () => {
 
     it("[P0] autoStartEnabled 非 store key，不寫入 settings.json", async () => {
       const store = useSettingsStore();
+      // 正式流程在 mount 前就 await loadSettings()；未載入完成時匯入會被守門擋下
+      await store.loadSettings();
       await store.importSettings({ autoStartEnabled: true });
       expect(h.mockStoreData.has("autoStartEnabled")).toBe(false);
     });

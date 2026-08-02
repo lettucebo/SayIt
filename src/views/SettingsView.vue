@@ -33,6 +33,11 @@ import {
   HOTKEY_RECORDING_REJECTED,
 } from "../composables/useTauriEvents";
 import {
+  isSignInCancelledError,
+  isPolicyDeniedError,
+  findSignInErrorKey,
+} from "../lib/azureUserAuth";
+import {
   type PresetTriggerKey,
   type ComboTriggerKey,
   isCustomTriggerKey,
@@ -71,6 +76,7 @@ import {
 } from "../i18n/languageConfig";
 
 import { PROMPT_MODE_VALUES, type PromptMode, THEME_MODE_VALUES, type ThemeMode } from "../types/settings";
+import { AZURE_AUTH_MODE_VALUES, type AzureAuthMode } from "../types/settings";
 import {
   Card,
   CardContent,
@@ -131,6 +137,8 @@ import {
   Trash2,
   X,
   Upload,
+  CircleCheck,
+  LoaderCircle,
 } from "lucide-vue-next";
 import { openLogFolder } from "../lib/logger";
 import type { AudioInputDeviceInfo } from "../types/audio";
@@ -768,7 +776,7 @@ async function handleProviderChange(providerId: LlmProviderId) {
 const azureFeedback = useFeedbackMessage();
 const azureEnabledInput = ref(false);
 const azureEndpointInput = ref("");
-const azureAuthModeInput = ref<"key" | "entra">("key");
+const azureAuthModeInput = ref<AzureAuthMode>("key");
 const azureApiKeyInput = ref("");
 const azureTenantIdInput = ref("");
 const azureClientIdInput = ref("");
@@ -802,22 +810,27 @@ function loadAzureInputsFromStore() {
 async function handleSaveAzureConnection() {
   try {
     isSubmittingAzure.value = true;
-    await settingsStore.saveAzureConnection({
-      enabled: azureEnabledInput.value,
-      endpoint: azureEndpointInput.value,
-      authMode: azureAuthModeInput.value,
-      apiKey: azureApiKeyInput.value,
-      tenantId: azureTenantIdInput.value,
-      clientId: azureClientIdInput.value,
-      clientSecret: azureClientSecretInput.value,
-      apiVersion: azureApiVersionInput.value,
-    });
+    await handleSaveAzureConnectionOrThrow();
     azureFeedback.show("success", t("settings.azure.saved"));
   } catch (err) {
     azureFeedback.show("error", extractErrorMessage(err));
   } finally {
     isSubmittingAzure.value = false;
   }
+}
+
+/** 儲存連線設定但**不**吞錯——供需要「失敗就中止」的呼叫端使用（例如登入前置）。 */
+async function handleSaveAzureConnectionOrThrow() {
+  await settingsStore.saveAzureConnection({
+    enabled: azureEnabledInput.value,
+    endpoint: azureEndpointInput.value,
+    authMode: azureAuthModeInput.value,
+    apiKey: azureApiKeyInput.value,
+    tenantId: azureTenantIdInput.value,
+    clientId: azureClientIdInput.value,
+    clientSecret: azureClientSecretInput.value,
+    apiVersion: azureApiVersionInput.value,
+  });
 }
 
 async function handleToggleAzureEnabled(value: boolean) {
@@ -837,6 +850,94 @@ async function handleDeleteAzureConnection() {
     isSubmittingAzure.value = false;
   }
 }
+
+// ── Entra 使用者登入 ────────────────────────────────────────
+const isAzureSigningIn = ref(false);
+
+/**
+ * 登入前先把連線設定落地，再開瀏覽器登入。
+ *
+ * 順序刻意是「先存後登入」：若反過來，儲存失敗時登入已經成功，UI 會顯示
+ * 已登入但持久化的 endpoint/deployment 其實沒寫進去，狀態不一致。先存的話
+ * 任一步失敗都只會停在「設定已存、尚未登入」這個一致且可重試的狀態。
+ */
+async function handleAzureUserSignIn() {
+  // 在第一個 await 之前定格：等待瀏覽器登入期間輸入框仍可編輯，
+  // 若之後再讀一次，就會用「設定 A」的 endpoint 去配「身分 B」的 token。
+  const tenantId = azureTenantIdInput.value;
+  const clientId = azureClientIdInput.value;
+  try {
+    isAzureSigningIn.value = true;
+    await handleSaveAzureConnectionOrThrow();
+    azureFeedback.show("success", t("settings.azure.signInWaiting"));
+    const account = await settingsStore.signInAzureUserAccount({
+      tenantId,
+      clientId,
+    });
+    azureFeedback.show(
+      "success",
+      t("settings.azure.signInSuccess", {
+        account: account.username ?? account.name ?? "",
+      }),
+    );
+  } catch (err) {
+    const message = extractErrorMessage(err);
+    if (isSignInCancelledError(message)) {
+      azureFeedback.show("error", t("settings.azure.signInCancelled"));
+    } else if (isPolicyDeniedError(message)) {
+      // 保留 AADSTS 原文：使用者需要它去跟 IT 說明是哪條政策擋下的
+      azureFeedback.show(
+        "error",
+        `${t("settings.azure.signInPolicyDenied")} ${message}`,
+      );
+    } else {
+      // 訊息固定的錯誤翻成使用者看得懂的說明；其餘（含帶 AADSTS 說明的）
+      // 保留原文，那才是使用者拿去找 IT 的依據。
+      const key = findSignInErrorKey(message);
+      azureFeedback.show("error", key === null ? message : t(key));
+    }
+  } finally {
+    isAzureSigningIn.value = false;
+  }
+}
+
+async function handleAzureUserCancelSignIn() {
+  try {
+    await settingsStore.cancelAzureUserSignInFlow();
+  } catch (err) {
+    azureFeedback.show("error", extractErrorMessage(err));
+  }
+}
+
+async function handleAzureUserSignOut() {
+  try {
+    isSubmittingAzure.value = true;
+    await settingsStore.signOutAzureUserAccount();
+    azureFeedback.show("success", t("settings.azure.signOutSuccess"));
+  } catch (err) {
+    azureFeedback.show("error", extractErrorMessage(err));
+  } finally {
+    isSubmittingAzure.value = false;
+  }
+}
+
+const azureSignedInLabel = computed(() => {
+  const account = settingsStore.azureUserAccount;
+  if (!account) return "";
+  return account.username ?? account.name ?? "";
+});
+
+/**
+ * 「已登入」區塊只在輸入框與已登入帳號一致時顯示。
+ * 否則使用者改了 Tenant/Client ID 之後，畫面仍顯示上一組帳號的「已登入」，
+ * 而登入按鈕被藏起來，會誤以為新的設定已經生效。
+ */
+const isSignedInForCurrentInput = computed(() =>
+  settingsStore.matchesSignedInAccount(
+    azureTenantIdInput.value,
+    azureClientIdInput.value,
+  ),
+);
 
 async function handleSaveAzureChatDeployment() {
   try {
@@ -877,7 +978,10 @@ function azureConnectionIssue(deployment: string): string {
   if (!settingsStore.azureEnabled) return t("settings.azure.issueNotEnabled");
   if (settingsStore.azureEndpoint === "")
     return t("settings.azure.issueEndpoint");
-  if (settingsStore.azureAuthMode === "entra") {
+  if (settingsStore.azureAuthMode === "entraUser") {
+    if (!settingsStore.isAzureUserSignedIn)
+      return t("settings.azure.issueNotSignedIn");
+  } else if (settingsStore.azureAuthMode === "entra") {
     if (
       settingsStore.azureTenantId === "" ||
       settingsStore.azureClientId === "" ||
@@ -1672,6 +1776,16 @@ async function applyBackupImport() {
   }
 }
 
+// 設定可能在本 View mount 之後才載入完成（main-window.ts 先 app.mount()
+// 才 await loadSettings()）。載入完成時重新把持久化值同步進輸入欄位，
+// 否則畫面會停在空白，使用者也無從得知那不是真正的設定值。
+watch(
+  () => settingsStore.isSettingsLoaded,
+  (loaded) => {
+    if (loaded) loadAzureInputsFromStore();
+  },
+);
+
 onMounted(async () => {
   await replacementStore.ensureLoaded();
   // F5 fix: 先載入裝置列表，完成後再啟動預覽（避免 cpal 並行 host 查詢）
@@ -2069,8 +2183,10 @@ onBeforeUnmount(() => {
           <Label>{{ $t("settings.azure.authModeLabel") }}</Label>
           <RadioGroup
             :model-value="azureAuthModeInput"
-            class="grid grid-cols-2 gap-2"
-            @update:model-value="(v: unknown) => (azureAuthModeInput = v as 'key' | 'entra')"
+            class="grid gap-2 sm:grid-cols-3"
+            @update:model-value="(v: unknown) => {
+              if (AZURE_AUTH_MODE_VALUES.includes(v as AzureAuthMode)) azureAuthModeInput = v as AzureAuthMode;
+            }"
           >
             <Label
               for="azure-auth-key"
@@ -2079,6 +2195,15 @@ onBeforeUnmount(() => {
             >
               <RadioGroupItem id="azure-auth-key" value="key" class="!size-0 !border-0 !shadow-none overflow-hidden" />
               <span class="text-sm font-medium">{{ $t("settings.azure.authKey") }}</span>
+            </Label>
+            <Label
+              for="azure-auth-entra-user"
+              class="flex cursor-pointer items-center gap-2.5 rounded-md border border-border p-3 transition-colors"
+              :class="azureAuthModeInput === 'entraUser' ? 'border-primary bg-primary/5' : 'hover:bg-muted/50'"
+            >
+              <RadioGroupItem id="azure-auth-entra-user" value="entraUser" class="!size-0 !border-0 !shadow-none overflow-hidden" />
+              <span class="min-w-0 truncate text-sm font-medium">{{ $t("settings.azure.authEntraUser") }}</span>
+              <Badge variant="secondary" class="ml-auto shrink-0">{{ $t("settings.azure.recommended") }}</Badge>
             </Label>
             <Label
               for="azure-auth-entra"
@@ -2104,6 +2229,45 @@ onBeforeUnmount(() => {
               {{ isAzureApiKeyVisible ? $t('settings.apiKey.hide') : $t('settings.apiKey.show') }}
             </Button>
           </div>
+        </div>
+
+        <div v-else-if="azureAuthModeInput === 'entraUser'" class="space-y-2">
+          <p class="text-sm text-muted-foreground leading-relaxed">
+            {{ $t("settings.azure.entraUserDescription") }}
+          </p>
+          <Label for="azure-user-tenant-id">{{ $t("settings.azure.tenantIdLabel") }}</Label>
+          <Input id="azure-user-tenant-id" v-model="azureTenantIdInput" class="font-mono text-xs" />
+          <Label for="azure-user-client-id">{{ $t("settings.azure.clientIdLabel") }}</Label>
+          <Input id="azure-user-client-id" v-model="azureClientIdInput" class="font-mono text-xs" />
+
+          <div
+            v-if="isSignedInForCurrentInput"
+            class="flex items-center justify-between rounded-md border border-border bg-muted/30 p-3"
+          >
+            <div class="flex items-center gap-2">
+              <CircleCheck class="size-4 text-green-400" />
+              <span class="text-sm">{{ $t("settings.azure.signedInAs", { account: azureSignedInLabel }) }}</span>
+            </div>
+            <Button variant="outline" size="sm" :disabled="isSubmittingAzure" @click="handleAzureUserSignOut">
+              {{ $t("settings.azure.signOut") }}
+            </Button>
+          </div>
+          <div v-else-if="isAzureSigningIn" class="flex items-center justify-between rounded-md border border-border p-3">
+            <div class="flex items-center gap-2">
+              <LoaderCircle class="size-4 animate-spin text-muted-foreground" />
+              <span class="text-sm text-muted-foreground">{{ $t("settings.azure.signInWaiting") }}</span>
+            </div>
+            <Button variant="outline" size="sm" @click="handleAzureUserCancelSignIn">
+              {{ $t("settings.azure.signInCancel") }}
+            </Button>
+          </div>
+          <Button
+            v-else
+            :disabled="azureTenantIdInput.trim() === '' || azureClientIdInput.trim() === ''"
+            @click="handleAzureUserSignIn"
+          >
+            {{ $t("settings.azure.signIn") }}
+          </Button>
         </div>
 
         <div v-else class="space-y-2">

@@ -88,10 +88,12 @@ describe("Azure provider", () => {
       expect(body.max_tokens).toBeUndefined();
     });
 
-    it("[P0] entra 模式：Authorization Bearer", () => {
+    it("[P0] bearer 模式：Authorization Bearer", () => {
+      // 服務主體（client secret）與使用者登入（PKCE）都映射到同一個 wire 值 "bearer"；
+      // 下游只需要知道要送哪種 header，不需要知道 token 怎麼來的。
       const azure: AzureRequestOptions = {
         endpoint: "https://r.services.ai.azure.com/",
-        authMode: "entra",
+        authMode: "bearer",
         authValue: "bearer-token-xyz",
       };
       const { url, init } = buildFetchParams("azure", REQUEST, "", azure);
