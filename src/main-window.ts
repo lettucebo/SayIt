@@ -80,6 +80,20 @@ async function bootstrap() {
     captureError(err, { source: "settings-load" });
   }
 
+  // 取代規則的 createdAt 一次性遷移必須在 mount 之前完成：
+  // 此時尚無 UI 可做 CRUD，且 HUD 不執行遷移 → 不會有跨視窗
+  // read-modify-write 互相覆蓋。遷移失敗不可阻擋 mount（會變白畫面）。
+  try {
+    const { useReplacementStore } = await import("./stores/useReplacementStore");
+    await useReplacementStore().migrateRuleCreatedAt();
+  } catch (err) {
+    console.error(
+      "[main-window] replacement createdAt migration failed:",
+      extractErrorMessage(err),
+    );
+    captureError(err, { source: "replacement-created-at-migration" });
+  }
+
   app.mount("#app");
   await router.isReady();
 
