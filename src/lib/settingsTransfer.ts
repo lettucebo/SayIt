@@ -98,8 +98,13 @@ export interface BackupContents {
 export interface BackupPayload {
   settings: SettingsPayload | null;
   dictionary: VocabularyExportFile | null;
-  /** 文字取代規則；舊備份為 null */
-  replacements?: ReplacementRule[] | null;
+  /**
+   * 文字取代規則；舊備份為 null。
+   * 解析端刻意用 `unknown[]`：這裡只做形狀檢查，逐條清洗（含補 `createdAt`）
+   * 交給 replacement store 的 `sanitizeRuleList`。若宣告成 `ReplacementRule[]`，
+   * 缺 `createdAt` 的舊備份會違反型別不變量。
+   */
+  replacements?: unknown[] | null;
 }
 
 export interface EncryptionMeta {
@@ -506,7 +511,7 @@ function normalizePayload(raw: Partial<BackupPayload>): BackupPayload {
       : null;
   // 只做形狀檢查，逐條規則的清洗交給 replacement store 的 sanitizeRuleList
   const replacements = Array.isArray(raw.replacements)
-    ? (raw.replacements as ReplacementRule[])
+    ? raw.replacements
     : null;
   return { settings, dictionary, replacements };
 }

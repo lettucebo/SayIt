@@ -21,6 +21,7 @@ import {
 import { buildExportFile } from "../../src/lib/vocabularyTransfer";
 import type { VocabularyExportFile } from "../../src/types/vocabulary";
 import type { ReplacementRule } from "../../src/types/replacement";
+import { createReplacementRule } from "../support/factories";
 import {
   EXPORTABLE_SETTING_KEYS,
   sanitizeSettingsPayload as _sanitizeCheck,
@@ -109,14 +110,14 @@ describe("buildBackupFile / serializeBackup", () => {
 
   it("[P0] 取代規則納入備份並可完整還原", () => {
     const rules: ReplacementRule[] = [
-      {
+      createReplacementRule({
         id: "r1",
         patterns: ["雷特西", "來特西"],
         replacement: "latency",
         isRegex: false,
         timing: "afterAI",
         enabled: true,
-      },
+      }),
     ];
     const file = buildPlainBackup(sampleSettings, null, rules);
     expect(file.contents.replacements).toBe(true);

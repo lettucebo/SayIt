@@ -11,6 +11,10 @@ import {
 } from "../stores/useSettingsStore";
 import { extractErrorMessage } from "../lib/errorUtils";
 import { useFeedbackMessage } from "../composables/useFeedbackMessage";
+import {
+  useReplacementTableSort,
+  type ReplacementSortKey,
+} from "../composables/useReplacementTableSort";
 import { useHistoryStore } from "../stores/useHistoryStore";
 import { useVocabularyStore } from "../stores/useVocabularyStore";
 import { useReplacementStore } from "../stores/useReplacementStore";
@@ -120,6 +124,9 @@ import {
 } from "@/components/ui/table";
 import {
   AtSign,
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
   Bug,
   CircleAlert,
   Download,
@@ -153,7 +160,7 @@ const settingsStore = useSettingsStore();
 const historyStore = useHistoryStore();
 const vocabularyStore = useVocabularyStore();
 const replacementStore = useReplacementStore();
-const { t } = useI18n();
+const { t, locale } = useI18n();
 
 declare const __APP_VERSION__: string;
 
@@ -598,6 +605,45 @@ const replacementTimingOptions = computed(() =>
   })),
 );
 
+const {
+  sortState: replacementSortState,
+  toggleSort: toggleReplacementSort,
+  sortedList: sortedReplacementRules,
+} = useReplacementTableSort(
+  () => replacementStore.rules,
+  () => locale.value,
+);
+
+function replacementSortIconFor(key: ReplacementSortKey) {
+  if (replacementSortState.value.key !== key) return ArrowUpDown;
+  return replacementSortState.value.direction === "asc" ? ArrowUp : ArrowDown;
+}
+
+function replacementAriaSortFor(
+  key: ReplacementSortKey,
+): "ascending" | "descending" | "none" {
+  if (replacementSortState.value.key !== key) return "none";
+  return replacementSortState.value.direction === "asc"
+    ? "ascending"
+    : "descending";
+}
+
+/**
+ * `createdAt` 是 ISO 8601 UTC（帶 `Z`），可直接 `new Date()` 解析，
+ * 不像 SQLite 的 `created_at` 需要自行補 "Z"。
+ */
+function formatReplacementCreatedAt(createdAt: string): string {
+  const date = new Date(createdAt);
+  if (Number.isNaN(date.getTime())) return createdAt;
+  return date.toLocaleString(locale.value, {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 function isReplacementTiming(value: unknown): value is ReplacementTiming {
   return (
     typeof value === "string" &&
@@ -699,12 +745,9 @@ async function handleToggleReplacementRule(rule: ReplacementRule, enabled: boole
 
 async function handleDeleteReplacementRule(rule: ReplacementRule) {
   try {
-    const removed = await replacementStore.removeRule(rule.id);
-    if (!removed) {
-      replacementFeedback.show(
-        "error",
-        replacementErrorMessage("persistence-failed"),
-      );
+    const result = await replacementStore.removeRule(rule.id);
+    if (!result.valid) {
+      replacementFeedback.show("error", replacementErrorMessage(result.error));
       return;
     }
     if (editingReplacementRuleId.value === rule.id) resetReplacementForm();
@@ -1567,6 +1610,8 @@ function getBackupErrorMessage(
       return t("settings.backup.errorPasswordRequired");
     case "CRYPTO_UNAVAILABLE":
       return t("settings.backup.errorCryptoUnavailable");
+    case "REPLACEMENTS_LOAD_FAILED":
+      return t("settings.backup.errorReplacementsLoadFailed");
     default:
       return t(
         operation === "export"
@@ -1719,6 +1764,7 @@ async function applyBackupImport() {
 
     const deviceBeforeImport = settingsStore.selectedAudioInputDeviceName;
     let settingsApplied = false;
+    let replacementsFailed = false;
     let dictionaryResult: {
       added: number;
       merged: number;
@@ -1731,7 +1777,18 @@ async function applyBackupImport() {
       settingsApplied = true;
       // 取代規則隨設定一起還原（舊備份沒有此區塊 → 維持現有規則不動）
       if (payload.replacements) {
-        await replacementStore.importRules(payload.replacements);
+        const replacementsResult = await replacementStore.importRules(
+          payload.replacements,
+        );
+        // 不 throw：設定確實已套用，統一報「匯入失敗」會誤導使用者以為什麼都沒變。
+        // 改為分項回報，讓使用者知道要重試哪一部分。
+        if (!replacementsResult.valid) {
+          replacementsFailed = true;
+          captureError(
+            new Error(replacementsResult.error ?? "unknown"),
+            { source: "settings-backup-import-replacements" },
+          );
+        }
       }
       // 音訊裝置若有變更，重啟預覽以對齊新裝置
       if (
@@ -1758,12 +1815,22 @@ async function applyBackupImport() {
         }),
       );
     }
-    backupFeedback.show(
-      "success",
-      t("settings.backup.importSuccess", { detail: parts.join("；") }),
-    );
-    parsedBackup.value = null;
-    importPassword.value = "";
+    if (replacementsFailed) {
+      backupFeedback.show(
+        "error",
+        t("settings.backup.importReplacementsFailed", {
+          detail: parts.join("；"),
+        }),
+      );
+      // 保留已解析的備份與密碼，讓使用者可直接重試，不必重新選檔／重打密碼
+    } else {
+      backupFeedback.show(
+        "success",
+        t("settings.backup.importSuccess", { detail: parts.join("；") }),
+      );
+      parsedBackup.value = null;
+      importPassword.value = "";
+    }
   } catch (err) {
     const code = extractErrorMessage(err);
     backupFeedback.show("error", getBackupErrorMessage(code));
@@ -3052,20 +3119,90 @@ onBeforeUnmount(() => {
         </div>
 
         <div v-else class="rounded-lg border border-border">
+          <p class="border-b border-border px-4 py-2 text-xs text-muted-foreground" data-testid="replacement-apply-order-hint">
+            {{ $t("settings.replacements.applyOrderHint") }}
+          </p>
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>{{ $t("settings.replacements.patternsHeader") }}</TableHead>
-                <TableHead>{{ $t("settings.replacements.replacementHeader") }}</TableHead>
-                <TableHead>{{ $t("settings.replacements.timingHeader") }}</TableHead>
-                <TableHead>{{ $t("settings.replacements.typeHeader") }}</TableHead>
-                <TableHead>{{ $t("settings.replacements.enabledHeader") }}</TableHead>
+                <TableHead :aria-sort="replacementAriaSortFor('patterns')">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    class="-ml-2 h-8"
+                    data-testid="replacement-sort-patterns"
+                    @click="toggleReplacementSort('patterns')"
+                  >
+                    {{ $t("settings.replacements.patternsHeader") }}
+                    <component :is="replacementSortIconFor('patterns')" class="ml-1 h-3.5 w-3.5" />
+                  </Button>
+                </TableHead>
+                <TableHead :aria-sort="replacementAriaSortFor('replacement')">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    class="-ml-2 h-8"
+                    data-testid="replacement-sort-replacement"
+                    @click="toggleReplacementSort('replacement')"
+                  >
+                    {{ $t("settings.replacements.replacementHeader") }}
+                    <component :is="replacementSortIconFor('replacement')" class="ml-1 h-3.5 w-3.5" />
+                  </Button>
+                </TableHead>
+                <TableHead :aria-sort="replacementAriaSortFor('timing')">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    class="-ml-2 h-8"
+                    data-testid="replacement-sort-timing"
+                    @click="toggleReplacementSort('timing')"
+                  >
+                    {{ $t("settings.replacements.timingHeader") }}
+                    <component :is="replacementSortIconFor('timing')" class="ml-1 h-3.5 w-3.5" />
+                  </Button>
+                </TableHead>
+                <TableHead :aria-sort="replacementAriaSortFor('isRegex')">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    class="-ml-2 h-8"
+                    data-testid="replacement-sort-type"
+                    @click="toggleReplacementSort('isRegex')"
+                  >
+                    {{ $t("settings.replacements.typeHeader") }}
+                    <component :is="replacementSortIconFor('isRegex')" class="ml-1 h-3.5 w-3.5" />
+                  </Button>
+                </TableHead>
+                <TableHead :aria-sort="replacementAriaSortFor('enabled')">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    class="-ml-2 h-8"
+                    data-testid="replacement-sort-enabled"
+                    @click="toggleReplacementSort('enabled')"
+                  >
+                    {{ $t("settings.replacements.enabledHeader") }}
+                    <component :is="replacementSortIconFor('enabled')" class="ml-1 h-3.5 w-3.5" />
+                  </Button>
+                </TableHead>
+                <TableHead :aria-sort="replacementAriaSortFor('createdAt')">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    class="-ml-2 h-8"
+                    data-testid="replacement-sort-created-at"
+                    @click="toggleReplacementSort('createdAt')"
+                  >
+                    {{ $t("settings.replacements.createdAtHeader") }}
+                    <component :is="replacementSortIconFor('createdAt')" class="ml-1 h-3.5 w-3.5" />
+                  </Button>
+                </TableHead>
                 <TableHead class="text-right">{{ $t("settings.replacements.actionsHeader") }}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               <TableRow
-                v-for="rule in replacementStore.rules"
+                v-for="rule in sortedReplacementRules"
                 :key="rule.id"
                 data-testid="replacement-rule-row"
               >
@@ -3099,6 +3236,11 @@ onBeforeUnmount(() => {
                     data-testid="replacement-row-enabled-switch"
                     @update:model-value="handleToggleReplacementRule(rule, $event)"
                   />
+                </TableCell>
+                <TableCell class="whitespace-nowrap text-sm text-muted-foreground">
+                  <span data-testid="replacement-row-created-at" :title="rule.createdAt">
+                    {{ formatReplacementCreatedAt(rule.createdAt) }}
+                  </span>
                 </TableCell>
                 <TableCell>
                   <div class="flex justify-end gap-2">

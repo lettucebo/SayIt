@@ -12,5 +12,6 @@ export const createReplacementRule = (
   isRegex: false,
   timing: "beforeAI",
   enabled: true,
+  createdAt: faker.date.recent().toISOString(),
   ...overrides,
 });
