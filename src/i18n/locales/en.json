@@ -612,8 +612,8 @@
     },
     "upgradeNotice": {
       "title": "SayIt Update Summary",
-      "item1": "Connect to Azure without a client secret — if your company's security policy rules out client secrets (a long-lived credential that hands over the whole app's permissions if it leaks), you can now sign in with your own work account instead. Under Settings → Azure / Microsoft Foundry, set the auth method to \"Entra ID sign-in\"; the button opens your browser on Microsoft's standard sign-in page, so MFA and Conditional Access still apply. Afterwards no long-lived secret remains in the settings file — only a credential in your OS credential store. You'll need an App Registration and the \"Cognitive Services OpenAI User\" role first; see the setup guide for the steps.",
-      "item2": "Your settings can no longer be overwritten with blanks. The main window used to render before reading the settings file, leaving every input empty in between — and a save triggered in that window would wipe your endpoint and API keys. A wiped key is gone for good. Settings are now loaded before the window renders, and if loading fails the window still opens so you can act, but writes are refused rather than clobbering your settings with defaults.",
+      "item1": "Sort replacement rules by six data columns: As your rule list grows, finding a rule by when it runs, whether it is enabled, or when you created it used to mean scanning a fixed order. All six data columns are now sortable, with newest rules first by default. Sorting changes only the display, never the order in which rules are applied.",
+      "item2": "Keep replacement rules safe when storage fails: A settings-file read error used to look like an empty list, so a later save could overwrite your existing rules. SayIt now refuses normal edits and exports after a read failure, saves successful changes in order, and preserves older entries it cannot yet recognize.",
       "dismiss": "Got it"
     }
   },
