@@ -71,6 +71,22 @@ jobs:
               --jq "[.[] | select(.tag_name==\"$RELEASE_TAG\")] | .[0].id // empty"
           }
 
+          # Draft release 建立後，release list API 可能短暫尚未回傳新項目。
+          # 有限重試後仍取不到才失敗，避免把空的 release ID 傳給平行 build job。
+          wait_for_id() {
+            local attempt
+            local id
+            for attempt in {1..10}; do
+              id="$(find_id)"
+              if [ -n "$id" ]; then
+                printf '%s\n' "$id"
+                return 0
+              fi
+              sleep 2
+            done
+            return 1
+          }
+
           ID="$(find_id)"
           if [ -n "$ID" ]; then
             echo "Reusing existing release $ID for $RELEASE_TAG"
@@ -79,8 +95,11 @@ jobs:
               --repo "$GITHUB_REPOSITORY" \
               --title "SayIt v$RELEASE_VERSION" \
               --notes-file release-notes.md \
-              --draft
-            ID="$(find_id)"
+              --draft \
+              --verify-tag
+            if ! ID="$(wait_for_id)"; then
+              ID=""
+            fi
           fi
 
           if [ -z "$ID" ]; then
