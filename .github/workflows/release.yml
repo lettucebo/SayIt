@@ -232,15 +232,6 @@ jobs:
     needs: [create-release, build]
     runs-on: ubuntu-24.04-arm
     steps:
-      - name: Publish GitHub Release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          # 用 release id 而非 tag：tag 查詢在有多個同 tag release 時會挑錯對象。
-          gh api -X PATCH \
-            "repos/$GITHUB_REPOSITORY/releases/${{ needs.create-release.outputs.release_id }}" \
-            -F draft=false
-
       - name: Verify release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -274,3 +265,13 @@ jobs:
               exit 1
             fi
           done
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # 資產驗證通過後才公開，避免殘缺的 draft release 被使用者取得。
+          # 用 release id 而非 tag：tag 查詢在有多個同 tag release 時會挑錯對象。
+          gh api -X PATCH \
+            "repos/$GITHUB_REPOSITORY/releases/${{ needs.create-release.outputs.release_id }}" \
+            -F draft=false
