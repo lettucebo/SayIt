@@ -4917,7 +4917,7 @@ dependencies = [
 
 [[package]]
 name = "sayit"
-version = "0.15.3"
+version = "0.15.5"
 dependencies = [
  "apple-native-keyring-store",
  "arboard",
