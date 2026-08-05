@@ -16,7 +16,8 @@ const MAX_WHISPER_PROMPT_TOKENS: usize = 200;
 /// 單一詞的字元上限：超過視為異常（避免巨型 request），組 prompt 時略過。
 const MAX_WHISPER_TERM_CHARS: usize = 100;
 const MINIMUM_AUDIO_SIZE: usize = 1000;
-/// Groq free tier 上限 25MB
+/// SayIt 的保守音檔上限。Groq 的免費層同樣限制 25MB；MAI 服務雖允許 300MB，
+/// 但現有錄音與重試流程會完整複製音訊，不能安全地宣稱支援更大的檔案。
 const MAX_AUDIO_FILE_SIZE: usize = 25 * 1024 * 1024;
 const DEFAULT_WHISPER_MODEL_ID: &str = "whisper-large-v3";
 const REQUEST_TIMEOUT_SECS: u64 = 120;
@@ -37,6 +38,13 @@ const GEMINI_API_BASE: &str = "https://generativelanguage.googleapis.com/v1beta"
 const MAX_GEMINI_INLINE_AUDIO_SIZE: usize = 14 * 1024 * 1024;
 /// Gemini request body 硬上限（Google 十進位 20MB）；組完 body 後二次驗證實際大小。
 const MAX_GEMINI_REQUEST_BODY_SIZE: usize = 20_000_000;
+
+// ── Azure AI Speech MAI-Transcribe ──
+const MAI_TRANSCRIPTION_MODEL: &str = "mai-transcribe-1.5";
+const MAI_TRANSCRIPTION_API_VERSION: &str = "2025-10-15";
+const MAI_MAX_CANDIDATE_LOCALES: usize = 1;
+const MAI_CANDIDATE_LOCALES: [&str; 5] = ["zh-TW", "zh-CN", "en-US", "ja-JP", "ko-KR"];
+const MAI_MAX_PHRASE_LIST_TERMS: usize = 500;
 
 // ========== State ==========
 
@@ -136,6 +144,39 @@ struct WhisperVerboseResponse {
 #[derive(serde::Deserialize)]
 struct WhisperSegment {
     no_speech_prob: f64,
+}
+
+// ========== Azure AI Speech MAI API Response ==========
+
+#[derive(serde::Deserialize)]
+struct MaiTranscriptionResponse {
+    #[serde(rename = "combinedPhrases")]
+    combined_phrases: Option<Vec<MaiCombinedPhrase>>,
+    phrases: Option<Vec<MaiPhrase>>,
+}
+
+#[derive(serde::Deserialize)]
+struct MaiCombinedPhrase {
+    text: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct MaiPhrase {
+    text: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct AzureSpeechErrorEnvelope {
+    code: Option<String>,
+    message: Option<String>,
+    #[serde(rename = "innerError")]
+    inner_error: Option<AzureSpeechInnerError>,
+}
+
+#[derive(serde::Deserialize)]
+struct AzureSpeechInnerError {
+    code: Option<String>,
+    message: Option<String>,
 }
 
 // ========== Helpers ==========
@@ -467,6 +508,37 @@ fn ensure_azure_endpoint_allowed(endpoint: &str) -> Result<(), TranscriptionErro
     )))
 }
 
+/// MAI-Transcribe 僅接受 Azure AI Speech resource endpoint，不能誤填 Azure OpenAI
+/// 或 Foundry project endpoint。兩種驗證模式皆用這個限制，避免外送 key 或錄音。
+fn ensure_mai_endpoint_allowed(endpoint: &str) -> Result<(), TranscriptionError> {
+    let url = reqwest::Url::parse(endpoint).map_err(|e| {
+        TranscriptionError::RequestFailed(format!("Invalid Azure AI Speech endpoint: {e}"))
+    })?;
+
+    if url.scheme() != "https" {
+        return Err(TranscriptionError::RequestFailed(
+            "Azure AI Speech endpoint must use https".to_string(),
+        ));
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err(TranscriptionError::RequestFailed(
+            "Azure AI Speech endpoint must not contain userinfo".to_string(),
+        ));
+    }
+
+    let host = url
+        .host_str()
+        .unwrap_or_default()
+        .trim_end_matches('.')
+        .to_ascii_lowercase();
+    if host.ends_with(".cognitiveservices.azure.com") {
+        return Ok(());
+    }
+    Err(TranscriptionError::RequestFailed(format!(
+        "Azure AI Speech endpoint host not allowed: {host}"
+    )))
+}
+
 /// Azure OpenAI Whisper（deployment-path）轉錄設定。
 struct AzureWhisperConfig {
     endpoint: String,
@@ -474,6 +546,14 @@ struct AzureWhisperConfig {
     api_version: String,
     /// true → `Authorization: Bearer`；false → `api-key` header
     use_bearer: bool,
+}
+
+/// Azure AI Speech Fast Transcription（MAI-Transcribe）設定。
+struct MaiTranscribeConfig {
+    endpoint: String,
+    use_bearer: bool,
+    candidate_locales: Vec<String>,
+    use_verbatim_style: bool,
 }
 
 /// 依 provider 參數建出 Azure 設定；非 azure 回 None。
@@ -487,6 +567,7 @@ fn build_azure_whisper_config(
     if provider.as_deref() != Some("azure") {
         return Ok(None);
     }
+
     let endpoint = endpoint
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
@@ -514,6 +595,189 @@ fn build_azure_whisper_config(
         api_version,
         use_bearer,
     }))
+}
+
+fn normalize_mai_candidate_locales(
+    locales: Option<Vec<String>>,
+) -> Result<Vec<String>, TranscriptionError> {
+    let mut normalized = Vec::new();
+    for locale in locales.unwrap_or_default() {
+        let locale = locale.trim();
+        if locale.is_empty() {
+            continue;
+        }
+        if !MAI_CANDIDATE_LOCALES.contains(&locale) {
+            return Err(TranscriptionError::RequestFailed(format!(
+                "Unsupported MAI candidate locale: {locale}"
+            )));
+        }
+        if !normalized.iter().any(|existing| existing == locale) {
+            normalized.push(locale.to_string());
+        }
+    }
+    if normalized.len() > MAI_MAX_CANDIDATE_LOCALES {
+        return Err(TranscriptionError::RequestFailed(format!(
+            "MAI supports at most {MAI_MAX_CANDIDATE_LOCALES} candidate locales"
+        )));
+    }
+    Ok(normalized)
+}
+
+fn parse_mai_transcribe_style(style: Option<&str>) -> Result<bool, TranscriptionError> {
+    match style.map(str::trim) {
+        None | Some("") | Some("default") => Ok(false),
+        Some("verbatim") => Ok(true),
+        Some(other) => Err(TranscriptionError::RequestFailed(format!(
+            "Unknown MAI transcribe style: {other}"
+        ))),
+    }
+}
+
+fn build_mai_transcribe_config(
+    endpoint: Option<String>,
+    auth_mode: Option<String>,
+    candidate_locales: Option<Vec<String>>,
+    transcribe_style: Option<String>,
+) -> Result<MaiTranscribeConfig, TranscriptionError> {
+    let endpoint = endpoint
+        .map(|value| value.trim().trim_end_matches('/').to_string())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            TranscriptionError::RequestFailed("Azure AI Speech endpoint missing".to_string())
+        })?;
+    ensure_mai_endpoint_allowed(&endpoint)?;
+    Ok(MaiTranscribeConfig {
+        endpoint,
+        use_bearer: parse_auth_header_mode(auth_mode.as_deref())?,
+        candidate_locales: normalize_mai_candidate_locales(candidate_locales)?,
+        use_verbatim_style: parse_mai_transcribe_style(transcribe_style.as_deref())?,
+    })
+}
+
+fn build_mai_definition(
+    candidate_locales: &[String],
+    vocabulary_terms: Option<&[String]>,
+    use_verbatim_style: bool,
+) -> serde_json::Value {
+    let mut definition = serde_json::Map::new();
+    if !candidate_locales.is_empty() {
+        definition.insert(
+            "locales".to_string(),
+            serde_json::Value::Array(
+                candidate_locales
+                    .iter()
+                    .cloned()
+                    .map(serde_json::Value::String)
+                    .collect(),
+            ),
+        );
+    }
+
+    let phrases: Vec<String> = vocabulary_terms
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|term| {
+            let term = term.trim();
+            (term.chars().count() <= MAX_WHISPER_TERM_CHARS && !term.is_empty())
+                .then(|| term.to_string())
+        })
+        .take(MAI_MAX_PHRASE_LIST_TERMS)
+        .collect();
+    if !phrases.is_empty() {
+        definition.insert(
+            "phraseList".to_string(),
+            serde_json::json!({ "phrases": phrases }),
+        );
+    }
+
+    let mut enhanced_mode = serde_json::Map::new();
+    enhanced_mode.insert("enabled".to_string(), serde_json::Value::Bool(true));
+    enhanced_mode.insert(
+        "model".to_string(),
+        serde_json::Value::String(MAI_TRANSCRIPTION_MODEL.to_string()),
+    );
+    if use_verbatim_style {
+        enhanced_mode.insert(
+            "transcribeStyle".to_string(),
+            serde_json::Value::String("verbatim".to_string()),
+        );
+    }
+    definition.insert(
+        "enhancedMode".to_string(),
+        serde_json::Value::Object(enhanced_mode),
+    );
+    serde_json::Value::Object(definition)
+}
+
+fn parse_mai_response(response: MaiTranscriptionResponse) -> String {
+    let combined_text = response
+        .combined_phrases
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|phrase| phrase.text.as_deref())
+        .map(str::trim)
+        .find(|text| !text.is_empty());
+    if let Some(text) = combined_text {
+        return text.to_string();
+    }
+
+    response
+        .phrases
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|phrase| phrase.text.as_deref())
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn format_mai_error(status: u16, body: &str) -> String {
+    let parsed = serde_json::from_str::<AzureSpeechErrorEnvelope>(body).ok();
+    let code = parsed
+        .as_ref()
+        .and_then(|error| {
+            error
+                .inner_error
+                .as_ref()
+                .and_then(|inner| inner.code.as_deref())
+                .or(error.code.as_deref())
+        })
+        .unwrap_or("UnknownError");
+    let message = parsed
+        .as_ref()
+        .and_then(|error| {
+            error
+                .inner_error
+                .as_ref()
+                .and_then(|inner| inner.message.as_deref())
+                .or(error.message.as_deref())
+        })
+        .unwrap_or(body)
+        .trim();
+
+    let detail = match code {
+        "NoLanguageIdentified" => "No language was identified in the audio.",
+        "AudioLengthLimitExceeded" => "The audio exceeds the Azure AI Speech length limit.",
+        "InvalidLocale" => "One or more MAI candidate locales are invalid.",
+        "Unauthorized" => "Azure AI Speech authentication failed.",
+        "Forbidden" => {
+            "Azure AI Speech access was denied. Assign the Cognitive Services Speech User role to this resource."
+        }
+        "NotFound" => {
+            "The Azure AI Speech endpoint, region, model, or API version was not found."
+        }
+        "InvalidRequest" if message.contains("Enhanced mode with model is currently not supported") => {
+            "This Azure AI Speech resource region does not currently support MAI-Transcribe-1.5. Use a Speech resource in a supported MAI region."
+        }
+        "InvalidRequest" if message.contains("requires at most one locale") => {
+            "MAI-Transcribe-1.5 Fast Transcription accepts at most one language locale."
+        }
+        _ => message,
+    };
+    format!("MAI-Transcribe API error ({status}, {code}): {detail}")
 }
 
 // ========== Shared Transcription Logic ==========
@@ -608,13 +872,14 @@ fn resolve_transcription_endpoint(azure: &Option<AzureWhisperConfig>) -> (String
     }
 }
 
-/// 已解析的轉錄 provider：Whisper 系（Groq/Azure，multipart+verbose_json）或 Gemini。
+/// 已解析的轉錄 provider：Whisper 系、Gemini 或 Azure AI Speech MAI。
 enum ResolvedProvider {
     /// Groq（azure=None）或 Azure（azure=Some）
     Whisper {
         azure: Option<AzureWhisperConfig>,
     },
     Gemini,
+    Mai(MaiTranscribeConfig),
 }
 
 /// 依前端 provider 值解析。未知 provider fail-closed 報錯（避免壞設定把 key 送錯服務）。
@@ -624,6 +889,8 @@ fn resolve_provider(
     deployment: Option<String>,
     api_version: Option<String>,
     auth_mode: Option<String>,
+    candidate_locales: Option<Vec<String>>,
+    transcribe_style: Option<String>,
 ) -> Result<ResolvedProvider, TranscriptionError> {
     match provider.as_deref() {
         None | Some("groq") => Ok(ResolvedProvider::Whisper { azure: None }),
@@ -639,10 +906,32 @@ fn resolve_provider(
             Ok(ResolvedProvider::Whisper { azure: Some(cfg) })
         }
         Some("gemini") => Ok(ResolvedProvider::Gemini),
+        Some("mai") => Ok(ResolvedProvider::Mai(build_mai_transcribe_config(
+            endpoint,
+            auth_mode,
+            candidate_locales,
+            transcribe_style,
+        )?)),
         Some(other) => Err(TranscriptionError::RequestFailed(format!(
             "Unknown transcription provider: {other}"
         ))),
     }
+}
+
+fn validate_provider_audio_size(
+    provider: &ResolvedProvider,
+    raw_len: usize,
+) -> Result<(), TranscriptionError> {
+    if matches!(provider, ResolvedProvider::Gemini) {
+        return validate_gemini_audio_size(raw_len);
+    }
+    if raw_len > MAX_AUDIO_FILE_SIZE {
+        return Err(TranscriptionError::FileTooLarge {
+            size_mb: raw_len as f64 / (1024.0 * 1024.0),
+            limit_mb: MAX_AUDIO_FILE_SIZE / (1024 * 1024),
+        });
+    }
+    Ok(())
 }
 
 /// 送出目標（URL + 協定形狀）。
@@ -654,6 +943,12 @@ enum TranscriptionTarget {
     },
     Gemini {
         url: String,
+    },
+    Mai {
+        url: String,
+        use_bearer: bool,
+        candidate_locales: Vec<String>,
+        use_verbatim_style: bool,
     },
 }
 
@@ -683,6 +978,15 @@ fn resolve_transcription_target(provider: &ResolvedProvider, model: &str) -> Tra
                 "{GEMINI_API_BASE}/models/{}:generateContent",
                 resolve_gemini_model(model)
             ),
+        },
+        ResolvedProvider::Mai(config) => TranscriptionTarget::Mai {
+            url: format!(
+                "{}/speechtotext/transcriptions:transcribe?api-version={MAI_TRANSCRIPTION_API_VERSION}",
+                config.endpoint
+            ),
+            use_bearer: config.use_bearer,
+            candidate_locales: config.candidate_locales.clone(),
+            use_verbatim_style: config.use_verbatim_style,
         },
     }
 }
@@ -803,6 +1107,84 @@ async fn attempt_whisper_request(
         raw_text,
         no_speech_probability: Some(no_speech_probability),
         // Groq/Azure Whisper 依音訊時長計費，不回報 token
+        token_usage: None,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn attempt_mai_request(
+    wav_data: Vec<u8>,
+    transcription_state: &TranscriptionState,
+    api_key: &str,
+    vocabulary_terms: Option<&[String]>,
+    url: &str,
+    use_bearer: bool,
+    candidate_locales: &[String],
+    use_verbatim_style: bool,
+) -> Result<AttemptOutcome, AttemptFailure> {
+    let no_retry = |error: TranscriptionError| AttemptFailure {
+        error,
+        kind: FailureKind::NoRetry,
+    };
+    let audio_part = reqwest::multipart::Part::bytes(wav_data)
+        .file_name("recording.wav")
+        .mime_str("audio/wav")
+        .map_err(|error| no_retry(TranscriptionError::RequestFailed(error.to_string())))?;
+    let definition = serde_json::to_string(&build_mai_definition(
+        candidate_locales,
+        vocabulary_terms,
+        use_verbatim_style,
+    ))
+    .map_err(|error| no_retry(TranscriptionError::RequestFailed(error.to_string())))?;
+    let form = reqwest::multipart::Form::new()
+        .part("audio", audio_part)
+        .text("definition", definition);
+
+    let mut request = transcription_state.client.post(url);
+    request = if use_bearer {
+        request.bearer_auth(api_key)
+    } else {
+        request.header("Ocp-Apim-Subscription-Key", api_key)
+    };
+    let response = request.multipart(form).send().await.map_err(|error| {
+        let kind = if error.is_timeout() {
+            FailureKind::NoRetry
+        } else if error.is_connect() {
+            FailureKind::Connect
+        } else {
+            FailureKind::NoRetry
+        };
+        AttemptFailure {
+            error: TranscriptionError::RequestFailed(error.to_string()),
+            kind,
+        }
+    })?;
+
+    if !response.status().is_success() {
+        let status = response.status().as_u16();
+        let retry_after_secs = parse_retry_after_secs(
+            response
+                .headers()
+                .get("retry-after")
+                .and_then(|value| value.to_str().ok()),
+        );
+        let body = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Failed to read error body".to_string());
+        return Err(AttemptFailure {
+            error: TranscriptionError::ApiError(status, format_mai_error(status, &body)),
+            kind: classify_response_status(status, retry_after_secs),
+        });
+    }
+
+    let response = response
+        .json::<MaiTranscriptionResponse>()
+        .await
+        .map_err(|error| no_retry(TranscriptionError::ParseError(error.to_string())))?;
+    Ok(AttemptOutcome {
+        raw_text: parse_mai_response(response),
+        no_speech_probability: None,
         token_usage: None,
     })
 }
@@ -931,15 +1313,7 @@ async fn send_transcription_request(
     }
 
     let is_gemini = matches!(provider, ResolvedProvider::Gemini);
-
-    // Size 驗證 provider-aware：Gemini inline 上限較嚴（base64 後須 < 20MB request）。
-    if is_gemini {
-        validate_gemini_audio_size(wav_data.len())?;
-    } else if wav_data.len() > MAX_AUDIO_FILE_SIZE {
-        let size_mb = wav_data.len() as f64 / (1024.0 * 1024.0);
-        let limit_mb = MAX_AUDIO_FILE_SIZE / (1024 * 1024);
-        return Err(TranscriptionError::FileTooLarge { size_mb, limit_mb });
-    }
+    validate_provider_audio_size(&provider, wav_data.len())?;
 
     let model = model_id.unwrap_or_else(|| DEFAULT_WHISPER_MODEL_ID.to_string());
     let target = resolve_transcription_target(&provider, &model);
@@ -947,7 +1321,13 @@ async fn send_transcription_request(
     log::info!(
         "[transcription] Sending {} bytes WAV via {} (model={})",
         wav_data.len(),
-        if is_gemini { "Gemini" } else { "Whisper" },
+        if is_gemini {
+            "Gemini"
+        } else if matches!(provider, ResolvedProvider::Mai(_)) {
+            "MAI-Transcribe"
+        } else {
+            "Whisper"
+        },
         if is_gemini {
             resolve_gemini_model(&model)
         } else {
@@ -1011,6 +1391,29 @@ async fn send_transcription_request(
             TranscriptionTarget::Gemini { url } => {
                 let body = gemini_body.as_ref().expect("gemini body built").clone();
                 attempt_gemini_request(body, transcription_state, &api_key, url).await
+            }
+            TranscriptionTarget::Mai {
+                url,
+                use_bearer,
+                candidate_locales,
+                use_verbatim_style,
+            } => {
+                let data = if attempt < MAX_TRANSCRIPTION_ATTEMPTS {
+                    wav_data.as_ref().expect("wav_data taken early").clone()
+                } else {
+                    wav_data.take().expect("wav_data taken early")
+                };
+                attempt_mai_request(
+                    data,
+                    transcription_state,
+                    &api_key,
+                    vocabulary_term_list.as_deref(),
+                    url,
+                    *use_bearer,
+                    candidate_locales,
+                    *use_verbatim_style,
+                )
+                .await
             }
         };
 
@@ -1140,24 +1543,32 @@ pub async fn transcribe_audio(
     deployment: Option<String>,
     api_version: Option<String>,
     auth_mode: Option<String>,
+    candidate_locales: Option<Vec<String>>,
+    transcribe_style: Option<String>,
 ) -> Result<TranscriptionResult, TranscriptionError> {
     if api_key.trim().is_empty() {
         return Err(TranscriptionError::ApiKeyMissing);
     }
 
-    let resolved = resolve_provider(provider, endpoint, deployment, api_version, auth_mode)?;
+    let resolved = resolve_provider(
+        provider,
+        endpoint,
+        deployment,
+        api_version,
+        auth_mode,
+        candidate_locales,
+        transcribe_style,
+    )?;
 
     // Take WAV data from shared state (consume it).
-    // Gemini inline 上限較嚴：先 peek 長度驗證，超限時不消耗 buffer（使用者改設定後仍可重試）。
+    // Provider 上限先驗證，超限時不消耗 buffer（使用者改設定後仍可重試）。
     let wav_data = {
         let mut guard = state
             .wav_buffer
             .lock()
             .map_err(|_| TranscriptionError::LockPoisoned)?;
-        if matches!(resolved, ResolvedProvider::Gemini) {
-            if let Some(len) = guard.as_ref().map(Vec::len) {
-                validate_gemini_audio_size(len)?;
-            }
+        if let Some(len) = guard.as_ref().map(Vec::len) {
+            validate_provider_audio_size(&resolved, len)?;
         }
         guard.take().ok_or(TranscriptionError::NoAudioData)?
     };
@@ -1188,12 +1599,22 @@ pub async fn retranscribe_from_file(
     deployment: Option<String>,
     api_version: Option<String>,
     auth_mode: Option<String>,
+    candidate_locales: Option<Vec<String>>,
+    transcribe_style: Option<String>,
 ) -> Result<TranscriptionResult, TranscriptionError> {
     if api_key.trim().is_empty() {
         return Err(TranscriptionError::ApiKeyMissing);
     }
 
-    let resolved = resolve_provider(provider, endpoint, deployment, api_version, auth_mode)?;
+    let resolved = resolve_provider(
+        provider,
+        endpoint,
+        deployment,
+        api_version,
+        auth_mode,
+        candidate_locales,
+        transcribe_style,
+    )?;
 
     // 注意：std::fs::read 是同步 I/O，但 WAV 檔案通常很小（< 1MB），
     // 在 Tauri command 的 async context 中可接受。
@@ -1201,9 +1622,7 @@ pub async fn retranscribe_from_file(
         .map_err(|e| TranscriptionError::RequestFailed(format!("Failed to read WAV file: {e}")))?;
 
     // provider-aware 大小檢查提前到能量掃描之前：超大檔不必先花 CPU 掃描全部樣本
-    if matches!(resolved, ResolvedProvider::Gemini) {
-        validate_gemini_audio_size(wav_data.len())?;
-    }
+    validate_provider_audio_size(&resolved, wav_data.len())?;
 
     log::info!(
         "[transcription] Retranscribing from file: {} ({} bytes)",
@@ -1241,12 +1660,22 @@ pub async fn test_whisper_connection(
     deployment: Option<String>,
     api_version: Option<String>,
     auth_mode: Option<String>,
+    candidate_locales: Option<Vec<String>>,
+    transcribe_style: Option<String>,
 ) -> Result<(), TranscriptionError> {
     if api_key.trim().is_empty() {
         return Err(TranscriptionError::ApiKeyMissing);
     }
 
-    let resolved = resolve_provider(provider, endpoint, deployment, api_version, auth_mode)?;
+    let resolved = resolve_provider(
+        provider,
+        endpoint,
+        deployment,
+        api_version,
+        auth_mode,
+        candidate_locales,
+        transcribe_style,
+    )?;
 
     let model = model_id.unwrap_or_else(|| DEFAULT_WHISPER_MODEL_ID.to_string());
     let target = resolve_transcription_target(&resolved, &model);
@@ -1285,6 +1714,35 @@ pub async fn test_whisper_connection(
             })?;
             attempt_gemini_connection_test(bytes, &transcription_state, &api_key, &url).await
         }
+        TranscriptionTarget::Mai {
+            url,
+            use_bearer,
+            candidate_locales,
+            use_verbatim_style,
+        } => attempt_mai_request(
+            wav_data,
+            &transcription_state,
+            &api_key,
+            None,
+            &url,
+            use_bearer,
+            &candidate_locales,
+            use_verbatim_style,
+        )
+        .await
+        .map(|_| ())
+        .or_else(|failure| {
+            if matches!(
+                &failure.error,
+                TranscriptionError::ApiError(_, message) if message.contains("NoLanguageIdentified")
+            ) {
+                // 連線測試刻意送靜音；服務端若把它視為「未辨識到語言」，仍代表
+                // endpoint、驗證與模型路由已正常工作。
+                Ok(())
+            } else {
+                Err(failure.error)
+            }
+        }),
     }
 }
 
@@ -1811,11 +2269,11 @@ mod tests {
     #[test]
     fn test_resolve_provider_defaults_to_groq() {
         assert!(matches!(
-            resolve_provider(None, None, None, None, None).unwrap(),
+            resolve_provider(None, None, None, None, None, None, None).unwrap(),
             ResolvedProvider::Whisper { azure: None }
         ));
         assert!(matches!(
-            resolve_provider(Some("groq".to_string()), None, None, None, None).unwrap(),
+            resolve_provider(Some("groq".to_string()), None, None, None, None, None, None).unwrap(),
             ResolvedProvider::Whisper { azure: None }
         ));
     }
@@ -1823,20 +2281,40 @@ mod tests {
     #[test]
     fn test_resolve_provider_gemini() {
         assert!(matches!(
-            resolve_provider(Some("gemini".to_string()), None, None, None, None).unwrap(),
+            resolve_provider(
+                Some("gemini".to_string()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None
+            )
+            .unwrap(),
             ResolvedProvider::Gemini
         ));
     }
 
     #[test]
     fn test_resolve_provider_azure_requires_config() {
-        assert!(resolve_provider(Some("azure".to_string()), None, None, None, None).is_err());
+        assert!(resolve_provider(
+            Some("azure".to_string()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None
+        )
+        .is_err());
         let ok = resolve_provider(
             Some("azure".to_string()),
             Some("https://r.openai.azure.com".to_string()),
             Some("whisper".to_string()),
             None,
             Some("key".to_string()),
+            None,
+            None,
         )
         .unwrap();
         assert!(matches!(ok, ResolvedProvider::Whisper { azure: Some(_) }));
@@ -1845,8 +2323,135 @@ mod tests {
     #[test]
     fn test_resolve_provider_unknown_is_error() {
         // fail-closed：壞掉的匯入設定不得把金鑰送到未知服務
-        assert!(resolve_provider(Some("openai".to_string()), None, None, None, None).is_err());
-        assert!(resolve_provider(Some("".to_string()), None, None, None, None).is_err());
+        assert!(resolve_provider(
+            Some("openai".to_string()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None
+        )
+        .is_err());
+        assert!(
+            resolve_provider(Some("".to_string()), None, None, None, None, None, None).is_err()
+        );
+    }
+
+    #[test]
+    fn test_resolve_provider_mai_requires_speech_endpoint() {
+        assert!(
+            resolve_provider(Some("mai".to_string()), None, None, None, None, None, None).is_err()
+        );
+
+        let resolved = resolve_provider(
+            Some("mai".to_string()),
+            Some("https://speech.cognitiveservices.azure.com/".to_string()),
+            None,
+            None,
+            Some("bearer".to_string()),
+            Some(vec!["zh-TW".to_string()]),
+            Some("verbatim".to_string()),
+        )
+        .unwrap();
+        assert!(matches!(resolved, ResolvedProvider::Mai(_)));
+        assert!(resolve_provider(
+            Some("mai".to_string()),
+            Some("https://speech.cognitiveservices.azure.com/".to_string()),
+            None,
+            None,
+            Some("bearer".to_string()),
+            Some(vec!["zh-TW".to_string(), "en-US".to_string()]),
+            None,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn test_mai_endpoint_only_allows_speech_resources() {
+        assert!(ensure_mai_endpoint_allowed("https://speech.cognitiveservices.azure.com").is_ok());
+        for endpoint in [
+            "https://speech.openai.azure.com",
+            "https://speech.services.ai.azure.com",
+            "https://evil.example.com",
+            "https://speech.cognitiveservices.azure.com@evil.example.com",
+            "https://evil.example.com\\.cognitiveservices.azure.com",
+        ] {
+            assert!(
+                ensure_mai_endpoint_allowed(endpoint).is_err(),
+                "should reject {endpoint}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_mai_definition_omits_default_fields() {
+        let definition = build_mai_definition(&[], None, false);
+        assert_eq!(
+            definition,
+            serde_json::json!({
+                "enhancedMode": {
+                    "enabled": true,
+                    "model": MAI_TRANSCRIPTION_MODEL,
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn test_mai_definition_includes_candidates_phrase_list_and_verbatim() {
+        let definition = build_mai_definition(
+            &["zh-TW".to_string()],
+            Some(&["SayIt".to_string(), "Contoso".to_string()]),
+            true,
+        );
+        assert_eq!(definition["locales"], serde_json::json!(["zh-TW"]));
+        assert_eq!(
+            definition["phraseList"]["phrases"],
+            serde_json::json!(["SayIt", "Contoso"])
+        );
+        assert_eq!(
+            definition["enhancedMode"]["transcribeStyle"],
+            serde_json::json!("verbatim")
+        );
+    }
+
+    #[test]
+    fn test_mai_response_handles_empty_combined_phrases() {
+        let empty: MaiTranscriptionResponse =
+            serde_json::from_str(r#"{"combinedPhrases":[],"phrases":[]}"#).unwrap();
+        assert_eq!(parse_mai_response(empty), "");
+
+        let fallback: MaiTranscriptionResponse = serde_json::from_str(
+            r#"{"combinedPhrases":[],"phrases":[{"text":"first"},{"text":"second"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(parse_mai_response(fallback), "first second");
+    }
+
+    #[test]
+    fn test_mai_error_prefers_inner_error_code() {
+        let error = format_mai_error(
+            400,
+            r#"{"code":"InvalidRequest","message":"outer","innerError":{"code":"InvalidLocale","message":"inner"}}"#,
+        );
+        assert!(error.contains("InvalidLocale"));
+        assert!(error.contains("candidate locales"));
+    }
+
+    #[test]
+    fn test_mai_forbidden_error_requires_speech_user_role() {
+        let error = format_mai_error(403, r#"{"code":"Forbidden","message":"access denied"}"#);
+        assert!(error.contains("Cognitive Services Speech User"));
+    }
+
+    #[test]
+    fn test_mai_region_unsupported_error_is_actionable() {
+        let error = format_mai_error(
+            400,
+            r#"{"code":"InvalidRequest","message":"Enhanced mode with model is currently not supported yet."}"#,
+        );
+        assert!(error.contains("does not currently support MAI-Transcribe-1.5"));
     }
 
     #[test]

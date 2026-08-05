@@ -34,6 +34,10 @@ describe("EXPORTABLE_SETTING_KEYS 完整性", () => {
       "geminiTranscriptionModelId",
       "geminiFreeQuotaRequests",
       "geminiFreeQuotaPeriod",
+      "azureSpeechEndpoint",
+      "azureSpeechApiKey",
+      "maiCandidateLocales",
+      "maiTranscribeStyle",
     ];
     for (const key of required) {
       expect(
@@ -48,11 +52,19 @@ describe("EXPORTABLE_SETTING_KEYS 完整性", () => {
       geminiTranscriptionModelId: "gemini-3.5-flash-lite",
       geminiFreeQuotaRequests: 500,
       geminiFreeQuotaPeriod: "daily",
+      azureSpeechEndpoint: "https://speech.cognitiveservices.azure.com",
+      azureSpeechApiKey: "speech-key",
+      maiCandidateLocales: ["zh-TW"],
+      maiTranscribeStyle: "verbatim",
     };
     const cleaned = _sanitizeCheck(sample);
     expect(cleaned.geminiTranscriptionModelId).toBe("gemini-3.5-flash-lite");
     expect(cleaned.geminiFreeQuotaRequests).toBe(500);
     expect(cleaned.geminiFreeQuotaPeriod).toBe("daily");
+    expect(cleaned.azureSpeechEndpoint).toBe(
+      "https://speech.cognitiveservices.azure.com",
+    );
+    expect(cleaned.maiCandidateLocales).toEqual(["zh-TW"]);
   });
 });
 
@@ -353,6 +365,21 @@ describe("sanitizeSettingsPayload", () => {
     expect(
       sanitizeSettingsPayload({ hotkeyTriggerKey: 123 as unknown as string }),
     ).not.toHaveProperty("hotkeyTriggerKey");
+  });
+
+  it("[P0] MAI 候選語言逐項清洗、API Key 會被視為敏感資料", () => {
+    const clean = sanitizeSettingsPayload({
+      maiCandidateLocales: ["zh-TW", "invalid", "zh-TW", "en-US"],
+      maiTranscribeStyle: "verbatim",
+    });
+    expect(clean.maiCandidateLocales).toEqual(["zh-TW"]);
+    expect(clean.maiTranscribeStyle).toBe("verbatim");
+    expect(
+      sanitizeSettingsPayload({ maiTranscribeStyle: "invalid" }),
+    ).not.toHaveProperty("maiTranscribeStyle");
+    expect(stripSensitiveKeys({ azureSpeechApiKey: "secret" })).not.toHaveProperty(
+      "azureSpeechApiKey",
+    );
   });
 });
 

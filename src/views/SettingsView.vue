@@ -68,6 +68,8 @@ import {
   type TranscriptionProviderId,
   type QuotaPeriod,
   type GeminiTranscriptionModelId,
+  type MaiTranscribeStyle,
+  MAI_TRANSCRIPTION_MODEL_ID,
   GEMINI_TRANSCRIPTION_MODEL_LIST,
   findGeminiTranscriptionModelConfig,
 } from "../lib/modelRegistry";
@@ -75,6 +77,8 @@ import { LLM_PROVIDER_LIST, findProviderConfig } from "../lib/llmProvider";
 import {
   LANGUAGE_OPTIONS,
   TRANSCRIPTION_LANGUAGE_OPTIONS,
+  MAI_CANDIDATE_LOCALE_OPTIONS,
+  type MaiCandidateLocale,
   type SupportedLocale,
   type TranscriptionLocale,
 } from "../i18n/languageConfig";
@@ -830,6 +834,9 @@ const isAzureClientSecretVisible = ref(false);
 const isSubmittingAzure = ref(false);
 const azureChatDeploymentInput = ref("");
 const azureWhisperDeploymentInput = ref("");
+const azureSpeechEndpointInput = ref("");
+const azureSpeechApiKeyInput = ref("");
+const isAzureSpeechApiKeyVisible = ref(false);
 
 function loadAzureInputsFromStore() {
   azureEnabledInput.value = settingsStore.azureEnabled;
@@ -842,6 +849,8 @@ function loadAzureInputsFromStore() {
   azureApiVersionInput.value = settingsStore.azureApiVersion;
   azureChatDeploymentInput.value = settingsStore.azureChatDeployment;
   azureWhisperDeploymentInput.value = settingsStore.azureWhisperDeployment;
+  azureSpeechEndpointInput.value = settingsStore.azureSpeechEndpoint;
+  azureSpeechApiKeyInput.value = settingsStore.azureSpeechApiKey;
   // Gemini 免費額度：0 視為「未設定」，輸入框留空而非顯示 0
   geminiFreeQuotaInput.value =
     settingsStore.geminiFreeQuotaRequests > 0
@@ -1016,6 +1025,37 @@ async function handleSaveAzureWhisperDeployment() {
   }
 }
 
+async function handleSaveAzureSpeechConnection() {
+  try {
+    await settingsStore.saveAzureSpeechConnection(
+      azureSpeechEndpointInput.value,
+      azureSpeechApiKeyInput.value,
+    );
+    modelFeedback.show("success", t("settings.azure.speechSaved"));
+  } catch (err) {
+    modelFeedback.show("error", extractErrorMessage(err));
+  }
+}
+
+async function handleMaiInputLocaleChange(value: string) {
+  try {
+    await settingsStore.saveMaiCandidateLocales(
+      value === "auto" ? [] : [value as MaiCandidateLocale],
+    );
+  } catch (err) {
+    modelFeedback.show("error", extractErrorMessage(err));
+  }
+}
+
+async function handleMaiTranscribeStyleChange(style: MaiTranscribeStyle) {
+  try {
+    await settingsStore.saveMaiTranscribeStyle(style);
+    modelFeedback.show("success", t("settings.model.whisperUpdated"));
+  } catch (err) {
+    modelFeedback.show("error", extractErrorMessage(err));
+  }
+}
+
 // 當 Azure 測試連線按鈕被禁用時，回報缺少的設定項（不會是空字串才顯示）。
 function azureConnectionIssue(deployment: string): string {
   if (!settingsStore.azureEnabled) return t("settings.azure.issueNotEnabled");
@@ -1136,6 +1176,28 @@ async function testAzureWhisperConnection() {
         authMode: cfg.authMode,
       },
     );
+  } catch (err) {
+    return {
+      ok: false as const,
+      durationMs: 0,
+      errorMessage: extractErrorMessage(err),
+    };
+  }
+}
+
+async function testMaiConnection() {
+  try {
+    const cfg = await settingsStore.getWhisperRequestConfig();
+    if (cfg.provider !== "mai") {
+      throw new Error("MAI_TRANSCRIPTION_CONFIG_UNAVAILABLE");
+    }
+    return await testWhisperConnection(cfg.modelId, cfg.apiKey, {
+      provider: cfg.provider,
+      endpoint: cfg.endpoint,
+      authMode: cfg.authMode,
+      candidateLocales: cfg.candidateLocales,
+      transcribeStyle: cfg.transcribeStyle,
+    });
   } catch (err) {
     return {
       ok: false as const,
@@ -2408,11 +2470,11 @@ onBeforeUnmount(() => {
         <div class="space-y-2">
           <Label for="whisper-model">{{ $t("settings.model.whisperLabel") }}</Label>
 
-          <!-- 轉錄 provider 切換：Groq / Gemini 常駐，Azure 啟用時才出現 -->
+          <!-- 轉錄 provider 切換：Groq / Gemini 常駐，Azure 啟用時顯示兩種 Azure 服務 -->
           <RadioGroup
             :model-value="settingsStore.whisperProviderId"
             class="grid gap-2"
-            :class="settingsStore.azureEnabled ? 'grid-cols-3' : 'grid-cols-2'"
+            :class="settingsStore.azureEnabled ? 'grid-cols-4' : 'grid-cols-2'"
             @update:model-value="(v: unknown) => handleWhisperProviderChange(v as TranscriptionProviderId)"
           >
             <Label
@@ -2438,7 +2500,16 @@ onBeforeUnmount(() => {
               :class="settingsStore.whisperProviderId === 'azure' ? 'border-primary bg-primary/5' : 'hover:bg-muted/50'"
             >
               <RadioGroupItem id="whisper-provider-azure" value="azure" class="!size-0 !border-0 !shadow-none overflow-hidden" />
-              <span class="text-sm font-medium">Azure</span>
+              <span class="text-sm font-medium">Azure OpenAI</span>
+            </Label>
+            <Label
+              v-if="settingsStore.azureEnabled"
+              for="whisper-provider-mai"
+              class="flex cursor-pointer items-center gap-2.5 rounded-md border border-border p-3 transition-colors"
+              :class="settingsStore.whisperProviderId === 'mai' ? 'border-primary bg-primary/5' : 'hover:bg-muted/50'"
+            >
+              <RadioGroupItem id="whisper-provider-mai" value="mai" class="!size-0 !border-0 !shadow-none overflow-hidden" />
+              <span class="text-sm font-medium">MAI-Transcribe</span>
             </Label>
           </RadioGroup>
 
@@ -2570,8 +2641,8 @@ onBeforeUnmount(() => {
             </p>
           </template>
 
-          <!-- Azure Whisper 部署 -->
-          <template v-else>
+          <!-- Azure OpenAI Whisper 部署 -->
+          <template v-else-if="settingsStore.whisperProviderId === 'azure'">
             <Label for="azure-whisper-deployment">{{ $t("settings.azure.whisperDeploymentLabel") }}</Label>
             <div class="flex gap-2">
               <Input
@@ -2595,6 +2666,98 @@ onBeforeUnmount(() => {
             >
               {{ azureConnectionIssue(settingsStore.azureWhisperDeployment) }}
             </p>
+          </template>
+
+          <!-- Azure AI Speech MAI-Transcribe -->
+          <template v-else>
+            <div class="flex items-center gap-2">
+              <Label for="mai-transcribe-model">{{ $t("settings.azure.maiModelLabel") }}</Label>
+              <Badge variant="secondary">{{ $t("settings.azure.preview") }}</Badge>
+            </div>
+            <Input
+              id="mai-transcribe-model"
+              :model-value="MAI_TRANSCRIPTION_MODEL_ID"
+              readonly
+              class="font-mono text-xs"
+            />
+            <p class="text-xs text-muted-foreground">{{ $t("settings.azure.maiHint") }}</p>
+
+            <div class="space-y-2">
+              <Label for="azure-speech-endpoint">{{ $t("settings.azure.speechEndpointLabel") }}</Label>
+              <Input
+                id="azure-speech-endpoint"
+                v-model="azureSpeechEndpointInput"
+                :placeholder="$t('settings.azure.speechEndpointPlaceholder')"
+                class="font-mono text-xs"
+              />
+            </div>
+            <div v-if="azureAuthModeInput === 'key'" class="space-y-2">
+              <Label for="azure-speech-api-key">{{ $t("settings.azure.speechApiKeyLabel") }}</Label>
+              <div class="flex gap-2">
+                <Input
+                  id="azure-speech-api-key"
+                  v-model="azureSpeechApiKeyInput"
+                  :type="isAzureSpeechApiKeyVisible ? 'text' : 'password'"
+                  class="flex-1 font-mono text-xs"
+                />
+                <Button variant="ghost" size="sm" @click="isAzureSpeechApiKeyVisible = !isAzureSpeechApiKeyVisible">
+                  {{ isAzureSpeechApiKeyVisible ? $t('settings.apiKey.hide') : $t('settings.apiKey.show') }}
+                </Button>
+              </div>
+            </div>
+            <div class="flex justify-end">
+              <Button
+                size="sm"
+                :disabled="!azureSpeechEndpointInput.trim() || (azureAuthModeInput === 'key' && !azureSpeechApiKeyInput.trim())"
+                @click="handleSaveAzureSpeechConnection"
+              >
+                {{ $t("common.save") }}
+              </Button>
+            </div>
+
+            <div class="space-y-2">
+              <Label for="mai-input-locale">{{ $t("settings.azure.maiCandidateLocalesLabel") }}</Label>
+              <p class="text-xs text-muted-foreground">{{ $t("settings.azure.maiCandidateLocalesHint") }}</p>
+              <Select
+                :model-value="settingsStore.maiCandidateLocales[0] ?? 'auto'"
+                @update:model-value="(value: unknown) => handleMaiInputLocaleChange(value as string)"
+              >
+                <SelectTrigger id="mai-input-locale" class="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="auto">{{ $t("settings.app.autoDetect") }}</SelectItem>
+                  <SelectItem
+                    v-for="option in MAI_CANDIDATE_LOCALE_OPTIONS"
+                    :key="option.locale"
+                    :value="option.locale"
+                  >
+                    {{ option.displayName }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div class="space-y-2">
+              <Label for="mai-transcribe-style">{{ $t("settings.azure.maiTranscribeStyleLabel") }}</Label>
+              <Select
+                :model-value="settingsStore.maiTranscribeStyle"
+                @update:model-value="(style: unknown) => handleMaiTranscribeStyleChange(style as MaiTranscribeStyle)"
+              >
+                <SelectTrigger id="mai-transcribe-style" class="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="default">{{ $t("settings.azure.maiTranscribeStyleDefault") }}</SelectItem>
+                  <SelectItem value="verbatim">{{ $t("settings.azure.maiTranscribeStyleVerbatim") }}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <p class="text-xs text-muted-foreground">{{ $t("settings.azure.maiRbacHint") }}</p>
+            <ConnectionTestButton
+              :on-test="testMaiConnection"
+              :disabled="!settingsStore.hasWhisperConfig"
+            />
           </template>
         </div>
 

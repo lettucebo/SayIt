@@ -169,13 +169,15 @@ invoke('get_foreground_app_name') → string | null
 invoke('transcribe_audio', {
   apiKey: string,
   vocabularyTermList?: string[] | null,
-  modelId?: string,        // Whisper 預設 'whisper-large-v3'；Gemini 走獨立模型清單
+  modelId?: string,        // Whisper 預設 'whisper-large-v3'；Gemini / MAI 走獨立模型
   language?: string | null, // null／省略 = 不送 language 欄位，由 provider 自動偵測
-  provider?: 'groq' | 'azure' | 'gemini',  // 預設 groq；未知值 fail-closed 報錯
-  endpoint?: string | null,        // Azure
+  provider?: 'groq' | 'azure' | 'gemini' | 'mai',  // 預設 groq；未知值 fail-closed 報錯
+  endpoint?: string | null,        // Azure OpenAI 或 MAI 的 Azure AI Speech endpoint
   deployment?: string | null,      // Azure
   apiVersion?: string | null,      // Azure
-  authMode?: 'key' | 'entra' | null,  // Azure 驗證方式
+  authMode?: 'key' | 'bearer' | null,  // Azure wire 驗證方式
+  candidateLocales?: string[] | null, // MAI Fast：至多一個 BCP-47 語言提示（空 = 多語自動）
+  transcribeStyle?: 'default' | 'verbatim' | null, // MAI：default 不送欄位
 }) → Result<TranscriptionResult, TranscriptionError>
 ```
 
@@ -187,9 +189,10 @@ invoke('retranscribe_from_file', {
   vocabularyTermList?: string[] | null,
   modelId?: string,
   language?: string | null,
-  provider?: 'groq' | 'azure' | 'gemini',
+  provider?: 'groq' | 'azure' | 'gemini' | 'mai',
   endpoint?: string | null, deployment?: string | null,
-  apiVersion?: string | null, authMode?: 'key' | 'entra' | null,
+  apiVersion?: string | null, authMode?: 'key' | 'bearer' | null,
+  candidateLocales?: string[] | null, transcribeStyle?: 'default' | 'verbatim' | null, // MAI Fast：至多一個 locale
 }) → Result<TranscriptionResult, TranscriptionError>
 ```
 
@@ -197,16 +200,17 @@ invoke('retranscribe_from_file', {
 ```ts
 invoke('test_whisper_connection', {
   apiKey: string, modelId?: string,
-  provider?: 'groq' | 'azure' | 'gemini',
+  provider?: 'groq' | 'azure' | 'gemini' | 'mai',
   endpoint?: string | null, deployment?: string | null,
-  apiVersion?: string | null, authMode?: 'key' | 'entra' | null,
+  apiVersion?: string | null, authMode?: 'key' | 'bearer' | null,
+  candidateLocales?: string[] | null, transcribeStyle?: 'default' | 'verbatim' | null, // MAI Fast：至多一個 locale
 }) → Result<(), TranscriptionError>
 ```
 - **呼叫端**：`src/lib/connectionTest.ts`（SettingsView 的連線測試按鈕）
 
 **型別**：
 - `TranscriptionResult = { rawText: string, transcriptionDurationMs: number, noSpeechProbability: number | null, peakEnergyLevel: number, rmsEnergyLevel: number, promptTokens: number | null, completionTokens: number | null, totalTokens: number | null }`
-  — `noSpeechProbability`：Gemini 無此信號回 `null`，前端幻覺偵測 Layer 2b 跳過
+  — `noSpeechProbability`：Gemini 與 MAI 無此信號回 `null`，前端幻覺偵測 Layer 2b 跳過
   — `peak/rmsEnergyLevel`：僅 `retranscribe_from_file` 會從 WAV 計算；即時轉錄路徑留 `0.0`（改用 recorder 的 `StopRecordingResult`）
   — `prompt/completion/totalTokens`：僅 Gemini 回報（依 token 計量）；Whisper（Groq/Azure）以音訊時長計費，為 `null`
 - `TranscriptionError`（thiserror enum）

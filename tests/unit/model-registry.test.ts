@@ -12,6 +12,7 @@ import {
   GEMINI_TRANSCRIPTION_MODEL_LIST,
   getEffectiveGeminiTranscriptionModelId,
   getEffectiveGeminiTranscriptionRpd,
+  getEffectiveMaiTranscribeStyle,
 } from "../../src/lib/modelRegistry";
 import zhTW from "../../src/i18n/locales/zh-TW.json";
 import zhCN from "../../src/i18n/locales/zh-CN.json";
@@ -152,6 +153,7 @@ describe("modelRegistry — 轉錄 provider", () => {
     expect(getEffectiveTranscriptionProviderId("groq")).toBe("groq");
     expect(getEffectiveTranscriptionProviderId("azure")).toBe("azure");
     expect(getEffectiveTranscriptionProviderId("gemini")).toBe("gemini");
+    expect(getEffectiveTranscriptionProviderId("mai")).toBe("mai");
   });
 
   it("[P0] 未知/空值 fail-closed 退回預設（避免金鑰送到非預期服務）", () => {
@@ -172,6 +174,13 @@ describe("modelRegistry — 轉錄 provider", () => {
   it("[P0] Gemini 轉錄模型不得是 Whisper 模型 id（會打到不存在的端點）", () => {
     expect(GEMINI_TRANSCRIPTION_MODEL).toMatch(/^gemini-/);
     expect(GEMINI_TRANSCRIPTION_MODEL).not.toMatch(/whisper/);
+  });
+
+  it("[P0] MAI 逐字稿風格只接受 verbatim，未知值安全退回 default", () => {
+    expect(getEffectiveMaiTranscribeStyle("verbatim")).toBe("verbatim");
+    expect(getEffectiveMaiTranscribeStyle("default")).toBe("default");
+    expect(getEffectiveMaiTranscribeStyle("unexpected")).toBe("default");
+    expect(getEffectiveMaiTranscribeStyle(null)).toBe("default");
   });
 });
 

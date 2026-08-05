@@ -46,10 +46,12 @@ import i18n, { switchLocale } from "../i18n";
 import {
   type SupportedLocale,
   type TranscriptionLocale,
+  type MaiCandidateLocale,
   FALLBACK_LOCALE,
   detectSystemLocale,
   getHtmlLangForLocale,
   getWhisperCodeForTranscriptionLocale,
+  normalizeMaiCandidateLocales,
 } from "../i18n/languageConfig";
 import {
   emitEvent,
@@ -75,10 +77,13 @@ import {
   type TranscriptionProviderId,
   type QuotaPeriod,
   type GeminiTranscriptionModelId,
+  type MaiTranscribeStyle,
   DEFAULT_QUOTA_PERIOD,
   GEMINI_TRANSCRIPTION_MODEL,
+  MAI_TRANSCRIPTION_MODEL_ID,
   getEffectiveTranscriptionProviderId,
   getEffectiveGeminiTranscriptionModelId,
+  getEffectiveMaiTranscribeStyle,
 } from "../lib/modelRegistry";
 import {
   normalizeAzureEndpoint,
@@ -232,6 +237,8 @@ export const useSettingsStore = defineStore("settings", () => {
   const azureOmitTemperature = ref<boolean>(false);
   const azureChatDeployment = ref<string>("");
   const azureWhisperDeployment = ref<string>("");
+  const azureSpeechEndpoint = ref<string>("");
+  const azureSpeechApiKey = ref<string>("");
   /**
    * `entraUser` 模式下目前已登入的帳號。真實來源在 Rust（OS 憑證庫），
    * 這裡只是給 UI 與 computed 用的快照，由 `refreshAzureUserAccount()` 同步。
@@ -295,7 +302,26 @@ export const useSettingsStore = defineStore("settings", () => {
         return false;
     }
   });
+  const hasMaiCredentials = computed(() => {
+    switch (azureAuthMode.value) {
+      case "key":
+        return azureSpeechApiKey.value !== "";
+      case "entra":
+        return (
+          azureTenantId.value !== "" &&
+          azureClientId.value !== "" &&
+          azureClientSecret.value !== ""
+        );
+      case "entraUser":
+        return isAzureUserSignedIn.value;
+      default:
+        azureAuthMode.value satisfies never;
+        return false;
+    }
+  });
   const whisperProviderId = ref<TranscriptionProviderId>("groq");
+  const maiCandidateLocales = ref<MaiCandidateLocale[]>([]);
+  const maiTranscribeStyle = ref<MaiTranscribeStyle>("default");
   /** Gemini 轉錄模型（Flash-Lite 免費額度高、Flash 品質優先） */
   const geminiTranscriptionModelId = ref<GeminiTranscriptionModelId>(
     GEMINI_TRANSCRIPTION_MODEL,
@@ -305,6 +331,13 @@ export const useSettingsStore = defineStore("settings", () => {
   const geminiFreeQuotaPeriod = ref<QuotaPeriod>(DEFAULT_QUOTA_PERIOD);
   const hasWhisperConfig = computed(() => {
     if (whisperProviderId.value === "gemini") return geminiApiKey.value !== "";
+    if (whisperProviderId.value === "mai") {
+      return (
+        azureEnabled.value &&
+        azureSpeechEndpoint.value !== "" &&
+        hasMaiCredentials.value
+      );
+    }
     if (whisperProviderId.value !== "azure") return apiKey.value !== "";
     return (
       azureEnabled.value &&
@@ -373,6 +406,10 @@ export const useSettingsStore = defineStore("settings", () => {
       clientSecret: azureClientSecret.value,
       chatDeployment: azureChatDeployment.value,
       whisperDeployment: azureWhisperDeployment.value,
+      speechEndpoint: azureSpeechEndpoint.value,
+      speechApiKey: azureSpeechApiKey.value,
+      maiCandidateLocales: [...maiCandidateLocales.value],
+      maiTranscribeStyle: maiTranscribeStyle.value,
       omitTemperature: azureOmitTemperature.value,
     };
   }
@@ -505,17 +542,52 @@ export const useSettingsStore = defineStore("settings", () => {
    * Azure-Entra 用 cognitiveservices scope（deployments 路徑）。
    * modelId 由 provider 決定：Gemini 有自己的固定轉錄模型，不可沿用 WhisperModelId。
    */
-  async function getWhisperRequestConfig(): Promise<{
-    apiKey: string;
-    provider: TranscriptionProviderId;
-    modelId: string;
-    endpoint?: string;
-    deployment?: string;
-    apiVersion?: string;
-    authMode?: AzureAuthHeaderMode;
-  }> {
+  type TranscriptionRequestConfig =
+    | {
+        apiKey: string;
+        provider: "groq";
+        modelId: WhisperModelId;
+        endpoint?: undefined;
+        deployment?: undefined;
+        apiVersion?: undefined;
+        authMode?: undefined;
+      }
+    | {
+        apiKey: string;
+        provider: "gemini";
+        modelId: GeminiTranscriptionModelId;
+        endpoint?: undefined;
+        deployment?: undefined;
+        apiVersion?: undefined;
+        authMode?: undefined;
+      }
+    | {
+        apiKey: string;
+        provider: "azure";
+        modelId: WhisperModelId;
+        endpoint?: string;
+        deployment?: string;
+        apiVersion?: string;
+        authMode?: AzureAuthHeaderMode;
+      }
+    | {
+        apiKey: string;
+        provider: "mai";
+        modelId: typeof MAI_TRANSCRIPTION_MODEL_ID;
+        endpoint?: string;
+        deployment?: undefined;
+        apiVersion?: undefined;
+        authMode?: AzureAuthHeaderMode;
+        candidateLocales: MaiCandidateLocale[];
+        transcribeStyle: MaiTranscribeStyle;
+      };
+
+  async function getWhisperRequestConfig(): Promise<TranscriptionRequestConfig> {
+    const provider = whisperProviderId.value;
+    const whisperModelId = selectedWhisperModelId.value;
+
     // Gemini 走 generateContent，模型固定（沿用 whisper-large-v3 會打到不存在的端點）
-    if (whisperProviderId.value === "gemini") {
+    if (provider === "gemini") {
       return {
         apiKey: geminiApiKey.value,
         provider: "gemini",
@@ -523,28 +595,63 @@ export const useSettingsStore = defineStore("settings", () => {
       };
     }
 
-    if (whisperProviderId.value !== "azure") {
+    if (provider === "groq") {
       return {
         apiKey: apiKey.value,
         provider: "groq",
-        modelId: selectedWhisperModelId.value,
+        modelId: whisperModelId,
       };
     }
 
     // 任何 await 之前先定格（同 getLlmRequestConfig 的理由）
     const snap = snapshotAzureConfig();
 
+    if (provider === "mai") {
+      const base = {
+        provider: "mai" as const,
+        modelId: MAI_TRANSCRIPTION_MODEL_ID,
+        endpoint: snap.speechEndpoint || undefined,
+        candidateLocales: snap.maiCandidateLocales,
+        transcribeStyle: snap.maiTranscribeStyle,
+      };
+      if (!snap.enabled || snap.speechEndpoint === "") {
+        return { ...base, apiKey: "" };
+      }
+
+      if (snap.authMode === "entraUser") {
+        const token = await acquireAzureUserToken(
+          { tenantId: snap.tenantId, clientId: snap.clientId },
+          "whisper",
+        );
+        return { ...base, apiKey: token, authMode: "bearer" };
+      }
+
+      if (snap.authMode === "entra") {
+        const token = await getAzureAccessToken(
+          {
+            tenantId: snap.tenantId,
+            clientId: snap.clientId,
+            clientSecret: snap.clientSecret,
+          },
+          getAzureScopeForApiKind("whisper"),
+        );
+        return { ...base, apiKey: token, authMode: "bearer" };
+      }
+
+      return { ...base, apiKey: snap.speechApiKey, authMode: "key" };
+    }
+
     if (!snap.enabled || snap.endpoint === "" || snap.whisperDeployment === "") {
       return {
         apiKey: "",
         provider: "azure",
-        modelId: selectedWhisperModelId.value,
+        modelId: whisperModelId,
       };
     }
 
     const base = {
       provider: "azure" as const,
-      modelId: selectedWhisperModelId.value,
+      modelId: whisperModelId,
       endpoint: snap.endpoint,
       deployment: snap.whisperDeployment,
       apiVersion: snap.apiVersion || undefined,
@@ -728,9 +835,28 @@ export const useSettingsStore = defineStore("settings", () => {
         (await store.get<string>("azureChatDeployment"))?.trim() ?? "";
       azureWhisperDeployment.value =
         (await store.get<string>("azureWhisperDeployment"))?.trim() ?? "";
-      whisperProviderId.value = getEffectiveTranscriptionProviderId(
+      azureSpeechEndpoint.value =
+        (await store.get<string>("azureSpeechEndpoint"))?.trim() ?? "";
+      azureSpeechApiKey.value =
+        (await store.get<string>("azureSpeechApiKey"))?.trim() ?? "";
+      maiCandidateLocales.value = normalizeMaiCandidateLocales(
+        await store.get("maiCandidateLocales"),
+      );
+      maiTranscribeStyle.value = getEffectiveMaiTranscribeStyle(
+        await store.get<string>("maiTranscribeStyle"),
+      );
+      const savedWhisperProviderId = getEffectiveTranscriptionProviderId(
         await store.get<string>("whisperProviderId"),
       );
+      whisperProviderId.value =
+        !azureEnabled.value &&
+        (savedWhisperProviderId === "azure" || savedWhisperProviderId === "mai")
+          ? "groq"
+          : savedWhisperProviderId;
+      if (whisperProviderId.value !== savedWhisperProviderId) {
+        await store.set("whisperProviderId", whisperProviderId.value);
+        await store.save();
+      }
       geminiFreeQuotaRequests.value =
         (await store.get<number>("geminiFreeQuotaRequests")) ?? 0;
       geminiFreeQuotaPeriod.value =
@@ -1514,7 +1640,10 @@ export const useSettingsStore = defineStore("settings", () => {
           selectedLlmProviderId.value = "groq";
           selectedLlmModelId.value = groqModel;
         }
-        if (whisperProviderId.value === "azure") {
+        if (
+          whisperProviderId.value === "azure" ||
+          whisperProviderId.value === "mai"
+        ) {
           await store.set("whisperProviderId", "groq");
           whisperProviderId.value = "groq";
         }
@@ -1576,6 +1705,10 @@ export const useSettingsStore = defineStore("settings", () => {
         "azureClientSecret",
         "azureApiVersion",
         "azureOmitTemperature",
+        "azureSpeechEndpoint",
+        "azureSpeechApiKey",
+        "maiCandidateLocales",
+        "maiTranscribeStyle",
       ];
       for (const k of keys) {
         await store.delete(k);
@@ -1589,7 +1722,10 @@ export const useSettingsStore = defineStore("settings", () => {
         selectedLlmProviderId.value = "groq";
         selectedLlmModelId.value = groqModel;
       }
-      if (whisperProviderId.value === "azure") {
+      if (
+        whisperProviderId.value === "azure" ||
+        whisperProviderId.value === "mai"
+      ) {
         await store.set("whisperProviderId", "groq");
         whisperProviderId.value = "groq";
       }
@@ -1604,6 +1740,10 @@ export const useSettingsStore = defineStore("settings", () => {
       azureClientSecret.value = "";
       azureApiVersion.value = "";
       azureOmitTemperature.value = false;
+      azureSpeechEndpoint.value = "";
+      azureSpeechApiKey.value = "";
+      maiCandidateLocales.value = [];
+      maiTranscribeStyle.value = "default";
       clearAzureTokenCache();
       azureUserAccount.value = null;
       azureUserReauthRequired.value = false;
@@ -1814,6 +1954,72 @@ export const useSettingsStore = defineStore("settings", () => {
     }
   }
 
+  async function saveAzureSpeechConnection(endpoint: string, apiKey: string) {
+    try {
+      if (!isLoaded) {
+        throw new Error("SETTINGS_NOT_LOADED");
+      }
+      const store = await load(STORE_NAME);
+      const normalizedEndpoint = normalizeAzureEndpoint(endpoint);
+      await store.set("azureSpeechEndpoint", normalizedEndpoint);
+      await store.set("azureSpeechApiKey", apiKey.trim());
+      await store.save();
+      azureSpeechEndpoint.value = normalizedEndpoint;
+      azureSpeechApiKey.value = apiKey.trim();
+      const payload: SettingsUpdatedPayload = {
+        key: "azureSpeechConnection",
+        value: normalizedEndpoint,
+      };
+      await emitEvent(SETTINGS_UPDATED, payload);
+    } catch (err) {
+      console.error(
+        "[useSettingsStore] saveAzureSpeechConnection failed:",
+        extractErrorMessage(err),
+      );
+      throw err;
+    }
+  }
+
+  async function saveMaiCandidateLocales(locales: MaiCandidateLocale[]) {
+    try {
+      const normalized = normalizeMaiCandidateLocales(locales);
+      const store = await load(STORE_NAME);
+      await store.set("maiCandidateLocales", normalized);
+      await store.save();
+      maiCandidateLocales.value = normalized;
+      await emitEvent(SETTINGS_UPDATED, {
+        key: "maiCandidateLocales",
+        value: normalized,
+      });
+    } catch (err) {
+      console.error(
+        "[useSettingsStore] saveMaiCandidateLocales failed:",
+        extractErrorMessage(err),
+      );
+      throw err;
+    }
+  }
+
+  async function saveMaiTranscribeStyle(style: MaiTranscribeStyle) {
+    try {
+      const normalized = getEffectiveMaiTranscribeStyle(style);
+      const store = await load(STORE_NAME);
+      await store.set("maiTranscribeStyle", normalized);
+      await store.save();
+      maiTranscribeStyle.value = normalized;
+      await emitEvent(SETTINGS_UPDATED, {
+        key: "maiTranscribeStyle",
+        value: normalized,
+      });
+    } catch (err) {
+      console.error(
+        "[useSettingsStore] saveMaiTranscribeStyle failed:",
+        extractErrorMessage(err),
+      );
+      throw err;
+    }
+  }
+
   // gh-45/#25：Azure/Foundry 的 model 是不透明部署名，無法從名稱判斷是否推理模型。
   // 開啟此開關時，Azure chat 請求一律省略 temperature（GPT-5 系列部署送 temperature
   // 會回 400）。刻意不自動補 reasoning_effort（原始 GPT-5 部署未必支援 "none"）。
@@ -1839,13 +2045,15 @@ export const useSettingsStore = defineStore("settings", () => {
 
   async function saveWhisperProvider(id: TranscriptionProviderId) {
     try {
+      const effectiveId =
+        !azureEnabled.value && (id === "azure" || id === "mai") ? "groq" : id;
       const store = await load(STORE_NAME);
-      await store.set("whisperProviderId", id);
+      await store.set("whisperProviderId", effectiveId);
       await store.save();
-      whisperProviderId.value = id;
+      whisperProviderId.value = effectiveId;
       const payload: SettingsUpdatedPayload = {
         key: "whisperProvider",
-        value: id,
+        value: effectiveId,
       };
       await emitEvent(SETTINGS_UPDATED, payload);
     } catch (err) {
@@ -2475,6 +2683,19 @@ export const useSettingsStore = defineStore("settings", () => {
           (await store.get<string>("azureChatDeployment"))?.trim() ?? "",
         whisperDeployment:
           (await store.get<string>("azureWhisperDeployment"))?.trim() ?? "",
+        speechEndpoint:
+          (await store.get<string>("azureSpeechEndpoint"))?.trim() ?? "",
+        speechApiKey:
+          (await store.get<string>("azureSpeechApiKey"))?.trim() ?? "",
+        maiCandidateLocales: normalizeMaiCandidateLocales(
+          await store.get("maiCandidateLocales"),
+        ),
+        maiTranscribeStyle: getEffectiveMaiTranscribeStyle(
+          await store.get<string>("maiTranscribeStyle"),
+        ),
+        whisperProvider: getEffectiveTranscriptionProviderId(
+          await store.get<string>("whisperProviderId"),
+        ),
       };
       azureEnabled.value = nextAzure.enabled;
       azureEndpoint.value = nextAzure.endpoint;
@@ -2487,9 +2708,16 @@ export const useSettingsStore = defineStore("settings", () => {
       azureOmitTemperature.value = nextAzure.omitTemperature;
       azureChatDeployment.value = nextAzure.chatDeployment;
       azureWhisperDeployment.value = nextAzure.whisperDeployment;
-      whisperProviderId.value = getEffectiveTranscriptionProviderId(
-        await store.get<string>("whisperProviderId"),
-      );
+      azureSpeechEndpoint.value = nextAzure.speechEndpoint;
+      azureSpeechApiKey.value = nextAzure.speechApiKey;
+      maiCandidateLocales.value = nextAzure.maiCandidateLocales;
+      maiTranscribeStyle.value = nextAzure.maiTranscribeStyle;
+      whisperProviderId.value =
+        !nextAzure.enabled &&
+        (nextAzure.whisperProvider === "azure" ||
+          nextAzure.whisperProvider === "mai")
+          ? "groq"
+          : nextAzure.whisperProvider;
       geminiFreeQuotaRequests.value =
         (await store.get<number>("geminiFreeQuotaRequests")) ?? 0;
       geminiFreeQuotaPeriod.value =
@@ -2582,7 +2810,8 @@ export const useSettingsStore = defineStore("settings", () => {
     }
     if (
       stripped.whisperProviderId === "azure" ||
-      stripped.whisperProviderId === "gemini"
+      stripped.whisperProviderId === "gemini" ||
+      stripped.whisperProviderId === "mai"
     ) {
       stripped.whisperProviderId = "groq";
     }
@@ -2640,11 +2869,21 @@ export const useSettingsStore = defineStore("settings", () => {
       // 備份是使用者可任意編輯的 JSON。UI 儲存路徑會經過 normalizeAzureEndpoint
       // 壓成純 origin，匯入路徑若不做同樣正規化，被污染的 endpoint
       // （例如夾帶反斜線讓真實 host 落在攻擊者網域）就會直接進到請求。
-      if (key === "azureEndpoint" && typeof value === "string") {
+      if (
+        (key === "azureEndpoint" || key === "azureSpeechEndpoint") &&
+        typeof value === "string"
+      ) {
         await store.set(key, normalizeAzureEndpoint(value));
         continue;
       }
       await store.set(key as ExportableSettingKey, value);
+    }
+    if (
+      settings["azureEnabled"] === false &&
+      (settings["whisperProviderId"] === "azure" ||
+        settings["whisperProviderId"] === "mai")
+    ) {
+      await store.set("whisperProviderId", "groq");
     }
     await store.save();
 
@@ -2740,6 +2979,8 @@ export const useSettingsStore = defineStore("settings", () => {
     azureOmitTemperature,
     azureChatDeployment,
     azureWhisperDeployment,
+    azureSpeechEndpoint,
+    azureSpeechApiKey: computed(() => azureSpeechApiKey.value),
     azureUserAccount: computed(() => azureUserAccount.value),
     isSettingsLoaded,
     settingsLoadFailed,
@@ -2759,10 +3000,15 @@ export const useSettingsStore = defineStore("settings", () => {
     geminiFreeQuotaRequests,
     geminiFreeQuotaPeriod,
     saveGeminiFreeQuota,
+    maiCandidateLocales,
+    maiTranscribeStyle,
     saveAzureConnection,
     deleteAzureConnection,
     saveAzureChatDeployment,
     saveAzureWhisperDeployment,
+    saveAzureSpeechConnection,
+    saveMaiCandidateLocales,
+    saveMaiTranscribeStyle,
     saveAzureOmitTemperature,
     saveWhisperProvider,
     refreshLlmApiKey,

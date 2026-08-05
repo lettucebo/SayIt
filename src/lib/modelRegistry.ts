@@ -25,8 +25,8 @@ export type WhisperModelId = "whisper-large-v3" | "whisper-large-v3-turbo";
 
 // ── 轉錄 Provider ─────────────────────────────────────────
 
-/** 語音轉錄 provider。Gemini 走 generateContent（非 Whisper multipart 協定）。 */
-export type TranscriptionProviderId = "groq" | "azure" | "gemini";
+/** 語音轉錄 provider。Gemini 與 MAI 均有專屬協定，非 Whisper multipart API。 */
+export type TranscriptionProviderId = "groq" | "azure" | "gemini" | "mai";
 
 /**
  * 免費額度的計算週期。多數 provider 是每日（如 Gemini 的 RPD、Groq 的 RPD），
@@ -38,6 +38,18 @@ export type QuotaPeriod = "daily" | "monthly";
 export const DEFAULT_QUOTA_PERIOD: QuotaPeriod = "daily";
 
 export const DEFAULT_TRANSCRIPTION_PROVIDER_ID: TranscriptionProviderId = "groq";
+
+/** Azure AI Speech LLM Speech API 的 MAI-Transcribe 模型 ID。 */
+export const MAI_TRANSCRIPTION_MODEL_ID = "mai-transcribe-1.5" as const;
+
+/** MAI 的預設輸出已最佳化可讀性；`verbatim` 才會傳到服務端。 */
+export type MaiTranscribeStyle = "default" | "verbatim";
+
+export function getEffectiveMaiTranscribeStyle(
+  savedStyle: string | null | undefined,
+): MaiTranscribeStyle {
+  return savedStyle === "verbatim" ? "verbatim" : "default";
+}
 
 /**
  * Gemini 轉錄可選模型（Rust 端有相同 allowlist，兩端必須一致）。
@@ -435,7 +447,10 @@ export function getEffectiveWhisperModelId(
 export function getEffectiveTranscriptionProviderId(
   savedId: string | null | undefined,
 ): TranscriptionProviderId {
-  return savedId === "azure" || savedId === "gemini" || savedId === "groq"
+  return savedId === "azure" ||
+    savedId === "gemini" ||
+    savedId === "groq" ||
+    savedId === "mai"
     ? savedId
     : DEFAULT_TRANSCRIPTION_PROVIDER_ID;
 }

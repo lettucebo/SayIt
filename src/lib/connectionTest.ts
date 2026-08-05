@@ -6,6 +6,10 @@ import type {
 } from "./modelRegistry";
 import type { AzureRequestOptions } from "./llmProvider";
 import type { AzureAuthHeaderMode } from "../types/settings";
+import type {
+  MaiCandidateLocale,
+} from "../i18n/languageConfig";
+import type { MaiTranscribeStyle } from "./modelRegistry";
 
 /**
  * 連線測試專用的錯誤格式化：盡量保留底層真實原因（HTTP 狀態碼 + 服務回應內容），
@@ -69,6 +73,8 @@ export async function testWhisperConnection(
     deployment?: string;
     apiVersion?: string;
     authMode?: AzureAuthHeaderMode;
+    candidateLocales?: MaiCandidateLocale[];
+    transcribeStyle?: MaiTranscribeStyle;
   },
 ): Promise<TestResult> {
   const start = performance.now();
@@ -81,6 +87,8 @@ export async function testWhisperConnection(
       deployment: extras?.deployment ?? null,
       apiVersion: extras?.apiVersion ?? null,
       authMode: extras?.authMode ?? null,
+      candidateLocales: extras?.candidateLocales ?? null,
+      transcribeStyle: extras?.transcribeStyle ?? null,
     });
     return { ok: true, durationMs: elapsed(start) };
   } catch (err) {

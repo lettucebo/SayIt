@@ -5,6 +5,8 @@ import {
 import type { VocabularyExportFile } from "../types/vocabulary";
 import type { ReplacementRule } from "../types/replacement";
 import { isAzureAuthMode } from "../types/settings";
+import { normalizeMaiCandidateLocales } from "../i18n/languageConfig";
+import { getEffectiveMaiTranscribeStyle } from "./modelRegistry";
 
 export const BACKUP_FORMAT = "sayit-backup" as const;
 export const BACKUP_VERSION = 1 as const;
@@ -68,6 +70,10 @@ export const EXPORTABLE_SETTING_KEYS = [
   "azureChatDeployment",
   "azureWhisperDeployment",
   "azureOmitTemperature",
+  "azureSpeechEndpoint",
+  "azureSpeechApiKey",
+  "maiCandidateLocales",
+  "maiTranscribeStyle",
 ] as const;
 
 export type ExportableSettingKey = (typeof EXPORTABLE_SETTING_KEYS)[number];
@@ -79,6 +85,7 @@ export const SENSITIVE_SETTING_KEYS: readonly ExportableSettingKey[] = [
   "anthropicApiKey",
   "geminiApiKey",
   "azureApiKey",
+  "azureSpeechApiKey",
   "azureClientSecret",
   "azureTenantId",
   "azureClientId",
@@ -227,7 +234,13 @@ export function buildBackupFilename(date: Date): string {
   return `sayit-backup-${stamp}.json`;
 }
 
-type ExpectedType = "string" | "number" | "boolean" | "object" | "stringOrObject";
+type ExpectedType =
+  | "string"
+  | "stringArray"
+  | "number"
+  | "boolean"
+  | "object"
+  | "stringOrObject";
 
 /**
  * 各設定 key 的期望值型別（含合成 autoStartEnabled）。
@@ -277,6 +290,10 @@ const SETTING_VALUE_TYPES: Record<string, ExpectedType> = {
   azureChatDeployment: "string",
   azureWhisperDeployment: "string",
   azureOmitTemperature: "boolean",
+  azureSpeechEndpoint: "string",
+  azureSpeechApiKey: "string",
+  maiCandidateLocales: "stringArray",
+  maiTranscribeStyle: "string",
   autoStartEnabled: "boolean",
 };
 
@@ -284,6 +301,8 @@ function matchesExpectedType(value: unknown, expected: ExpectedType): boolean {
   switch (expected) {
     case "string":
       return typeof value === "string";
+    case "stringArray":
+      return Array.isArray(value) && value.every((item) => typeof item === "string");
     case "number":
       return typeof value === "number" && Number.isFinite(value);
     case "boolean":
@@ -313,6 +332,17 @@ export function sanitizeSettingsPayload(
     // 列舉型欄位光靠 typeof 檢查不夠：備份是可任意編輯的 JSON，
     // 未知的驗證模式會一路帶進 store 並讓下游 header 判斷失準。
     if (key === "azureAuthMode" && !isAzureAuthMode(value)) continue;
+    if (key === "maiCandidateLocales") {
+      result[key] = normalizeMaiCandidateLocales(value);
+      continue;
+    }
+    if (
+      key === "maiTranscribeStyle" &&
+      (typeof value !== "string" ||
+        value !== getEffectiveMaiTranscribeStyle(value))
+    ) {
+      continue;
+    }
     result[key] = value;
   }
   return result;

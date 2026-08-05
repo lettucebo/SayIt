@@ -38,7 +38,9 @@ const settingsStore = useSettingsStore();
 // 付費偵測一律依 provider id：Azure Whisper 的 selectedWhisperModelId 仍是 Groq
 // model id，無法用 model config 判斷；LLM 同理（Azure 無 registry entry）。
 const isPaidWhisperProvider = computed(
-  () => settingsStore.whisperProviderId === "azure",
+  () =>
+    settingsStore.whisperProviderId === "azure" ||
+    settingsStore.whisperProviderId === "mai",
 );
 
 /** 目前 Gemini 轉錄模型實際採用的每日額度（使用者覆寫 > 內建預設） */
@@ -430,4 +432,3 @@ onBeforeUnmount(() => {
     </Card>
   </div>
 </template>
-

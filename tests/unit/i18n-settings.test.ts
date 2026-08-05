@@ -147,6 +147,29 @@ describe("i18n 設定功能", () => {
       expect(localeList).toContain("zh-CN");
       expect(localeList).toContain("ko");
     });
+
+    it("[P0] MAI 候選語言保留繁簡中文的不同 BCP-47 代碼，並清洗匯入值", async () => {
+      const {
+        MAI_CANDIDATE_LOCALE_OPTIONS,
+        normalizeMaiCandidateLocales,
+      } = await import("../../src/i18n/languageConfig");
+      expect(MAI_CANDIDATE_LOCALE_OPTIONS.map((option) => option.locale)).toEqual([
+        "zh-TW",
+        "en-US",
+        "ja-JP",
+        "zh-CN",
+        "ko-KR",
+      ]);
+      expect(
+        normalizeMaiCandidateLocales([
+          "zh-TW",
+          "zh-CN",
+          "zh-TW",
+          "invalid",
+          123,
+        ]),
+      ).toEqual(["zh-TW"]);
+    });
   });
 
   // ==========================================================================

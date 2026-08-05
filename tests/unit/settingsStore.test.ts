@@ -52,6 +52,7 @@ vi.mock("../../src/i18n/languageConfig", () => ({
   detectSystemLocale: () => "zh-TW",
   getHtmlLangForLocale: () => "zh-TW",
   getWhisperCodeForTranscriptionLocale: () => null,
+  normalizeMaiCandidateLocales: () => [],
 }));
 
 vi.mock("../../src/lib/enhancer", () => ({
@@ -89,11 +90,17 @@ vi.mock("../../src/lib/modelRegistry", () => ({
   DEFAULT_WHISPER_MODEL_ID: "test-whisper",
   getEffectiveLlmModelId: (id: string | null) => id ?? "test-llm",
   getEffectiveWhisperModelId: (id: string | null) => id ?? "test-whisper",
+  findLlmModelConfig: () => ({ providerId: "groq" }),
   getEffectiveTranscriptionProviderId: (id: string | null | undefined) =>
-    id === "azure" || id === "gemini" || id === "groq" ? id : "groq",
+    id === "azure" || id === "gemini" || id === "groq" || id === "mai"
+      ? id
+      : "groq",
   getEffectiveGeminiTranscriptionModelId: (id: string | null | undefined) =>
     id === "gemini-3.6-flash" ? id : "gemini-3.5-flash-lite",
   GEMINI_TRANSCRIPTION_MODEL: "gemini-3.5-flash-lite",
+  MAI_TRANSCRIPTION_MODEL_ID: "mai-transcribe-1.5",
+  getEffectiveMaiTranscribeStyle: (style: string | null | undefined) =>
+    style === "verbatim" ? "verbatim" : "default",
   DEFAULT_QUOTA_PERIOD: "daily",
   getModelListByProvider: () => [],
   getDefaultModelIdForProvider: () => "test-llm",
