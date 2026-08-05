@@ -2,6 +2,12 @@
 
 SayIt 版本更新紀錄。
 
+## [0.15.5] - 2026-08-05
+
+### Added
+
+- 新增 MAI-Transcribe 1.5 轉錄來源：需要使用公司既有 Azure AI Speech 資源時，原本只能選 Groq、Azure Whisper 或 Gemini，無法使用 Microsoft 的新一代轉錄模型。現在可在設定中選擇 MAI-Transcribe 1.5，並以獨立的 Speech endpoint 與金鑰連線；音訊只會傳送至通過 HTTPS 與 Azure Speech 網域白名單驗證的端點。設定備份會保留 endpoint、候選語言與逐字風格，但一律排除金鑰；使用 Entra ID 時，介面會明確提示 Speech 資源所需的 `Cognitive Services Speech User` 角色，避免登入成功後才因權限不足失敗。
+
 ## [0.15.3] - 2026-08-03
 
 ### Added

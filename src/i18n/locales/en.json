@@ -625,8 +625,7 @@
     },
     "upgradeNotice": {
       "title": "SayIt Update Summary",
-      "item1": "Sort replacement rules by six data columns: As your rule list grows, finding a rule by when it runs, whether it is enabled, or when you created it used to mean scanning a fixed order. All six data columns are now sortable, with newest rules first by default. Sorting changes only the display, never the order in which rules are applied.",
-      "item2": "Keep replacement rules safe when storage fails: A settings-file read error used to look like an empty list, so a later save could overwrite your existing rules. SayIt now refuses normal edits and exports after a read failure, saves successful changes in order, and preserves older entries it cannot yet recognize.",
+      "item1": "MAI-Transcribe 1.5 transcription: Add Azure AI Speech's MAI-Transcribe 1.5 as a transcription source with its own Speech endpoint and credential. When using Entra ID, SayIt now identifies the required Speech resource role before a missing permission turns into a failed request.",
       "dismiss": "Got it"
     }
   },
