@@ -543,6 +543,8 @@ describe("useVoiceFlowStore", () => {
       deployment: null,
       apiVersion: null,
       authMode: null,
+      candidateLocales: null,
+      transcribeStyle: null,
     });
     expect(store.status).toBe("success");
     expect(store.message).toBe("voiceFlow.pasteSuccess");
@@ -1962,6 +1964,8 @@ describe("useVoiceFlowStore", () => {
         deployment: null,
         apiVersion: null,
         authMode: null,
+        candidateLocales: null,
+        transcribeStyle: null,
       });
     });
 
@@ -1996,6 +2000,8 @@ describe("useVoiceFlowStore", () => {
         deployment: null,
         apiVersion: null,
         authMode: null,
+        candidateLocales: null,
+        transcribeStyle: null,
       });
     });
 
@@ -2062,6 +2068,8 @@ describe("useVoiceFlowStore", () => {
         deployment: null,
         apiVersion: null,
         authMode: null,
+        candidateLocales: null,
+        transcribeStyle: null,
       });
 
       // enhancer 也收到詞彙

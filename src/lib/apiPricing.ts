@@ -12,8 +12,8 @@ const WHISPER_MIN_BILLING_MS = 10_000;
  * Groq 最低計費 10 秒/次，不足 10 秒一律按 10 秒算。
  * 從 modelRegistry 查表取得對應模型的每小時費率。
  *
- * 非 Whisper 系模型（如 Gemini 轉錄）採 audio-token 計價、與每小時費率無關，
- * 一律回 0 表示「未追蹤」——套用 Groq 費率會在 Dashboard 顯示錯誤金額。
+ * 非 Whisper 系模型（如 Gemini 與 Preview 中的 MAI-Transcribe）不套用 Groq
+ * 每小時計費。一律回 0 表示「未追蹤」——捏造費率會在 Dashboard 顯示錯誤金額。
  * 此判斷刻意放在這裡（而非各呼叫點），確保即時轉錄與歷史重新辨識兩條路徑一致。
  */
 export function calculateWhisperCostCeiling(

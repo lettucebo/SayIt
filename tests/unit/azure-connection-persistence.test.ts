@@ -132,6 +132,36 @@ describe("saveAzureConnection 的資料保存性", () => {
     expect(mockStoreData.get("geminiApiKey")).toBe("gemini-key");
   });
 
+  it("[P0] MAI 使用獨立 Speech endpoint/key，但沿用既有 Azure 身分設定", async () => {
+    const { useSettingsStore } = await import(
+      "../../src/stores/useSettingsStore"
+    );
+    const store = useSettingsStore();
+    await store.loadSettings();
+
+    await store.saveAzureConnection(
+      baseConfig({ authMode: "key", apiKey: "openai-resource-key" }),
+    );
+    await store.saveAzureSpeechConnection(
+      "https://speech.cognitiveservices.azure.com/",
+      "speech-resource-key",
+    );
+    await store.saveMaiCandidateLocales(["zh-TW"]);
+    await store.saveMaiTranscribeStyle("verbatim");
+    await store.saveWhisperProvider("mai");
+
+    const config = await store.getWhisperRequestConfig();
+    expect(config.provider).toBe("mai");
+    if (config.provider !== "mai") throw new Error("Expected MAI config");
+    expect(config.endpoint).toBe("https://speech.cognitiveservices.azure.com");
+    expect(config.apiKey).toBe("speech-resource-key");
+    expect(config.candidateLocales).toEqual(["zh-TW"]);
+    expect(config.transcribeStyle).toBe("verbatim");
+    expect(store.hasWhisperConfig).toBe(true);
+    expect(mockStoreData.get("azureApiKey")).toBe("openai-resource-key");
+    expect(mockStoreData.get("azureSpeechApiKey")).toBe("speech-resource-key");
+  });
+
   it("[P0] 設定尚未載入完成時拒絕儲存，避免空白輸入覆寫既有設定", async () => {
     // main-window.ts 先 app.mount() 才 await loadSettings()，所以 SettingsView 的
     // onMounted 可能早於載入完成。此時輸入欄位還是預設空值，存回去會整批清空。

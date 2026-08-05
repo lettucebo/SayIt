@@ -730,6 +730,10 @@ export const useHistoryStore = defineStore("history", () => {
         deployment: whisperCfg.deployment ?? null,
         apiVersion: whisperCfg.apiVersion ?? null,
         authMode: whisperCfg.authMode ?? null,
+        candidateLocales:
+          whisperCfg.provider === "mai" ? whisperCfg.candidateLocales : null,
+        transcribeStyle:
+          whisperCfg.provider === "mai" ? whisperCfg.transcribeStyle : null,
       });
     } catch (err) {
       captureError(err, { source: "history", step: "retranscribe-invoke" });

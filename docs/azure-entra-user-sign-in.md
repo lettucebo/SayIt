@@ -1,6 +1,6 @@
-# 使用 Entra ID 登入 Azure OpenAI / Foundry
+# 使用 Entra ID 登入 Azure OpenAI / Foundry / Speech
 
-SayIt 支援用**你自己的公司帳號**登入 Azure OpenAI / Microsoft Foundry，
+SayIt 支援用**你自己的公司帳號**登入 Azure OpenAI / Microsoft Foundry / Speech，
 不需要 client secret。適合公司政策禁用長期共享密鑰的環境。
 
 ## 為什麼用這個模式
@@ -65,6 +65,10 @@ Azure Portal → **Microsoft Entra ID** → **App registrations** → **New regi
 前往你的 **Azure OpenAI / AI Services 資源** → **Access control (IAM)**
 → **Add role assignment** → 角色選 **Cognitive Services OpenAI User**
 → 指派給使用者，或（建議）指派給一個 Entra 群組再把使用者加進去。
+
+若使用 MAI-Transcribe，還要在**Azure AI Speech 資源**上指派
+**Cognitive Services Speech User** 角色；OpenAI 與 Speech 是不同資源，
+各自的 RBAC 指派不會互通。
 
 > 變更後最多需要 5 分鐘生效。
 
@@ -146,7 +150,7 @@ echo "Client ID: $APP_ID"
 | 瀏覽器顯示 **AADSTS50011**（reply URL 不符） | App Registration 的 redirect URI 沒設或帶了路徑。改成 `http://localhost`（不含路徑） |
 | 瀏覽器顯示 **AADSTS7000218** 或要求 client secret | 沒開 **Allow public client flows** |
 | 顯示「登入被貴公司的存取政策擋下」 | Conditional Access 擋下。把訊息中的 AADSTS 代碼提供給 IT |
-| 登入成功但轉錄回 **401 / 403** | 缺 Azure RBAC。確認在**資源**上有 `Cognitive Services OpenAI User`（不是只有 App Registration 權限），並等 5 分鐘 |
+| 登入成功但轉錄回 **401 / 403** | 缺 Azure RBAC。Azure OpenAI / Foundry 要有 `Cognitive Services OpenAI User`；MAI-Transcribe 的 Azure AI Speech 資源要有 `Cognitive Services Speech User`（不是只有 App Registration 權限），並等 5 分鐘 |
 | 登入成功但回 **404** | 部署名稱打錯，或 endpoint 指向錯的資源 |
 | 一直停在「已開啟瀏覽器，請完成登入…」 | 防毒/防火牆可能擋掉本機 loopback 連線。放行 SayIt 對 `127.0.0.1` 的本機連線後重試；或按取消再試一次 |
 | 更新 SayIt 後要求重新登入 | macOS 未簽章版本的已知限制，重新登入即可 |

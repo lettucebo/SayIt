@@ -6,15 +6,25 @@ export interface LanguageOption {
   locale: SupportedLocale;
   displayName: string;
   whisperCode: string;
+  /** Azure AI Speech Fast Transcription 的候選語言 BCP-47 代碼。 */
+  maiLocale: MaiCandidateLocale;
   htmlLang: string;
   navigatorPatternList: string[];
 }
+
+export type MaiCandidateLocale =
+  | "zh-TW"
+  | "en-US"
+  | "ja-JP"
+  | "zh-CN"
+  | "ko-KR";
 
 export const LANGUAGE_OPTIONS: LanguageOption[] = [
   {
     locale: "zh-TW",
     displayName: "\u7E41\u9AD4\u4E2D\u6587",
     whisperCode: "zh",
+    maiLocale: "zh-TW",
     htmlLang: "zh-Hant",
     navigatorPatternList: ["zh-Hant-TW", "zh-Hant", "zh-TW"],
   },
@@ -22,6 +32,7 @@ export const LANGUAGE_OPTIONS: LanguageOption[] = [
     locale: "en",
     displayName: "English",
     whisperCode: "en",
+    maiLocale: "en-US",
     htmlLang: "en",
     navigatorPatternList: ["en"],
   },
@@ -29,6 +40,7 @@ export const LANGUAGE_OPTIONS: LanguageOption[] = [
     locale: "ja",
     displayName: "\u65E5\u672C\u8A9E",
     whisperCode: "ja",
+    maiLocale: "ja-JP",
     htmlLang: "ja",
     navigatorPatternList: ["ja"],
   },
@@ -36,6 +48,7 @@ export const LANGUAGE_OPTIONS: LanguageOption[] = [
     locale: "zh-CN",
     displayName: "\u7B80\u4F53\u4E2D\u6587",
     whisperCode: "zh",
+    maiLocale: "zh-CN",
     htmlLang: "zh-Hans",
     navigatorPatternList: ["zh-Hans", "zh-CN"],
   },
@@ -43,6 +56,7 @@ export const LANGUAGE_OPTIONS: LanguageOption[] = [
     locale: "ko",
     displayName: "\uD55C\uAD6D\uC5B4",
     whisperCode: "ko",
+    maiLocale: "ko-KR",
     htmlLang: "ko",
     navigatorPatternList: ["ko"],
   },
@@ -123,6 +137,36 @@ export const TRANSCRIPTION_LANGUAGE_OPTIONS: TranscriptionLanguageOption[] = [
     whisperCode: opt.whisperCode,
   })),
 ];
+
+/**
+ * MAI 目前設定頁提供與 SayIt 五個 UI 語系對應的輸入語言。
+ * Fast Transcription 的 MAI enhanced mode 限制最多一個 locale；留空才是多語自動辨識。
+ */
+export const MAI_CANDIDATE_LOCALE_OPTIONS = LANGUAGE_OPTIONS.map((option) => ({
+  locale: option.maiLocale,
+  displayName: option.displayName,
+}));
+
+const MAI_CANDIDATE_LOCALE_SET = new Set<string>(
+  MAI_CANDIDATE_LOCALE_OPTIONS.map((option) => option.locale),
+);
+
+export function normalizeMaiCandidateLocales(
+  value: unknown,
+): MaiCandidateLocale[] {
+  if (!Array.isArray(value)) return [];
+  const normalized: MaiCandidateLocale[] = [];
+  for (const locale of value) {
+    if (
+      typeof locale === "string" &&
+      MAI_CANDIDATE_LOCALE_SET.has(locale) &&
+      !normalized.includes(locale as MaiCandidateLocale)
+    ) {
+      normalized.push(locale as MaiCandidateLocale);
+    }
+  }
+  return normalized.slice(0, 1);
+}
 
 export function getWhisperCodeForTranscriptionLocale(
   locale: TranscriptionLocale,

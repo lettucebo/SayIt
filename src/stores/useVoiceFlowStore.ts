@@ -1422,6 +1422,8 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
         deployment: whisperCfg.deployment ?? null,
         apiVersion: whisperCfg.apiVersion ?? null,
         authMode: whisperCfg.authMode ?? null,
+        candidateLocales: whisperCfg.provider === "mai" ? whisperCfg.candidateLocales : null,
+        transcribeStyle: whisperCfg.provider === "mai" ? whisperCfg.transcribeStyle : null,
       });
       if (isAborted.value) return;
 
@@ -1899,6 +1901,10 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
           deployment: whisperCfg.deployment ?? null,
           apiVersion: whisperCfg.apiVersion ?? null,
           authMode: whisperCfg.authMode ?? null,
+          candidateLocales:
+            whisperCfg.provider === "mai" ? whisperCfg.candidateLocales : null,
+          transcribeStyle:
+            whisperCfg.provider === "mai" ? whisperCfg.transcribeStyle : null,
         },
       );
       if (isAborted.value) return;
