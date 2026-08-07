@@ -26,6 +26,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useFeedbackMessage } from "./composables/useFeedbackMessage";
+import InlineFeedback from "./components/InlineFeedback.vue";
 import { listenToEvent, VOCABULARY_CHANGED } from "./composables/useTauriEvents";
 import { useSettingsStore } from "./stores/useSettingsStore";
 import { useVocabularyStore } from "./stores/useVocabularyStore";
@@ -389,13 +390,12 @@ onUnmounted(() => {
             {{ $t("mainApp.update.installNow") }}
           </Button>
         </div>
-        <p
-          v-if="updateFeedback.message.value"
-          class="mt-1 text-xs"
-          :class="updateFeedback.type.value === 'success' ? 'text-primary' : 'text-destructive'"
-        >
-          {{ updateFeedback.message.value }}
-        </p>
+        <div class="mt-1 min-h-4">
+          <InlineFeedback
+            :feedback="updateFeedback.state.value"
+            class="block text-xs"
+          />
+        </div>
       </SidebarFooter>
     </Sidebar>
 

@@ -17,6 +17,7 @@ applyTo: "src/**/*.{ts,vue}"
 7. ❌ 直接 import Tauri event API → 經 `src/composables/useTauriEvents.ts` 封裝。
 8. ❌ 假設 `invoke()` 錯誤是 `Error` 實例 → Rust 錯誤 enum 經 `serialize_str` 以**純字串** reject；錯誤比對一律先 `extractErrorMessage(err)` 正規化（見 `src/lib/errorUtils.ts`），勿包在 `error instanceof Error` 內。
 9. ❌ 未經設計直接實作 UI → 先用 Pencil MCP 完成 `design.pen` 設計稿，再寫程式碼。
+10. ❌ 手寫 `<Transition name="feedback-fade">`、在 View 內三元判斷回饋色彩、或將回饋渲染在 `CardContent` 尾端 → 操作回饋一律使用 `InlineFeedback`，按鈕列用 `SettingsActionRow`，Switch / Select 用 `SettingsControlRow`。回饋錨點不得位於該操作會卸載的 `v-if`、`v-for` 或 Dialog 中。
 
 > **依賴方向（硬規則）**：`views/ → components/ + stores/ + composables/`；`stores/ → lib/`；`lib/ → 外部 API`。**❌ views/ 不可直接 import `lib/`**（一律經 Pinia store：`useSettingsStore` / `useHistoryStore` / `useVocabularyStore` / `useVoiceFlowStore`）；**❌ 元件不可直接執行 SQL**（經 `src/lib/database.ts` + store）。
 
