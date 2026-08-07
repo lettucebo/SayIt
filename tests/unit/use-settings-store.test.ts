@@ -569,6 +569,138 @@ describe("useSettingsStore", () => {
     });
   });
 
+  describe("azureChatModelFamily", () => {
+    it("[P0] 應持久化 profile、更新 ref 並 emit settings:updated", async () => {
+      const { useSettingsStore } = await import(
+        "../../src/stores/useSettingsStore"
+      );
+      const store = useSettingsStore();
+
+      await store.saveAzureChatModelFamily("deepseek");
+
+      expect(mockStoreSet).toHaveBeenCalledWith(
+        "azureChatModelFamily",
+        "deepseek",
+      );
+      expect(store.azureChatModelFamily).toBe("deepseek");
+      expect(mockEmit).toHaveBeenCalledWith("settings:updated", {
+        key: "azureChatModelFamily",
+        value: "deepseek",
+      });
+      expect(mockStoreSet).toHaveBeenCalledWith(
+        "azureChatModelFamilySource",
+        "manual",
+      );
+      expect(store.azureChatModelFamilySource).toBe("manual");
+    });
+
+    it("[P0] 舊設定缺 profile 時依 omitTemperature 推導相容 profile，且來源視為手動", async () => {
+      mockStoreData.set("azureOmitTemperature", true);
+      const { useSettingsStore } = await import(
+        "../../src/stores/useSettingsStore"
+      );
+      const store = useSettingsStore();
+
+      await store.loadSettings();
+
+      expect(store.azureChatModelFamily).toBe("azure-openai-reasoning");
+      expect(store.azureChatModelFamilySource).toBe("manual");
+      expect(mockStoreSet).not.toHaveBeenCalledWith(
+        "azureChatModelFamily",
+        expect.anything(),
+      );
+    });
+
+    it("[P0] 跨視窗同步應讀取已儲存的 profile 與來源", async () => {
+      mockStoreData.set("azureChatModelFamily", "kimi");
+      mockStoreData.set("azureChatModelFamilySource", "auto");
+      const { useSettingsStore } = await import(
+        "../../src/stores/useSettingsStore"
+      );
+      const store = useSettingsStore();
+
+      await store.refreshCrossWindowSettings();
+
+      expect(store.azureChatModelFamily).toBe("kimi");
+      expect(store.azureChatModelFamilySource).toBe("auto");
+    });
+
+    it("[P0] 選取已驗證部署時必須原子寫入部署、profile 與自動來源", async () => {
+      const { useSettingsStore } = await import(
+        "../../src/stores/useSettingsStore"
+      );
+      const store = useSettingsStore();
+
+      await store.saveAzureChatDeploymentSelection({
+        deployment: "deepseek-v4",
+        modelFamily: "deepseek",
+        familySource: "auto",
+      });
+
+      expect(mockStoreSet).toHaveBeenCalledWith(
+        "azureChatDeployment",
+        "deepseek-v4",
+      );
+      expect(mockStoreSet).toHaveBeenCalledWith(
+        "azureChatModelFamily",
+        "deepseek",
+      );
+      expect(mockStoreSet).toHaveBeenCalledWith(
+        "azureChatModelFamilySource",
+        "auto",
+      );
+      expect(mockStoreSave).toHaveBeenCalledTimes(1);
+      expect(store.azureChatDeployment).toBe("deepseek-v4");
+      expect(store.azureChatModelFamily).toBe("deepseek");
+      expect(store.azureChatModelFamilySource).toBe("auto");
+    });
+  });
+
+  describe("azureProjectName", () => {
+    it("[P0] 儲存完整 Foundry 專案端點時應拆出 origin 與 project 名稱", async () => {
+      const { useSettingsStore } = await import(
+        "../../src/stores/useSettingsStore"
+      );
+      const store = useSettingsStore();
+      await store.loadSettings();
+
+      await store.saveAzureConnection({
+        enabled: true,
+        endpoint:
+          "https://r.services.ai.azure.com/api/projects/voice-project",
+        authMode: "key",
+        apiKey: "key",
+        tenantId: "",
+        clientId: "",
+        clientSecret: "",
+        apiVersion: "",
+      });
+
+      expect(mockStoreSet).toHaveBeenCalledWith(
+        "azureEndpoint",
+        "https://r.services.ai.azure.com",
+      );
+      expect(mockStoreSet).toHaveBeenCalledWith(
+        "azureProjectName",
+        "voice-project",
+      );
+      expect(store.azureEndpoint).toBe("https://r.services.ai.azure.com");
+      expect(store.azureProjectName).toBe("voice-project");
+    });
+
+    it("[P1] 跨視窗同步應讀取專案名稱", async () => {
+      mockStoreData.set("azureProjectName", "voice-project");
+      const { useSettingsStore } = await import(
+        "../../src/stores/useSettingsStore"
+      );
+      const store = useSettingsStore();
+
+      await store.refreshCrossWindowSettings();
+
+      expect(store.azureProjectName).toBe("voice-project");
+    });
+  });
+
   // ==========================================================================
   // refreshCrossWindowSettings
   // ==========================================================================

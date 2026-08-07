@@ -118,6 +118,19 @@ describe("getTranscriptionErrorMessage", () => {
     ).toBe("網路連線中斷");
   });
 
+  it("[P0] context_length_exceeded 應提示內容超過模型長度而非泛用 400", async () => {
+    const { EnhancerApiError } = await import("../../src/lib/enhancer");
+    expect(
+      getEnhancementErrorMessage(
+        new EnhancerApiError(
+          400,
+          "Bad Request",
+          '{"error":{"code":"context_length_exceeded"}}',
+        ),
+      ),
+    ).toBe("輸入內容超過模型可處理的長度，已貼上原始文字");
+  });
+
   it("[P0] DNS resolution failure 應映射為網路連線中斷", () => {
     expect(
       getTranscriptionErrorMessage(
@@ -220,6 +233,15 @@ describe("getEnhancementErrorMessage - 網路錯誤", () => {
         new Error("network error: connection refused"),
       ),
     ).toBe("網路連線中斷");
+  });
+
+  it("[P0] 推理模型沒有最終輸出時應顯示明確 fallback 原因", () => {
+    const error = Object.assign(new Error("empty output"), {
+      code: "ENHANCEMENT_EMPTY_OUTPUT",
+    });
+    expect(getEnhancementErrorMessage(error)).toBe(
+      "模型未產生最終整理結果，已貼原始文字",
+    );
   });
 });
 

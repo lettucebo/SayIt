@@ -148,6 +148,9 @@ export function getEnhancementErrorMessage(error: unknown): string {
     const status = error.statusCode;
     if (status === 401) return t("errors.enhancement.invalidApiKey");
     if (status === 429) return t("errors.enhancement.rateLimited");
+    if (error.body.includes("context_length_exceeded")) {
+      return t("errors.enhancement.contextLengthExceeded");
+    }
     if (status === 400) return t("errors.enhancement.badRequest");
     if (status >= 500) return t("errors.enhancement.serviceUnavailable");
   }
@@ -159,6 +162,12 @@ export function getEnhancementErrorMessage(error: unknown): string {
 
     if ((error as Error & { code?: string }).code === "ENHANCEMENT_TIMEOUT") {
       return t("errors.enhancement.timeout");
+    }
+    if (
+      (error as Error & { code?: string }).code ===
+      "ENHANCEMENT_EMPTY_OUTPUT"
+    ) {
+      return t("errors.enhancement.emptyOutput");
     }
   }
 

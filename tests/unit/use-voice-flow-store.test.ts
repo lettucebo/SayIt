@@ -160,6 +160,9 @@ vi.mock("../../src/lib/enhancer", () => {
       this.name = "EnhancerApiError";
     }
   }
+  class EnhancerEmptyOutputError extends Error {
+    readonly code = "ENHANCEMENT_EMPTY_OUTPUT";
+  }
   return {
     enhanceText: mockEnhanceText,
     enhanceWithAnomalyGuard: async (
@@ -171,7 +174,21 @@ vi.mock("../../src/lib/enhancer", () => {
       return { text: r.text, usage: r.usage ?? null, wasAnomalous: false };
     },
     buildSystemPrompt: (basePrompt: string) => basePrompt,
+    combineChatUsage: (
+      first: {
+        promptTokens: number;
+        completionTokens: number;
+        totalTokens: number;
+      } | null,
+      second: {
+        promptTokens: number;
+        completionTokens: number;
+        totalTokens: number;
+      } | null,
+    ) => first ?? second,
     EnhancerApiError,
+    EnhancerEmptyOutputError,
+    getEnhancementErrorUsage: () => null,
   };
 });
 

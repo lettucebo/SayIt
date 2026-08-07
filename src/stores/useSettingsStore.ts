@@ -78,17 +78,32 @@ import {
   type QuotaPeriod,
   type GeminiTranscriptionModelId,
   type MaiTranscribeStyle,
+  type AzureChatModelFamilyId,
+  type AzureChatModelFamilySource,
   DEFAULT_QUOTA_PERIOD,
+  DEFAULT_AZURE_CHAT_MODEL_FAMILY_ID,
+  getEffectiveAzureChatModelFamilySource,
   GEMINI_TRANSCRIPTION_MODEL,
   MAI_TRANSCRIPTION_MODEL_ID,
+  getEffectiveAzureChatModelFamilyId,
+  isAzureChatModelFamilyId,
   getEffectiveTranscriptionProviderId,
   getEffectiveGeminiTranscriptionModelId,
   getEffectiveMaiTranscribeStyle,
 } from "../lib/modelRegistry";
 import {
   normalizeAzureEndpoint,
+  parseAzureProjectEndpoint,
   type AzureRequestOptions,
 } from "../lib/llmProvider";
+import {
+  listAzureChatDeployments as fetchAzureChatDeployments,
+  type AzureDeploymentListResult,
+} from "../lib/foundryDeployments";
+import {
+  clearAzureTemperatureCapability,
+  getAzureTemperatureCapability,
+} from "../lib/azureTemperatureCapability";
 import {
   getAzureAccessToken,
   clearAzureTokenCache,
@@ -228,6 +243,7 @@ export const useSettingsStore = defineStore("settings", () => {
   // ── Azure / Microsoft Foundry ──
   const azureEnabled = ref<boolean>(false);
   const azureEndpoint = ref<string>("");
+  const azureProjectName = ref<string>("");
   const azureAuthMode = ref<AzureAuthMode>("key");
   const azureApiKey = ref<string>("");
   const azureTenantId = ref<string>("");
@@ -236,6 +252,12 @@ export const useSettingsStore = defineStore("settings", () => {
   const azureApiVersion = ref<string>("");
   const azureOmitTemperature = ref<boolean>(false);
   const azureChatDeployment = ref<string>("");
+  const azureChatModelFamily = ref<AzureChatModelFamilyId>(
+    DEFAULT_AZURE_CHAT_MODEL_FAMILY_ID,
+  );
+  const azureChatModelFamilySource = ref<AzureChatModelFamilySource>(
+    "manual",
+  );
   const azureWhisperDeployment = ref<string>("");
   const azureSpeechEndpoint = ref<string>("");
   const azureSpeechApiKey = ref<string>("");
@@ -398,6 +420,7 @@ export const useSettingsStore = defineStore("settings", () => {
     return {
       enabled: azureEnabled.value,
       endpoint: azureEndpoint.value,
+      projectName: azureProjectName.value,
       apiVersion: azureApiVersion.value,
       authMode: azureAuthMode.value,
       apiKey: azureApiKey.value,
@@ -405,6 +428,7 @@ export const useSettingsStore = defineStore("settings", () => {
       clientId: azureClientId.value,
       clientSecret: azureClientSecret.value,
       chatDeployment: azureChatDeployment.value,
+      chatModelFamily: azureChatModelFamily.value,
       whisperDeployment: azureWhisperDeployment.value,
       speechEndpoint: azureSpeechEndpoint.value,
       speechApiKey: azureSpeechApiKey.value,
@@ -449,6 +473,43 @@ export const useSettingsStore = defineStore("settings", () => {
     }
   }
 
+  async function saveAzureChatDeploymentSelection({
+    deployment,
+    modelFamily,
+    familySource,
+  }: {
+    deployment: string;
+    modelFamily: AzureChatModelFamilyId;
+    familySource: AzureChatModelFamilySource;
+  }) {
+    try {
+      const normalizedDeployment = deployment.trim();
+      const effectiveFamily = getEffectiveAzureChatModelFamilyId(modelFamily);
+      const effectiveSource = getEffectiveAzureChatModelFamilySource(
+        familySource,
+      );
+      const store = await load(STORE_NAME);
+      await store.set("azureChatDeployment", normalizedDeployment);
+      await store.set("azureChatModelFamily", effectiveFamily);
+      await store.set("azureChatModelFamilySource", effectiveSource);
+      await store.save();
+
+      azureChatDeployment.value = normalizedDeployment;
+      azureChatModelFamily.value = effectiveFamily;
+      azureChatModelFamilySource.value = effectiveSource;
+      await emitEvent(SETTINGS_UPDATED, {
+        key: "azureChatDeployment",
+        value: normalizedDeployment,
+      });
+    } catch (err) {
+      console.error(
+        "[useSettingsStore] saveAzureChatDeploymentSelection failed:",
+        extractErrorMessage(err),
+      );
+      throw err;
+    }
+  }
+
   function azureOptionsFromSnapshot(
     snap: AzureConfigSnapshot,
     authValue: string,
@@ -459,8 +520,35 @@ export const useSettingsStore = defineStore("settings", () => {
       apiVersion: snap.apiVersion || undefined,
       authMode,
       authValue,
+      modelFamily: snap.chatModelFamily,
       omitTemperature: snap.omitTemperature,
     };
+  }
+
+  async function resolveAzureChatAuth(
+    snap: AzureConfigSnapshot,
+  ): Promise<{ authValue: string; authMode: AzureAuthHeaderMode }> {
+    if (snap.authMode === "entraUser") {
+      const token = await acquireAzureUserToken(
+        { tenantId: snap.tenantId, clientId: snap.clientId },
+        "chat",
+      );
+      return { authValue: token, authMode: "bearer" };
+    }
+
+    if (snap.authMode === "entra") {
+      const token = await getAzureAccessToken(
+        {
+          tenantId: snap.tenantId,
+          clientId: snap.clientId,
+          clientSecret: snap.clientSecret,
+        },
+        getAzureScopeForApiKind("chat"),
+      );
+      return { authValue: token, authMode: "bearer" };
+    }
+
+    return { authValue: snap.apiKey, authMode: "key" };
   }
 
   /**
@@ -490,44 +578,49 @@ export const useSettingsStore = defineStore("settings", () => {
       return { apiKey: "", provider, modelId: snap.chatDeployment };
     }
 
-    // chat 走 v1 路徑（/openai/v1/）→ ai.azure.com 受眾
-    if (snap.authMode === "entraUser") {
-      const token = await acquireAzureUserToken(
-        { tenantId: snap.tenantId, clientId: snap.clientId },
-        "chat",
+    const auth = await resolveAzureChatAuth(snap);
+    let temperatureCapability: Awaited<
+      ReturnType<typeof getAzureTemperatureCapability>
+    > = undefined;
+    try {
+      temperatureCapability = await getAzureTemperatureCapability(
+        snap.endpoint,
+        snap.chatDeployment,
       );
-      return {
-        apiKey: token,
-        provider,
-        modelId: snap.chatDeployment,
-        azure: azureOptionsFromSnapshot(snap, token, "bearer"),
-      };
-    }
-
-    const scope = getAzureScopeForApiKind("chat");
-    if (snap.authMode === "entra") {
-      const token = await getAzureAccessToken(
-        {
-          tenantId: snap.tenantId,
-          clientId: snap.clientId,
-          clientSecret: snap.clientSecret,
-        },
-        scope,
+    } catch (err) {
+      console.warn(
+        "[useSettingsStore] failed to read Azure temperature capability:",
+        extractErrorMessage(err),
       );
-      return {
-        apiKey: token,
-        provider,
-        modelId: snap.chatDeployment,
-        azure: azureOptionsFromSnapshot(snap, token, "bearer"),
-      };
     }
-
     return {
-      apiKey: snap.apiKey,
+      apiKey: auth.authValue,
       provider,
       modelId: snap.chatDeployment,
-      azure: azureOptionsFromSnapshot(snap, snap.apiKey, "key"),
+      azure: {
+        ...azureOptionsFromSnapshot(snap, auth.authValue, auth.authMode),
+        supportsTemperature: temperatureCapability?.supportsTemperature,
+      },
     };
+  }
+
+  async function listAzureChatDeployments(): Promise<AzureDeploymentListResult> {
+    const snap = snapshotAzureConfig();
+    if (!snap.enabled || snap.endpoint === "") {
+      throw new Error("AZURE_CONNECTION_INCOMPLETE");
+    }
+
+    const auth = await resolveAzureChatAuth(snap);
+    if (auth.authValue.trim() === "") {
+      throw new Error("AZURE_CREDENTIALS_INCOMPLETE");
+    }
+
+    return fetchAzureChatDeployments({
+      endpoint: snap.endpoint,
+      projectName: snap.projectName,
+      authMode: auth.authMode,
+      authValue: auth.authValue,
+    });
   }
 
   /** 用於 usage 記錄/成本計算的有效 chat 模型：Azure 用部署名，其餘用 selectedLlmModelId。 */
@@ -818,6 +911,8 @@ export const useSettingsStore = defineStore("settings", () => {
       azureEnabled.value = (await store.get<boolean>("azureEnabled")) ?? false;
       azureEndpoint.value =
         (await store.get<string>("azureEndpoint"))?.trim() ?? "";
+      azureProjectName.value =
+        (await store.get<string>("azureProjectName"))?.trim() ?? "";
       azureAuthMode.value =
         toAzureAuthMode(await store.get("azureAuthMode"));
       azureApiKey.value = (await store.get<string>("azureApiKey"))?.trim() ?? "";
@@ -833,6 +928,21 @@ export const useSettingsStore = defineStore("settings", () => {
         (await store.get<boolean>("azureOmitTemperature")) ?? false;
       azureChatDeployment.value =
         (await store.get<string>("azureChatDeployment"))?.trim() ?? "";
+      const savedAzureChatModelFamily = await store.get<string>(
+        "azureChatModelFamily",
+      );
+      // 舊版只有 omitTemperature；以它推導相容的 profile，但不在 load 時寫回，
+      // 避免兩個視窗同時啟動時對同一個 store 競寫。
+      azureChatModelFamily.value = getEffectiveAzureChatModelFamilyId(
+        savedAzureChatModelFamily ??
+          (azureOmitTemperature.value
+            ? "azure-openai-reasoning"
+            : "azure-openai"),
+      );
+      azureChatModelFamilySource.value =
+        getEffectiveAzureChatModelFamilySource(
+          await store.get<string>("azureChatModelFamilySource"),
+        );
       azureWhisperDeployment.value =
         (await store.get<string>("azureWhisperDeployment"))?.trim() ?? "";
       azureSpeechEndpoint.value =
@@ -1604,7 +1714,11 @@ export const useSettingsStore = defineStore("settings", () => {
         throw new Error("SETTINGS_NOT_LOADED");
       }
       const store = await load(STORE_NAME);
-      const normalizedEndpoint = normalizeAzureEndpoint(cfg.endpoint);
+      const projectEndpoint = parseAzureProjectEndpoint(cfg.endpoint);
+      const normalizedEndpoint = projectEndpoint.endpoint;
+      const previousEndpoint = azureEndpoint.value;
+      const previousProjectName = azureProjectName.value;
+      const previousChatDeployment = azureChatDeployment.value;
       const nextTenantId = cfg.tenantId.trim();
       const nextClientId = cfg.clientId.trim();
       // 換掉 tenant/client 等於換一個登入身分：舊的 refresh token 若不清掉會
@@ -1620,6 +1734,7 @@ export const useSettingsStore = defineStore("settings", () => {
       if (identityChanged) azureUserReauthRequired.value = false;
       await store.set("azureEnabled", cfg.enabled);
       await store.set("azureEndpoint", normalizedEndpoint);
+      await store.set("azureProjectName", projectEndpoint.projectName);
       await store.set("azureAuthMode", cfg.authMode);
       await store.set("azureApiKey", cfg.apiKey.trim());
       await store.set("azureTenantId", nextTenantId);
@@ -1652,12 +1767,29 @@ export const useSettingsStore = defineStore("settings", () => {
 
       azureEnabled.value = cfg.enabled;
       azureEndpoint.value = normalizedEndpoint;
+      azureProjectName.value = projectEndpoint.projectName;
       azureAuthMode.value = cfg.authMode;
       azureApiKey.value = cfg.apiKey.trim();
       azureTenantId.value = cfg.tenantId.trim();
       azureClientId.value = cfg.clientId.trim();
       azureClientSecret.value = cfg.clientSecret;
       azureApiVersion.value = cfg.apiVersion.trim();
+      if (
+        normalizedEndpoint !== previousEndpoint ||
+        projectEndpoint.projectName !== previousProjectName
+      ) {
+        try {
+          await clearAzureTemperatureCapability(
+            previousEndpoint,
+            previousChatDeployment,
+          );
+        } catch (err) {
+          console.warn(
+            "[useSettingsStore] failed to clear Azure temperature capability:",
+            extractErrorMessage(err),
+          );
+        }
+      }
       clearAzureTokenCache();
       // tenant/client 可能剛剛才變更 → 重新確認這組設定底下的登入狀態
       await refreshAzureUserAccount();
@@ -1695,9 +1827,12 @@ export const useSettingsStore = defineStore("settings", () => {
       }
 
       const store = await load(STORE_NAME);
+      const previousEndpoint = azureEndpoint.value;
+      const previousChatDeployment = azureChatDeployment.value;
       const keys = [
         "azureEnabled",
         "azureEndpoint",
+        "azureProjectName",
         "azureAuthMode",
         "azureApiKey",
         "azureTenantId",
@@ -1733,6 +1868,18 @@ export const useSettingsStore = defineStore("settings", () => {
 
       azureEnabled.value = false;
       azureEndpoint.value = "";
+      try {
+        await clearAzureTemperatureCapability(
+          previousEndpoint,
+          previousChatDeployment,
+        );
+      } catch (err) {
+        console.warn(
+          "[useSettingsStore] failed to clear Azure temperature capability:",
+          extractErrorMessage(err),
+        );
+      }
+      azureProjectName.value = "";
       azureAuthMode.value = "key";
       azureApiKey.value = "";
       azureTenantId.value = "";
@@ -1916,18 +2063,45 @@ export const useSettingsStore = defineStore("settings", () => {
 
   async function saveAzureChatDeployment(name: string) {
     try {
+      const normalizedName = name.trim();
       const store = await load(STORE_NAME);
-      await store.set("azureChatDeployment", name.trim());
+      await store.set("azureChatDeployment", normalizedName);
+      // 手動輸入沒有 Foundry metadata 可供驗證，不能繼續宣稱目前 profile
+      // 來自上一個部署的自動判定。
+      await store.set("azureChatModelFamilySource", "manual");
       await store.save();
-      azureChatDeployment.value = name.trim();
+      azureChatDeployment.value = normalizedName;
+      azureChatModelFamilySource.value = "manual";
       const payload: SettingsUpdatedPayload = {
         key: "azureChatDeployment",
-        value: name.trim(),
+        value: normalizedName,
       };
       await emitEvent(SETTINGS_UPDATED, payload);
     } catch (err) {
       console.error(
         "[useSettingsStore] saveAzureChatDeployment failed:",
+        extractErrorMessage(err),
+      );
+      throw err;
+    }
+  }
+
+  async function saveAzureChatModelFamily(id: AzureChatModelFamilyId) {
+    try {
+      const effectiveId = getEffectiveAzureChatModelFamilyId(id);
+      const store = await load(STORE_NAME);
+      await store.set("azureChatModelFamily", effectiveId);
+      await store.set("azureChatModelFamilySource", "manual");
+      await store.save();
+      azureChatModelFamily.value = effectiveId;
+      azureChatModelFamilySource.value = "manual";
+      await emitEvent(SETTINGS_UPDATED, {
+        key: "azureChatModelFamily",
+        value: effectiveId,
+      });
+    } catch (err) {
+      console.error(
+        "[useSettingsStore] saveAzureChatModelFamily failed:",
         extractErrorMessage(err),
       );
       throw err;
@@ -2092,6 +2266,8 @@ export const useSettingsStore = defineStore("settings", () => {
         case "azure": {
           azureEndpoint.value =
             (await store.get<string>("azureEndpoint"))?.trim() ?? "";
+          azureProjectName.value =
+            (await store.get<string>("azureProjectName"))?.trim() ?? "";
           azureAuthMode.value =
             toAzureAuthMode(await store.get("azureAuthMode"));
           azureApiKey.value =
@@ -2108,6 +2284,16 @@ export const useSettingsStore = defineStore("settings", () => {
             (await store.get<boolean>("azureOmitTemperature")) ?? false;
           azureChatDeployment.value =
             (await store.get<string>("azureChatDeployment"))?.trim() ?? "";
+          azureChatModelFamily.value = getEffectiveAzureChatModelFamilyId(
+            (await store.get<string>("azureChatModelFamily")) ??
+              (azureOmitTemperature.value
+                ? "azure-openai-reasoning"
+                : "azure-openai"),
+          );
+          azureChatModelFamilySource.value =
+            getEffectiveAzureChatModelFamilySource(
+              await store.get<string>("azureChatModelFamilySource"),
+            );
           break;
         }
       }
@@ -2668,19 +2854,37 @@ export const useSettingsStore = defineStore("settings", () => {
       // 呼叫 snapshotAzureConfig()，若邊讀邊寫 ref，就會取到新 endpoint 配
       // 舊 authMode／舊 tenant 的混合設定，把內容送到非預期的 Azure 資源。
       // 下面的賦值區塊沒有 await，對其他協程而言是不可分割的。
+      const nextAzureOmitTemperature =
+        (await store.get<boolean>("azureOmitTemperature")) ?? false;
+      const savedCrossWindowAzureChatModelFamily = await store.get<string>(
+        "azureChatModelFamily",
+      );
+      const savedCrossWindowAzureChatModelFamilySource = await store.get<string>(
+        "azureChatModelFamilySource",
+      );
       const nextAzure = {
         enabled: (await store.get<boolean>("azureEnabled")) ?? false,
         endpoint: (await store.get<string>("azureEndpoint"))?.trim() ?? "",
+        projectName:
+          (await store.get<string>("azureProjectName"))?.trim() ?? "",
         authMode: toAzureAuthMode(await store.get("azureAuthMode")),
         apiKey: (await store.get<string>("azureApiKey"))?.trim() ?? "",
         tenantId: (await store.get<string>("azureTenantId"))?.trim() ?? "",
         clientId: (await store.get<string>("azureClientId"))?.trim() ?? "",
         clientSecret: (await store.get<string>("azureClientSecret")) ?? "",
         apiVersion: (await store.get<string>("azureApiVersion"))?.trim() ?? "",
-        omitTemperature:
-          (await store.get<boolean>("azureOmitTemperature")) ?? false,
+        omitTemperature: nextAzureOmitTemperature,
         chatDeployment:
           (await store.get<string>("azureChatDeployment"))?.trim() ?? "",
+        chatModelFamily: getEffectiveAzureChatModelFamilyId(
+          savedCrossWindowAzureChatModelFamily ??
+            (nextAzureOmitTemperature
+              ? "azure-openai-reasoning"
+              : "azure-openai"),
+        ),
+        chatModelFamilySource: getEffectiveAzureChatModelFamilySource(
+          savedCrossWindowAzureChatModelFamilySource,
+        ),
         whisperDeployment:
           (await store.get<string>("azureWhisperDeployment"))?.trim() ?? "",
         speechEndpoint:
@@ -2699,6 +2903,7 @@ export const useSettingsStore = defineStore("settings", () => {
       };
       azureEnabled.value = nextAzure.enabled;
       azureEndpoint.value = nextAzure.endpoint;
+      azureProjectName.value = nextAzure.projectName;
       azureAuthMode.value = nextAzure.authMode;
       azureApiKey.value = nextAzure.apiKey;
       azureTenantId.value = nextAzure.tenantId;
@@ -2707,6 +2912,8 @@ export const useSettingsStore = defineStore("settings", () => {
       azureApiVersion.value = nextAzure.apiVersion;
       azureOmitTemperature.value = nextAzure.omitTemperature;
       azureChatDeployment.value = nextAzure.chatDeployment;
+      azureChatModelFamily.value = nextAzure.chatModelFamily;
+      azureChatModelFamilySource.value = nextAzure.chatModelFamilySource;
       azureWhisperDeployment.value = nextAzure.whisperDeployment;
       azureSpeechEndpoint.value = nextAzure.speechEndpoint;
       azureSpeechApiKey.value = nextAzure.speechApiKey;
@@ -2859,6 +3066,28 @@ export const useSettingsStore = defineStore("settings", () => {
     // 匯入等於換一組設定 → 舊的「需要重新登入」標記不再適用
     azureUserReauthRequired.value = false;
 
+    const importedAzureChatDeployment = settings["azureChatDeployment"];
+    const importedAzureChatModelFamily =
+      settings["azureChatModelFamily"];
+    let importedAzureChatModelFamilyDefaulted = false;
+    if (
+      typeof importedAzureChatDeployment === "string" &&
+      importedAzureChatDeployment.trim() !== "" &&
+      !isAzureChatModelFamilyId(importedAzureChatModelFamily)
+    ) {
+      // 舊備份沒有 family 時不可沿用本機既有值，否則新的 deployment 會套錯
+      // profile。仍以備份內既有 omitTemperature 維持舊版的參數行為。
+      const importedOmitTemperature =
+        settings["azureOmitTemperature"] === true;
+      await store.set(
+        "azureChatModelFamily",
+        importedOmitTemperature
+          ? "azure-openai-reasoning"
+          : DEFAULT_AZURE_CHAT_MODEL_FAMILY_ID,
+      );
+      importedAzureChatModelFamilyDefaulted = true;
+    }
+
     for (const [key, value] of Object.entries(settings)) {
       if (key === AUTO_START_KEY) {
         if (typeof value === "boolean") autoStartDesired = value;
@@ -2873,10 +3102,28 @@ export const useSettingsStore = defineStore("settings", () => {
         (key === "azureEndpoint" || key === "azureSpeechEndpoint") &&
         typeof value === "string"
       ) {
-        await store.set(key, normalizeAzureEndpoint(value));
+        if (key === "azureEndpoint") {
+          const projectEndpoint = parseAzureProjectEndpoint(value);
+          await store.set("azureEndpoint", projectEndpoint.endpoint);
+          if (
+            !Object.prototype.hasOwnProperty.call(
+              settings,
+              "azureProjectName",
+            )
+          ) {
+            await store.set("azureProjectName", projectEndpoint.projectName);
+          }
+        } else {
+          await store.set(key, normalizeAzureEndpoint(value));
+        }
         continue;
       }
       await store.set(key as ExportableSettingKey, value);
+    }
+    if (importedAzureChatModelFamilyDefaulted) {
+      // 舊備份的 deployment 沒有可信 family，不能保留目標機器原本的 auto
+      // 標記，也不能採信備份中與無效 family 搭配的來源欄位。
+      await store.set("azureChatModelFamilySource", "manual");
     }
     if (
       settings["azureEnabled"] === false &&
@@ -2970,6 +3217,7 @@ export const useSettingsStore = defineStore("settings", () => {
     deleteGeminiApiKey,
     azureEnabled,
     azureEndpoint,
+    azureProjectName,
     azureAuthMode,
     azureApiKey: computed(() => azureApiKey.value),
     azureTenantId,
@@ -2978,6 +3226,8 @@ export const useSettingsStore = defineStore("settings", () => {
     azureApiVersion,
     azureOmitTemperature,
     azureChatDeployment,
+    azureChatModelFamily,
+    azureChatModelFamilySource,
     azureWhisperDeployment,
     azureSpeechEndpoint,
     azureSpeechApiKey: computed(() => azureSpeechApiKey.value),
@@ -3004,7 +3254,10 @@ export const useSettingsStore = defineStore("settings", () => {
     maiTranscribeStyle,
     saveAzureConnection,
     deleteAzureConnection,
+    listAzureChatDeployments,
     saveAzureChatDeployment,
+    saveAzureChatModelFamily,
+    saveAzureChatDeploymentSelection,
     saveAzureWhisperDeployment,
     saveAzureSpeechConnection,
     saveMaiCandidateLocales,
