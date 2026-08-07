@@ -1,29 +1,54 @@
-import { ref } from "vue";
+import { onScopeDispose, ref } from "vue";
 
-type FeedbackType = "success" | "error" | "";
+export type FeedbackType = "success" | "error";
 
-const FEEDBACK_DISPLAY_DURATION_MS = 2500;
+export type Feedback = {
+  type: FeedbackType;
+  message: string;
+};
+
+export type FeedbackOptions = {
+  durationMs?: number;
+  persistent?: boolean;
+};
+
+const SUCCESS_DISPLAY_DURATION_MS = 2_500;
+const ERROR_DISPLAY_DURATION_MS = 6_000;
 
 export function useFeedbackMessage() {
-  const message = ref("");
-  const type = ref<FeedbackType>("");
+  const state = ref<Feedback | null>(null);
   let timer: ReturnType<typeof setTimeout> | null = null;
 
-  function clearTimer() {
-    if (!timer) return;
-    clearTimeout(timer);
-    timer = null;
+  function hide() {
+    if (timer !== null) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    state.value = null;
   }
 
-  function show(feedbackType: "success" | "error", feedbackMessage: string) {
-    clearTimer();
-    type.value = feedbackType;
-    message.value = feedbackMessage;
+  function show(
+    type: FeedbackType,
+    message: string,
+    options: FeedbackOptions = {},
+  ) {
+    hide();
+    state.value = { type, message };
+
+    if (options.persistent) return;
+
+    const durationMs = options.durationMs ??
+      (type === "success"
+        ? SUCCESS_DISPLAY_DURATION_MS
+        : ERROR_DISPLAY_DURATION_MS);
+
     timer = setTimeout(() => {
-      message.value = "";
-      type.value = "";
-    }, FEEDBACK_DISPLAY_DURATION_MS);
+      timer = null;
+      state.value = null;
+    }, durationMs);
   }
 
-  return { message, type, show, clearTimer };
+  onScopeDispose(hide);
+
+  return { state, show, hide };
 }

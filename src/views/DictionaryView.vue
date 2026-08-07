@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useVocabularyStore } from "../stores/useVocabularyStore";
 import { useSettingsStore } from "../stores/useSettingsStore";
 import { extractErrorMessage } from "../lib/errorUtils";
@@ -20,6 +20,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import InlineFeedback from "@/components/InlineFeedback.vue";
+import SettingsActionRow from "@/components/SettingsActionRow.vue";
 import {
   Table,
   TableBody,
@@ -40,7 +42,8 @@ const { t, locale } = useI18n();
 const newTermInput = ref("");
 const isAdding = ref(false);
 const removingTermIdSet = ref(new Set<string>());
-const feedback = useFeedbackMessage();
+const addFeedback = useFeedbackMessage();
+const tableFeedback = useFeedbackMessage();
 
 const isAddDisabled = computed(
   () => !newTermInput.value.trim() || isAdding.value,
@@ -129,9 +132,9 @@ async function handleAddTerm() {
     isAdding.value = true;
     await vocabularyStore.addTerm(term);
     newTermInput.value = "";
-    feedback.show("success", t("dictionary.added", { term }));
+    addFeedback.show("success", t("dictionary.added", { term }));
   } catch (err) {
-    feedback.show("error", extractErrorMessage(err));
+    addFeedback.show("error", extractErrorMessage(err));
   } finally {
     isAdding.value = false;
   }
@@ -143,9 +146,9 @@ async function handleRemoveTerm(id: string, term: string) {
   try {
     removingTermIdSet.value.add(id);
     await vocabularyStore.removeTerm(id);
-    feedback.show("success", t("dictionary.removed", { term }));
+    tableFeedback.show("success", t("dictionary.removed", { term }));
   } catch (err) {
-    feedback.show("error", extractErrorMessage(err));
+    tableFeedback.show("error", extractErrorMessage(err));
   } finally {
     removingTermIdSet.value.delete(id);
   }
@@ -169,14 +172,11 @@ onMounted(async () => {
   try {
     await vocabularyStore.fetchTermList();
   } catch (err) {
-    feedback.show("error", t("dictionary.loadFailed"));
+    tableFeedback.show("error", t("dictionary.loadFailed"));
     captureError(err, { source: "dictionary-view-mount" });
   }
 });
 
-onBeforeUnmount(() => {
-  feedback.clearTimer();
-});
 </script>
 
 <template>
@@ -187,7 +187,7 @@ onBeforeUnmount(() => {
         <Badge variant="secondary">{{ $t("dictionary.termCount", { count: vocabularyStore.termCount }) }}</Badge>
       </div>
 
-      <div class="flex items-center gap-2">
+      <SettingsActionRow :feedback="addFeedback.state.value">
         <div class="flex flex-col">
           <Input
             v-model="newTermInput"
@@ -206,7 +206,7 @@ onBeforeUnmount(() => {
         >
           <Plus class="h-4 w-4 mr-1" />{{ $t("dictionary.add") }}
         </Button>
-      </div>
+      </SettingsActionRow>
     </div>
 
     <!-- Description -->
@@ -228,16 +228,11 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- Feedback message -->
-    <transition name="feedback-fade">
-      <p
-        v-if="feedback.message.value !== ''"
-        class="mt-3 text-sm"
-        :class="feedback.type.value === 'success' ? 'text-emerald-500' : 'text-destructive'"
-      >
-        {{ feedback.message.value }}
-      </p>
-    </transition>
+    <InlineFeedback
+      :feedback="tableFeedback.state.value"
+      class="mt-3 block"
+      data-testid="dictionary-list-feedback"
+    />
 
     <!-- Loading state -->
     <div v-if="vocabularyStore.isLoading" class="mt-6 text-center text-muted-foreground">
@@ -349,15 +344,3 @@ onBeforeUnmount(() => {
     </div>
   </div>
 </template>
-
-<style scoped>
-.feedback-fade-enter-active,
-.feedback-fade-leave-active {
-  transition: opacity 180ms ease;
-}
-
-.feedback-fade-enter-from,
-.feedback-fade-leave-to {
-  opacity: 0;
-}
-</style>

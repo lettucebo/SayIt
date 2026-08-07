@@ -27,6 +27,13 @@ jobs:
       - name: ESLint
         run: pnpm exec eslint src
 
+      - name: Feedback presentation guard
+        run: |
+          if rg --glob '*.vue' 'feedback-fade|\.message\.value|\.type\.value' src/views src/MainApp.vue; then
+            echo "Use InlineFeedback instead of hand-written view feedback rendering."
+            exit 1
+          fi
+
       - name: Test
         run: pnpm test
 

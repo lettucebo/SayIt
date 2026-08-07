@@ -164,6 +164,9 @@ import { openLogFolder } from "../lib/logger";
 import type { AudioInputDeviceInfo } from "../types/audio";
 import { useAudioPreview } from "../composables/useAudioPreview";
 import ConnectionTestButton from "../components/ConnectionTestButton.vue";
+import InlineFeedback from "../components/InlineFeedback.vue";
+import SettingsActionRow from "../components/SettingsActionRow.vue";
+import SettingsControlRow from "../components/SettingsControlRow.vue";
 import {
   testLlmConnection,
   testWhisperConnection,
@@ -199,7 +202,9 @@ const triggerKeyOptions = computed<{ value: PresetTriggerKey; label: string }[]>
       ]
 );
 
-const hotkeyFeedback = useFeedbackMessage();
+const hotkeyKeyFeedback = useFeedbackMessage();
+const hotkeyModeFeedback = useFeedbackMessage();
+const hotkeyRecordingFeedback = useFeedbackMessage();
 
 // ── 兩層模式切換 ──────────────────────────────────────────
 const isCustomMode = ref(false);
@@ -253,12 +258,12 @@ async function handleRecordingCaptured(payload: RecordingCapturedPayload) {
     };
     try {
       await settingsStore.saveComboTriggerKey(comboKey, domCode ?? "", currentMode);
-      hotkeyFeedback.show(
+      hotkeyRecordingFeedback.show(
         "success",
         t("settings.hotkey.keySet", { key: settingsStore.getTriggerKeyDisplayName(comboKey) }),
       );
     } catch (err) {
-      hotkeyFeedback.show("error", extractErrorMessage(err));
+      hotkeyRecordingFeedback.show("error", extractErrorMessage(err));
     }
   } else {
     // Single key
@@ -280,12 +285,12 @@ async function handleRecordingCaptured(payload: RecordingCapturedPayload) {
       const displayName = domCode
         ? settingsStore.getKeyDisplayName(domCode)
         : getKeyDisplayNameByKeycode(keycode);
-      hotkeyFeedback.show(
+      hotkeyRecordingFeedback.show(
         "success",
         t("settings.hotkey.keySet", { key: displayName }),
       );
     } catch (err) {
-      hotkeyFeedback.show("error", extractErrorMessage(err));
+      hotkeyRecordingFeedback.show("error", extractErrorMessage(err));
     }
   }
 }
@@ -293,7 +298,7 @@ async function handleRecordingCaptured(payload: RecordingCapturedPayload) {
 function handleRecordingRejected(payload: RecordingRejectedPayload) {
   stopKeyRecording();
   if (payload.reason === "esc_reserved") {
-    hotkeyFeedback.show("error", settingsStore.getEscapeReservedMessage());
+    hotkeyRecordingFeedback.show("error", settingsStore.getEscapeReservedMessage());
   }
 }
 
@@ -306,7 +311,7 @@ async function startRecording() {
   try {
     await invoke("start_hotkey_recording");
   } catch (err) {
-    hotkeyFeedback.show("error", extractErrorMessage(err));
+    hotkeyRecordingFeedback.show("error", extractErrorMessage(err));
     isRecording.value = false;
     return;
   }
@@ -327,7 +332,7 @@ async function startRecording() {
   // 10s timeout
   recordingTimeoutId = setTimeout(() => {
     if (isRecording.value) {
-      hotkeyFeedback.show("error", settingsStore.getHotkeyRecordingTimeoutMessage());
+      hotkeyRecordingFeedback.show("error", settingsStore.getHotkeyRecordingTimeoutMessage());
       stopKeyRecording();
     }
   }, RECORDING_TIMEOUT_MS);
@@ -353,7 +358,7 @@ function switchToCustom() {
     settingsStore
       .switchToCustomMode(settingsStore.triggerMode)
       .catch((err: unknown) => {
-        hotkeyFeedback.show("error", extractErrorMessage(err));
+        hotkeyRecordingFeedback.show("error", extractErrorMessage(err));
       });
   }
 }
@@ -366,7 +371,7 @@ function switchToPreset() {
   settingsStore
     .switchToPresetMode(currentPresetKey.value, settingsStore.triggerMode)
     .catch((err: unknown) => {
-      hotkeyFeedback.show("error", extractErrorMessage(err));
+      hotkeyKeyFeedback.show("error", extractErrorMessage(err));
     });
 }
 
@@ -374,9 +379,9 @@ async function handleTriggerKeyChange(newKey: PresetTriggerKey) {
   const currentMode = settingsStore.triggerMode;
   try {
     await settingsStore.saveHotkeyConfig(newKey, currentMode);
-    hotkeyFeedback.show("success", t("settings.hotkey.updated"));
+    hotkeyKeyFeedback.show("success", t("settings.hotkey.updated"));
   } catch (err) {
-    hotkeyFeedback.show("error", extractErrorMessage(err));
+    hotkeyKeyFeedback.show("error", extractErrorMessage(err));
   }
 }
 
@@ -385,9 +390,9 @@ async function handleTriggerModeChange(newMode: TriggerMode) {
     settingsStore.hotkeyConfig?.triggerKey ?? (isMac ? "fn" : "rightAlt");
   try {
     await settingsStore.saveHotkeyConfig(currentKey, newMode);
-    hotkeyFeedback.show("success", t("settings.hotkey.modeUpdated"));
+    hotkeyModeFeedback.show("success", t("settings.hotkey.modeUpdated"));
   } catch (err) {
-    hotkeyFeedback.show("error", extractErrorMessage(err));
+    hotkeyModeFeedback.show("error", extractErrorMessage(err));
   }
 }
 
@@ -424,8 +429,8 @@ const apiKeyStatusLabel = computed(() =>
 );
 const apiKeyStatusClass = computed(() =>
   settingsStore.hasApiKey
-    ? "bg-green-500/20 text-green-400"
-    : "bg-red-500/20 text-red-400",
+    ? "bg-success/20 text-success"
+    : "bg-destructive/20 text-destructive",
 );
 const shouldShowOnboardingHint = computed(() => !settingsStore.hasApiKey);
 
@@ -549,7 +554,8 @@ async function handleResetPrompt() {
 // ── AI 整理門檻 ──────────────────────────────────────────────
 const thresholdEnabled = ref(DEFAULT_ENHANCEMENT_THRESHOLD_ENABLED);
 const thresholdCharCount = ref(DEFAULT_ENHANCEMENT_THRESHOLD_CHAR_COUNT);
-const enhancementThresholdFeedback = useFeedbackMessage();
+const thresholdToggleFeedback = useFeedbackMessage();
+const thresholdCharCountFeedback = useFeedbackMessage();
 
 async function handleToggleEnhancementThreshold() {
   thresholdEnabled.value = !thresholdEnabled.value;
@@ -558,13 +564,13 @@ async function handleToggleEnhancementThreshold() {
       thresholdEnabled.value,
       thresholdCharCount.value,
     );
-    enhancementThresholdFeedback.show(
+    thresholdToggleFeedback.show(
       "success",
       thresholdEnabled.value ? t("settings.threshold.enabledFeedback") : t("settings.threshold.disabledFeedback"),
     );
   } catch (err) {
     thresholdEnabled.value = !thresholdEnabled.value;
-    enhancementThresholdFeedback.show("error", extractErrorMessage(err));
+    thresholdToggleFeedback.show("error", extractErrorMessage(err));
   }
 }
 
@@ -575,9 +581,9 @@ async function handleSaveThresholdCharCount() {
       thresholdCharCount.value,
     );
     thresholdCharCount.value = settingsStore.enhancementThresholdCharCount;
-    enhancementThresholdFeedback.show("success", t("settings.threshold.charCountSaved"));
+    thresholdCharCountFeedback.show("success", t("settings.threshold.charCountSaved"));
   } catch (err) {
-    enhancementThresholdFeedback.show("error", extractErrorMessage(err));
+    thresholdCharCountFeedback.show("error", extractErrorMessage(err));
   }
 }
 
@@ -596,7 +602,8 @@ const REPLACEMENT_TIMINGS: readonly ReplacementTiming[] = [
   "both",
 ];
 
-const replacementFeedback = useFeedbackMessage();
+const replacementFormFeedback = useFeedbackMessage();
+const replacementListFeedback = useFeedbackMessage();
 const isSavingReplacementRule = ref(false);
 const editingReplacementRuleId = ref<string | null>(null);
 const replacementForm = ref<ReplacementFormState>({
@@ -713,7 +720,7 @@ async function handleSubmitReplacementRule() {
     replacementForm.value.isRegex,
   );
   if (!validation.valid) {
-    replacementFeedback.show("error", replacementErrorMessage(validation.error));
+    replacementFormFeedback.show("error", replacementErrorMessage(validation.error));
     return;
   }
 
@@ -731,11 +738,11 @@ async function handleSubmitReplacementRule() {
       : await replacementStore.addRule(input);
 
     if (!result.valid) {
-      replacementFeedback.show("error", replacementErrorMessage(result.error));
+      replacementFormFeedback.show("error", replacementErrorMessage(result.error));
       return;
     }
 
-    replacementFeedback.show(
+    replacementFormFeedback.show(
       "success",
       editingReplacementRuleId.value
         ? t("settings.replacements.updated")
@@ -743,7 +750,7 @@ async function handleSubmitReplacementRule() {
     );
     resetReplacementForm();
   } catch (err) {
-    replacementFeedback.show("error", extractErrorMessage(err));
+    replacementFormFeedback.show("error", extractErrorMessage(err));
   } finally {
     isSavingReplacementRule.value = false;
   }
@@ -752,7 +759,7 @@ async function handleSubmitReplacementRule() {
 async function handleToggleReplacementRule(rule: ReplacementRule, enabled: boolean) {
   const result = await replacementStore.updateRule(rule.id, { enabled });
   if (!result.valid) {
-    replacementFeedback.show("error", replacementErrorMessage(result.error));
+    replacementListFeedback.show("error", replacementErrorMessage(result.error));
   }
 }
 
@@ -760,18 +767,25 @@ async function handleDeleteReplacementRule(rule: ReplacementRule) {
   try {
     const result = await replacementStore.removeRule(rule.id);
     if (!result.valid) {
-      replacementFeedback.show("error", replacementErrorMessage(result.error));
+      replacementListFeedback.show("error", replacementErrorMessage(result.error));
       return;
     }
     if (editingReplacementRuleId.value === rule.id) resetReplacementForm();
-    replacementFeedback.show("success", t("settings.replacements.deleted"));
+    replacementListFeedback.show("success", t("settings.replacements.deleted"));
   } catch (err) {
-    replacementFeedback.show("error", extractErrorMessage(err));
+    replacementListFeedback.show("error", extractErrorMessage(err));
   }
 }
 
 // ── 模型選擇 ──────────────────────────────────────────────
-const modelFeedback = useFeedbackMessage();
+const whisperProviderFeedback = useFeedbackMessage();
+const whisperModelFeedback = useFeedbackMessage();
+const geminiTranscriptionModelFeedback = useFeedbackMessage();
+const geminiQuotaFeedback = useFeedbackMessage();
+const azureWhisperDeploymentFeedback = useFeedbackMessage();
+const azureSpeechFeedback = useFeedbackMessage();
+const maiOptionsFeedback = useFeedbackMessage();
+const llmModelFeedback = useFeedbackMessage();
 
 const whisperModelDescription = computed(() => {
   const config = findWhisperModelConfig(settingsStore.selectedWhisperModelId);
@@ -795,23 +809,30 @@ const providerModelList = computed(() =>
 async function handleWhisperModelChange(newId: WhisperModelId) {
   try {
     await settingsStore.saveWhisperModel(newId);
-    modelFeedback.show("success", t("settings.model.whisperUpdated"));
+    whisperModelFeedback.show("success", t("settings.model.whisperUpdated"));
   } catch (err) {
-    modelFeedback.show("error", extractErrorMessage(err));
+    whisperModelFeedback.show("error", extractErrorMessage(err));
   }
 }
 
 async function handleLlmModelChange(newId: LlmModelId) {
   try {
     await settingsStore.saveLlmModel(newId);
-    modelFeedback.show("success", t("settings.model.llmUpdated"));
+    llmModelFeedback.show("success", t("settings.model.llmUpdated"));
   } catch (err) {
-    modelFeedback.show("error", extractErrorMessage(err));
+    llmModelFeedback.show("error", extractErrorMessage(err));
   }
 }
 
 // ── LLM Provider ────────────────────────────────────────────
-const providerFeedback = useFeedbackMessage();
+const llmProviderFeedback = useFeedbackMessage();
+const openaiApiKeyFeedback = useFeedbackMessage();
+const anthropicApiKeyFeedback = useFeedbackMessage();
+const geminiWhisperApiKeyFeedback = useFeedbackMessage();
+const geminiLlmApiKeyFeedback = useFeedbackMessage();
+const azureChatDeploymentFeedback = useFeedbackMessage();
+const azureModelFamilyFeedback = useFeedbackMessage();
+const azureOmitTemperatureFeedback = useFeedbackMessage();
 const openaiApiKeyInput = ref("");
 const anthropicApiKeyInput = ref("");
 const geminiApiKeyInput = ref("");
@@ -822,14 +843,16 @@ const isGeminiApiKeyVisible = ref(false);
 async function handleProviderChange(providerId: LlmProviderId) {
   try {
     await settingsStore.saveLlmProvider(providerId);
-    providerFeedback.show("success", t("settings.model.llmUpdated"));
+    llmProviderFeedback.show("success", t("settings.model.llmUpdated"));
   } catch (err) {
-    providerFeedback.show("error", extractErrorMessage(err));
+    llmProviderFeedback.show("error", extractErrorMessage(err));
   }
 }
 
 // ── Azure / Microsoft Foundry ───────────────────────────────
-const azureFeedback = useFeedbackMessage();
+const azureLifecycleFeedback = useFeedbackMessage();
+const azureConnectionFeedback = useFeedbackMessage();
+const azureSignInFeedback = useFeedbackMessage();
 const azureEnabledInput = ref(false);
 const azureEndpointInput = ref("");
 const azureAuthModeInput = ref<AzureAuthMode>("key");
@@ -941,11 +964,11 @@ async function handleSaveAzureConnection() {
   try {
     isSubmittingAzure.value = true;
     await handleSaveAzureConnectionOrThrow();
-    azureFeedback.show("success", t("settings.azure.saved"));
+    azureConnectionFeedback.show("success", t("settings.azure.saved"));
     hasAttemptedAzureAutoLoad.value = false;
     void tryAutoLoadAzureDeployments();
   } catch (err) {
-    azureFeedback.show("error", extractErrorMessage(err));
+    azureConnectionFeedback.show("error", extractErrorMessage(err));
   } finally {
     isSubmittingAzure.value = false;
   }
@@ -967,7 +990,17 @@ async function handleSaveAzureConnectionOrThrow() {
 
 async function handleToggleAzureEnabled(value: boolean) {
   azureEnabledInput.value = value;
-  await handleSaveAzureConnection();
+  try {
+    isSubmittingAzure.value = true;
+    await handleSaveAzureConnectionOrThrow();
+    azureLifecycleFeedback.show("success", t("settings.azure.saved"));
+    hasAttemptedAzureAutoLoad.value = false;
+    void tryAutoLoadAzureDeployments();
+  } catch (err) {
+    azureLifecycleFeedback.show("error", extractErrorMessage(err));
+  } finally {
+    isSubmittingAzure.value = false;
+  }
 }
 
 async function handleDeleteAzureConnection() {
@@ -975,9 +1008,9 @@ async function handleDeleteAzureConnection() {
     isSubmittingAzure.value = true;
     await settingsStore.deleteAzureConnection();
     loadAzureInputsFromStore();
-    azureFeedback.show("success", t("settings.azure.deleted"));
+    azureLifecycleFeedback.show("success", t("settings.azure.deleted"));
   } catch (err) {
-    azureFeedback.show("error", extractErrorMessage(err));
+    azureLifecycleFeedback.show("error", extractErrorMessage(err));
   } finally {
     isSubmittingAzure.value = false;
   }
@@ -1001,12 +1034,12 @@ async function handleAzureUserSignIn() {
   try {
     isAzureSigningIn.value = true;
     await handleSaveAzureConnectionOrThrow();
-    azureFeedback.show("success", t("settings.azure.signInWaiting"));
+    azureSignInFeedback.show("success", t("settings.azure.signInWaiting"));
     const account = await settingsStore.signInAzureUserAccount({
       tenantId,
       clientId,
     });
-    azureFeedback.show(
+    azureSignInFeedback.show(
       "success",
       t("settings.azure.signInSuccess", {
         account: account.username ?? account.name ?? "",
@@ -1015,18 +1048,21 @@ async function handleAzureUserSignIn() {
   } catch (err) {
     const message = extractErrorMessage(err);
     if (isSignInCancelledError(message)) {
-      azureFeedback.show("error", t("settings.azure.signInCancelled"));
+      azureSignInFeedback.show("error", t("settings.azure.signInCancelled"));
     } else if (isPolicyDeniedError(message)) {
       // 保留 AADSTS 原文：使用者需要它去跟 IT 說明是哪條政策擋下的
-      azureFeedback.show(
+      azureSignInFeedback.show(
         "error",
         `${t("settings.azure.signInPolicyDenied")} ${message}`,
+        { persistent: true },
       );
     } else {
       // 訊息固定的錯誤翻成使用者看得懂的說明；其餘（含帶 AADSTS 說明的）
       // 保留原文，那才是使用者拿去找 IT 的依據。
       const key = findSignInErrorKey(message);
-      azureFeedback.show("error", key === null ? message : t(key));
+      azureSignInFeedback.show("error", key === null ? message : t(key), {
+        persistent: key === null,
+      });
     }
   } finally {
     isAzureSigningIn.value = false;
@@ -1037,7 +1073,7 @@ async function handleAzureUserCancelSignIn() {
   try {
     await settingsStore.cancelAzureUserSignInFlow();
   } catch (err) {
-    azureFeedback.show("error", extractErrorMessage(err));
+    azureSignInFeedback.show("error", extractErrorMessage(err));
   }
 }
 
@@ -1045,9 +1081,9 @@ async function handleAzureUserSignOut() {
   try {
     isSubmittingAzure.value = true;
     await settingsStore.signOutAzureUserAccount();
-    azureFeedback.show("success", t("settings.azure.signOutSuccess"));
+    azureSignInFeedback.show("success", t("settings.azure.signOutSuccess"));
   } catch (err) {
-    azureFeedback.show("error", extractErrorMessage(err));
+    azureSignInFeedback.show("error", extractErrorMessage(err));
   } finally {
     isSubmittingAzure.value = false;
   }
@@ -1074,9 +1110,9 @@ const isSignedInForCurrentInput = computed(() =>
 async function handleSaveAzureChatDeployment() {
   try {
     await settingsStore.saveAzureChatDeployment(azureChatDeploymentInput.value);
-    providerFeedback.show("success", t("settings.azure.deploymentSaved"));
+    azureChatDeploymentFeedback.show("success", t("settings.azure.deploymentSaved"));
   } catch (err) {
-    providerFeedback.show("error", extractErrorMessage(err));
+    azureChatDeploymentFeedback.show("error", extractErrorMessage(err));
   }
 }
 
@@ -1096,7 +1132,7 @@ async function loadAzureDeployments({
     azureDeploymentList.value = result.deploymentList;
     azureDeploymentListResult.value = result;
     if (showFeedback) {
-      providerFeedback.show(
+      azureChatDeploymentFeedback.show(
         "success",
         result.deploymentList.length === 0
           ? t("settings.azure.deploymentListEmpty")
@@ -1109,7 +1145,7 @@ async function loadAzureDeployments({
     if (showFeedback) {
       azureDeploymentList.value = [];
       azureDeploymentListResult.value = null;
-      providerFeedback.show("error", extractErrorMessage(err));
+      azureChatDeploymentFeedback.show("error", extractErrorMessage(err));
     } else {
       console.warn(
         "[SettingsView] automatic Azure deployment load failed:",
@@ -1155,10 +1191,10 @@ async function handleAzureDeploymentSelection(name: string) {
     } else {
       await settingsStore.saveAzureChatDeployment(name);
     }
-    providerFeedback.show("success", t("settings.azure.deploymentSaved"));
+    azureChatDeploymentFeedback.show("success", t("settings.azure.deploymentSaved"));
   } catch (err) {
     azureChatDeploymentInput.value = previousDeployment;
-    providerFeedback.show("error", extractErrorMessage(err));
+    azureChatDeploymentFeedback.show("error", extractErrorMessage(err));
   }
 }
 
@@ -1167,9 +1203,9 @@ async function handleAzureChatModelFamilyChange(
 ) {
   try {
     await settingsStore.saveAzureChatModelFamily(modelFamily);
-    providerFeedback.show("success", t("settings.azure.deploymentSaved"));
+    azureModelFamilyFeedback.show("success", t("settings.azure.deploymentSaved"));
   } catch (err) {
-    providerFeedback.show("error", extractErrorMessage(err));
+    azureModelFamilyFeedback.show("error", extractErrorMessage(err));
   }
 }
 
@@ -1182,23 +1218,23 @@ async function handleRestoreAzureModelFamilyAuto() {
       modelFamily: resolution.familyId,
       familySource: "auto",
     });
-    providerFeedback.show("success", t("settings.azure.deploymentSaved"));
+    azureModelFamilyFeedback.show("success", t("settings.azure.deploymentSaved"));
   } catch (err) {
-    providerFeedback.show("error", extractErrorMessage(err));
+    azureModelFamilyFeedback.show("error", extractErrorMessage(err));
   }
 }
 
 async function handleToggleAzureOmitTemperature(newValue: boolean) {
   try {
     await settingsStore.saveAzureOmitTemperature(newValue);
-    providerFeedback.show(
+    azureOmitTemperatureFeedback.show(
       "success",
       newValue
         ? t("settings.azure.omitTemperatureEnabled")
         : t("settings.azure.omitTemperatureDisabled"),
     );
   } catch (err) {
-    providerFeedback.show("error", extractErrorMessage(err));
+    azureOmitTemperatureFeedback.show("error", extractErrorMessage(err));
   }
 }
 
@@ -1207,9 +1243,9 @@ async function handleSaveAzureWhisperDeployment() {
     await settingsStore.saveAzureWhisperDeployment(
       azureWhisperDeploymentInput.value,
     );
-    modelFeedback.show("success", t("settings.azure.deploymentSaved"));
+    azureWhisperDeploymentFeedback.show("success", t("settings.azure.deploymentSaved"));
   } catch (err) {
-    modelFeedback.show("error", extractErrorMessage(err));
+    azureWhisperDeploymentFeedback.show("error", extractErrorMessage(err));
   }
 }
 
@@ -1219,9 +1255,9 @@ async function handleSaveAzureSpeechConnection() {
       azureSpeechEndpointInput.value,
       azureSpeechApiKeyInput.value,
     );
-    modelFeedback.show("success", t("settings.azure.speechSaved"));
+    azureSpeechFeedback.show("success", t("settings.azure.speechSaved"));
   } catch (err) {
-    modelFeedback.show("error", extractErrorMessage(err));
+    azureSpeechFeedback.show("error", extractErrorMessage(err));
   }
 }
 
@@ -1231,16 +1267,16 @@ async function handleMaiInputLocaleChange(value: string) {
       value === "auto" ? [] : [value as MaiCandidateLocale],
     );
   } catch (err) {
-    modelFeedback.show("error", extractErrorMessage(err));
+    maiOptionsFeedback.show("error", extractErrorMessage(err));
   }
 }
 
 async function handleMaiTranscribeStyleChange(style: MaiTranscribeStyle) {
   try {
     await settingsStore.saveMaiTranscribeStyle(style);
-    modelFeedback.show("success", t("settings.model.whisperUpdated"));
+    maiOptionsFeedback.show("success", t("settings.model.whisperUpdated"));
   } catch (err) {
-    modelFeedback.show("error", extractErrorMessage(err));
+    maiOptionsFeedback.show("error", extractErrorMessage(err));
   }
 }
 
@@ -1269,9 +1305,9 @@ function azureConnectionIssue(deployment: string): string {
 async function handleWhisperProviderChange(id: TranscriptionProviderId) {
   try {
     await settingsStore.saveWhisperProvider(id);
-    modelFeedback.show("success", t("settings.model.whisperUpdated"));
+    whisperProviderFeedback.show("success", t("settings.model.whisperUpdated"));
   } catch (err) {
-    modelFeedback.show("error", extractErrorMessage(err));
+    whisperProviderFeedback.show("error", extractErrorMessage(err));
   }
 }
 
@@ -1288,9 +1324,9 @@ async function handleGeminiTranscriptionModelChange(
 ) {
   try {
     await settingsStore.saveGeminiTranscriptionModel(id);
-    modelFeedback.show("success", t("settings.model.whisperUpdated"));
+    geminiTranscriptionModelFeedback.show("success", t("settings.model.whisperUpdated"));
   } catch (err) {
-    modelFeedback.show("error", extractErrorMessage(err));
+    geminiTranscriptionModelFeedback.show("error", extractErrorMessage(err));
   }
 }
 
@@ -1314,9 +1350,9 @@ async function handleSaveGeminiFreeQuota() {
       Number.isFinite(parsed) ? parsed : 0,
       geminiFreeQuotaPeriodInput.value,
     );
-    modelFeedback.show("success", t("settings.model.geminiQuotaSaved"));
+    geminiQuotaFeedback.show("success", t("settings.model.geminiQuotaSaved"));
   } catch (err) {
-    modelFeedback.show("error", extractErrorMessage(err));
+    geminiQuotaFeedback.show("error", extractErrorMessage(err));
   }
 }
 
@@ -1399,18 +1435,18 @@ async function handleSaveOpenaiApiKey() {
   try {
     await settingsStore.saveOpenaiApiKey(openaiApiKeyInput.value);
     openaiApiKeyInput.value = "";
-    providerFeedback.show("success", t("settings.apiKey.saved"));
+    openaiApiKeyFeedback.show("success", t("settings.apiKey.saved"));
   } catch (err) {
-    providerFeedback.show("error", extractErrorMessage(err));
+    openaiApiKeyFeedback.show("error", extractErrorMessage(err));
   }
 }
 
 async function handleDeleteOpenaiApiKey() {
   try {
     await settingsStore.deleteOpenaiApiKey();
-    providerFeedback.show("success", t("settings.apiKey.deleted"));
+    openaiApiKeyFeedback.show("success", t("settings.apiKey.deleted"));
   } catch (err) {
-    providerFeedback.show("error", extractErrorMessage(err));
+    openaiApiKeyFeedback.show("error", extractErrorMessage(err));
   }
 }
 
@@ -1418,37 +1454,41 @@ async function handleSaveAnthropicApiKey() {
   try {
     await settingsStore.saveAnthropicApiKey(anthropicApiKeyInput.value);
     anthropicApiKeyInput.value = "";
-    providerFeedback.show("success", t("settings.apiKey.saved"));
+    anthropicApiKeyFeedback.show("success", t("settings.apiKey.saved"));
   } catch (err) {
-    providerFeedback.show("error", extractErrorMessage(err));
+    anthropicApiKeyFeedback.show("error", extractErrorMessage(err));
   }
 }
 
 async function handleDeleteAnthropicApiKey() {
   try {
     await settingsStore.deleteAnthropicApiKey();
-    providerFeedback.show("success", t("settings.apiKey.deleted"));
+    anthropicApiKeyFeedback.show("success", t("settings.apiKey.deleted"));
   } catch (err) {
-    providerFeedback.show("error", extractErrorMessage(err));
+    anthropicApiKeyFeedback.show("error", extractErrorMessage(err));
   }
 }
 
-async function handleSaveGeminiApiKey() {
+async function handleSaveGeminiApiKey(scope: "whisper" | "llm") {
+  const feedback =
+    scope === "whisper" ? geminiWhisperApiKeyFeedback : geminiLlmApiKeyFeedback;
   try {
     await settingsStore.saveGeminiApiKey(geminiApiKeyInput.value);
     geminiApiKeyInput.value = "";
-    providerFeedback.show("success", t("settings.apiKey.saved"));
+    feedback.show("success", t("settings.apiKey.saved"));
   } catch (err) {
-    providerFeedback.show("error", extractErrorMessage(err));
+    feedback.show("error", extractErrorMessage(err));
   }
 }
 
-async function handleDeleteGeminiApiKey() {
+async function handleDeleteGeminiApiKey(scope: "whisper" | "llm") {
+  const feedback =
+    scope === "whisper" ? geminiWhisperApiKeyFeedback : geminiLlmApiKeyFeedback;
   try {
     await settingsStore.deleteGeminiApiKey();
-    providerFeedback.show("success", t("settings.apiKey.deleted"));
+    feedback.show("success", t("settings.apiKey.deleted"));
   } catch (err) {
-    providerFeedback.show("error", extractErrorMessage(err));
+    feedback.show("error", extractErrorMessage(err));
   }
 }
 
@@ -1590,7 +1630,9 @@ async function handleToggleContextInjection(newValue: boolean) {
 }
 
 // ── 錄音儲存管理 ──────────────────────────────────────────
-const recordingCleanupFeedback = useFeedbackMessage();
+const recordingAutoCleanupFeedback = useFeedbackMessage();
+const recordingCleanupDaysFeedback = useFeedbackMessage();
+const recordingDeleteFeedback = useFeedbackMessage();
 const recordingAutoCleanupEnabled = ref(false);
 const recordingAutoCleanupDays = ref(7);
 const isDeletingRecordings = ref(false);
@@ -1602,7 +1644,7 @@ async function handleToggleRecordingAutoCleanup() {
       recordingAutoCleanupEnabled.value,
       recordingAutoCleanupDays.value,
     );
-    recordingCleanupFeedback.show(
+    recordingAutoCleanupFeedback.show(
       "success",
       recordingAutoCleanupEnabled.value
         ? t("settings.recording.autoCleanupEnabled")
@@ -1610,7 +1652,7 @@ async function handleToggleRecordingAutoCleanup() {
     );
   } catch (err) {
     recordingAutoCleanupEnabled.value = !recordingAutoCleanupEnabled.value;
-    recordingCleanupFeedback.show("error", extractErrorMessage(err));
+    recordingAutoCleanupFeedback.show("error", extractErrorMessage(err));
   }
 }
 
@@ -1621,9 +1663,9 @@ async function handleSaveCleanupDays() {
       recordingAutoCleanupDays.value,
     );
     recordingAutoCleanupDays.value = settingsStore.recordingAutoCleanupDays;
-    recordingCleanupFeedback.show("success", t("settings.recording.daysSaved"));
+    recordingCleanupDaysFeedback.show("success", t("settings.recording.daysSaved"));
   } catch (err) {
-    recordingCleanupFeedback.show("error", extractErrorMessage(err));
+    recordingCleanupDaysFeedback.show("error", extractErrorMessage(err));
   }
 }
 
@@ -1632,19 +1674,21 @@ async function handleDeleteAllRecordings() {
     isDeletingRecordings.value = true;
     const deletedCount = await historyStore.deleteAllRecordingFiles();
 
-    recordingCleanupFeedback.show(
+    recordingDeleteFeedback.show(
       "success",
       t("settings.recording.deleteSuccess", { count: deletedCount }),
     );
   } catch (err) {
-    recordingCleanupFeedback.show("error", extractErrorMessage(err));
+    recordingDeleteFeedback.show("error", extractErrorMessage(err));
   } finally {
     isDeletingRecordings.value = false;
   }
 }
 
 // ── 進階：除錯記錄（Debug Log）────────────────────────────────
-const debugLogFeedback = useFeedbackMessage();
+const debugLogToggleFeedback = useFeedbackMessage();
+const debugLogDaysFeedback = useFeedbackMessage();
+const debugLogFolderFeedback = useFeedbackMessage();
 const debugLogEnabled = ref(false);
 const debugLogRetentionDays = ref(7);
 
@@ -1655,7 +1699,7 @@ async function handleToggleDebugLog() {
       debugLogEnabled.value,
       debugLogRetentionDays.value,
     );
-    debugLogFeedback.show(
+    debugLogToggleFeedback.show(
       "success",
       debugLogEnabled.value
         ? t("settings.debugLog.enabledMessage")
@@ -1663,7 +1707,7 @@ async function handleToggleDebugLog() {
     );
   } catch (err) {
     debugLogEnabled.value = !debugLogEnabled.value;
-    debugLogFeedback.show("error", extractErrorMessage(err));
+    debugLogToggleFeedback.show("error", extractErrorMessage(err));
   }
 }
 
@@ -1674,9 +1718,9 @@ async function handleSaveDebugLogDays() {
       debugLogRetentionDays.value,
     );
     debugLogRetentionDays.value = settingsStore.debugLogRetentionDays;
-    debugLogFeedback.show("success", t("settings.debugLog.daysSaved"));
+    debugLogDaysFeedback.show("success", t("settings.debugLog.daysSaved"));
   } catch (err) {
-    debugLogFeedback.show("error", extractErrorMessage(err));
+    debugLogDaysFeedback.show("error", extractErrorMessage(err));
   }
 }
 
@@ -1684,7 +1728,7 @@ async function handleOpenLogFolder() {
   try {
     await openLogFolder();
   } catch (err) {
-    debugLogFeedback.show("error", extractErrorMessage(err));
+    debugLogFolderFeedback.show("error", extractErrorMessage(err));
   }
 }
 
@@ -1758,7 +1802,9 @@ async function handleAudioInputDeviceChange(deviceName: string) {
 }
 
 // ── 備份與還原（匯出／匯入完整設定）────────────────────────
-const backupFeedback = useFeedbackMessage();
+const backupExportFeedback = useFeedbackMessage();
+const backupImportFeedback = useFeedbackMessage();
+const backupDictionaryImportFeedback = useFeedbackMessage();
 
 const exportSettingsSelected = ref(true);
 const exportDictionarySelected = ref(true);
@@ -1903,11 +1949,11 @@ async function handleBackupExport() {
     });
     if (!path) return;
     await invoke("save_text_file", { path, content: serializeBackup(file) });
-    backupFeedback.show("success", t("settings.backup.exportSuccess"));
+    backupExportFeedback.show("success", t("settings.backup.exportSuccess"));
     exportPassword.value = "";
     exportPasswordConfirm.value = "";
   } catch (err) {
-    backupFeedback.show(
+    backupExportFeedback.show(
       "error",
       getBackupErrorMessage(extractErrorMessage(err), "export"),
     );
@@ -1933,7 +1979,7 @@ async function triggerBackupImport() {
     importDictionarySelected.value = parsed.contents.dictionary;
   } catch (err) {
     const code = extractErrorMessage(err);
-    backupFeedback.show(
+    backupImportFeedback.show(
       "error",
       code === "FILE_TOO_LARGE"
         ? t("settings.backup.errorTooLarge")
@@ -1957,11 +2003,11 @@ async function handleExternalDictionaryImport() {
     const content = await invoke<string>("read_text_file", { path });
     const entries = parseImportContent(path, content);
     if (entries.length === 0) {
-      backupFeedback.show("error", t("settings.backup.dictImportEmpty"));
+      backupDictionaryImportFeedback.show("error", t("settings.backup.dictImportEmpty"));
       return;
     }
     const result = await vocabularyStore.importEntries(entries);
-    backupFeedback.show(
+    backupDictionaryImportFeedback.show(
       "success",
       t("settings.backup.dictImportSuccess", {
         added: result.added,
@@ -1979,7 +2025,7 @@ async function handleExternalDictionaryImport() {
             code.includes("Invalid UTF-8")
           ? t("settings.backup.dictImportInvalid")
           : t("settings.backup.dictImportFailed");
-    backupFeedback.show("error", msg);
+    backupDictionaryImportFeedback.show("error", msg);
     captureError(err, { source: "settings-dictionary-import" });
   } finally {
     isDictionaryImporting.value = false;
@@ -2066,7 +2112,7 @@ async function applyBackupImport() {
       );
     }
     if (replacementsFailed) {
-      backupFeedback.show(
+      backupImportFeedback.show(
         "error",
         t("settings.backup.importReplacementsFailed", {
           detail: parts.join("；"),
@@ -2074,7 +2120,7 @@ async function applyBackupImport() {
       );
       // 保留已解析的備份與密碼，讓使用者可直接重試，不必重新選檔／重打密碼
     } else {
-      backupFeedback.show(
+      backupImportFeedback.show(
         "success",
         t("settings.backup.importSuccess", { detail: parts.join("；") }),
       );
@@ -2083,7 +2129,7 @@ async function applyBackupImport() {
     }
   } catch (err) {
     const code = extractErrorMessage(err);
-    backupFeedback.show("error", getBackupErrorMessage(code));
+    backupImportFeedback.show("error", getBackupErrorMessage(code));
     // 密碼錯誤／需要密碼屬常態使用者操作，不上報 Sentry 噪音
     if (code !== "DECRYPT_FAILED" && code !== "PASSWORD_REQUIRED") {
       captureError(err, { source: "settings-backup-import" });
@@ -2151,27 +2197,6 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   void stopPreview();
   stopKeyRecording();
-  hotkeyFeedback.clearTimer();
-  apiKeyFeedback.clearTimer();
-  promptFeedback.clearTimer();
-  enhancementThresholdFeedback.clearTimer();
-  replacementFeedback.clearTimer();
-  modelFeedback.clearTimer();
-  muteOnRecordingFeedback.clearTimer();
-  soundFeedbackFeedback.clearTimer();
-  hideDockIconFeedback.clearTimer();
-  copyTranscriptionToClipboardFeedback.clearTimer();
-  localeFeedback.clearTimer();
-  themeFeedback.clearTimer();
-  transcriptionLocaleFeedback.clearTimer();
-  autoStartFeedback.clearTimer();
-  smartDictionaryFeedback.clearTimer();
-  contextInjectionFeedback.clearTimer();
-  recordingCleanupFeedback.clearTimer();
-  debugLogFeedback.clearTimer();
-  providerFeedback.clearTimer();
-  azureFeedback.clearTimer();
-  backupFeedback.clearTimer();
   clearTimeout(deleteConfirmTimeoutId);
   clearTimeout(resetPromptConfirmTimeoutId);
   clearTimeout(hideDockIconPendingTimeoutId);
@@ -2281,7 +2306,10 @@ onBeforeUnmount(() => {
 
         <!-- 簡易模式：Select 下拉 -->
         <div v-if="!isCustomMode" class="flex items-center justify-between">
-          <Label for="trigger-key">{{ $t("settings.hotkey.triggerKey") }}</Label>
+          <div class="flex items-baseline">
+            <Label for="trigger-key">{{ $t("settings.hotkey.triggerKey") }}</Label>
+            <InlineFeedback :feedback="hotkeyKeyFeedback.state.value" class="ms-2" />
+          </div>
           <Select
             :model-value="currentPresetKey"
             @update:model-value="handleTriggerKeyChange($event as PresetTriggerKey)"
@@ -2304,7 +2332,10 @@ onBeforeUnmount(() => {
         <!-- 自訂模式：錄製按鍵 -->
         <div v-else class="space-y-3">
           <div class="flex items-center justify-between">
-            <Label>{{ $t("settings.hotkey.customTriggerKey") }}</Label>
+            <div class="flex items-baseline">
+              <Label>{{ $t("settings.hotkey.customTriggerKey") }}</Label>
+              <InlineFeedback :feedback="hotkeyRecordingFeedback.state.value" class="ms-2" />
+            </div>
             <div class="flex items-center gap-3">
               <span v-if="hasCustomKey" class="text-sm font-medium text-foreground">
                 {{ currentCustomKeyDisplay }}
@@ -2337,7 +2368,10 @@ onBeforeUnmount(() => {
 
         <!-- 觸發模式 -->
         <div class="flex items-center justify-between">
-          <Label for="trigger-mode">{{ $t("settings.hotkey.triggerMode") }}</Label>
+          <div class="flex items-baseline">
+            <Label for="trigger-mode">{{ $t("settings.hotkey.triggerMode") }}</Label>
+            <InlineFeedback :feedback="hotkeyModeFeedback.state.value" class="ms-2" />
+          </div>
           <div class="flex rounded-lg border border-border overflow-hidden">
             <button
               type="button"
@@ -2381,20 +2415,6 @@ onBeforeUnmount(() => {
               : $t("settings.hotkey.longPressHint")
           }}
         </p>
-
-        <transition name="feedback-fade">
-          <p
-            v-if="hotkeyFeedback.message.value !== ''"
-            class="text-sm"
-            :class="
-              hotkeyFeedback.type.value === 'success'
-                ? 'text-green-400'
-                : 'text-red-400'
-            "
-          >
-            {{ hotkeyFeedback.message.value }}
-          </p>
-        </transition>
       </CardContent>
     </Card>
 
@@ -2457,19 +2477,7 @@ onBeforeUnmount(() => {
           </Button>
         </div>
 
-        <div class="flex items-center justify-between">
-          <transition name="feedback-fade">
-            <p
-              v-if="apiKeyFeedback.message.value !== ''"
-              class="text-sm"
-              :class="
-                apiKeyFeedback.type.value === 'success' ? 'text-green-400' : 'text-red-400'
-              "
-            >
-              {{ apiKeyFeedback.message.value }}
-            </p>
-          </transition>
-
+        <SettingsActionRow :feedback="apiKeyFeedback.state.value">
           <Button
             v-if="settingsStore.hasApiKey"
             variant="outline"
@@ -2483,16 +2491,20 @@ onBeforeUnmount(() => {
           >
             {{ isConfirmingDeleteApiKey ? $t('settings.apiKey.confirmDelete') : $t('settings.apiKey.delete') }}
           </Button>
-        </div>
+        </SettingsActionRow>
       </CardContent>
     </Card>
 
     <!-- Azure / Microsoft Foundry 連線 -->
     <Card>
       <CardHeader class="flex-row items-center justify-between border-b border-border">
-        <CardTitle class="text-base">{{ $t("settings.azure.title") }}</CardTitle>
+        <div class="flex min-w-0 items-baseline">
+          <CardTitle class="text-base">{{ $t("settings.azure.title") }}</CardTitle>
+          <InlineFeedback :feedback="azureLifecycleFeedback.state.value" class="ms-2" />
+        </div>
         <Switch
           :model-value="azureEnabledInput"
+          :disabled="isSubmittingAzure"
           @update:model-value="handleToggleAzureEnabled"
         />
       </CardHeader>
@@ -2580,7 +2592,7 @@ onBeforeUnmount(() => {
             class="flex items-center justify-between rounded-md border border-border bg-muted/30 p-3"
           >
             <div class="flex items-center gap-2">
-              <CircleCheck class="size-4 text-green-400" />
+              <CircleCheck class="size-4 text-success" />
               <span class="text-sm">{{ $t("settings.azure.signedInAs", { account: azureSignedInLabel }) }}</span>
             </div>
             <Button variant="outline" size="sm" :disabled="isSubmittingAzure" @click="handleAzureUserSignOut">
@@ -2596,13 +2608,16 @@ onBeforeUnmount(() => {
               {{ $t("settings.azure.signInCancel") }}
             </Button>
           </div>
-          <Button
+          <SettingsActionRow
             v-else
-            :disabled="azureTenantIdInput.trim() === '' || azureClientIdInput.trim() === ''"
-            @click="handleAzureUserSignIn"
           >
-            {{ $t("settings.azure.signIn") }}
-          </Button>
+            <Button
+              :disabled="azureTenantIdInput.trim() === '' || azureClientIdInput.trim() === ''"
+              @click="handleAzureUserSignIn"
+            >
+              {{ $t("settings.azure.signIn") }}
+            </Button>
+          </SettingsActionRow>
         </div>
 
         <div v-else class="space-y-2">
@@ -2625,6 +2640,12 @@ onBeforeUnmount(() => {
           <p class="text-xs text-amber-400">{{ $t("settings.azure.secretWarning") }}</p>
         </div>
 
+        <InlineFeedback
+          :feedback="azureSignInFeedback.state.value"
+          :assertive="azureSignInFeedback.state.value?.type === 'error'"
+          class="block"
+        />
+
         <div class="space-y-2">
           <Label for="azure-api-version">{{ $t("settings.azure.apiVersionLabel") }}</Label>
           <Input
@@ -2635,30 +2656,19 @@ onBeforeUnmount(() => {
           />
         </div>
 
-        <div class="flex items-center justify-between">
-          <transition name="feedback-fade">
-            <p
-              v-if="azureFeedback.message.value !== ''"
-              class="text-sm"
-              :class="azureFeedback.type.value === 'success' ? 'text-green-400' : 'text-red-400'"
-            >
-              {{ azureFeedback.message.value }}
-            </p>
-          </transition>
-          <div class="flex gap-2">
-            <Button
-              variant="outline"
-              class="text-destructive border-destructive hover:bg-destructive/10"
-              :disabled="isSubmittingAzure"
-              @click="handleDeleteAzureConnection"
-            >
-              {{ $t('settings.azure.clear') }}
-            </Button>
-            <Button :disabled="isSubmittingAzure" @click="handleSaveAzureConnection">
-              {{ $t('common.save') }}
-            </Button>
-          </div>
-        </div>
+        <SettingsActionRow :feedback="azureConnectionFeedback.state.value">
+          <Button
+            variant="outline"
+            class="text-destructive border-destructive hover:bg-destructive/10"
+            :disabled="isSubmittingAzure"
+            @click="handleDeleteAzureConnection"
+          >
+            {{ $t('settings.azure.clear') }}
+          </Button>
+          <Button :disabled="isSubmittingAzure" @click="handleSaveAzureConnection">
+            {{ $t('common.save') }}
+          </Button>
+        </SettingsActionRow>
       </CardContent>
     </Card>
 
@@ -2718,6 +2728,7 @@ onBeforeUnmount(() => {
               <span class="text-sm font-medium">MAI-Transcribe</span>
             </Label>
           </RadioGroup>
+          <InlineFeedback :feedback="whisperProviderFeedback.state.value" class="block" />
 
           <!-- Groq Whisper 模型下拉 -->
           <template v-if="settingsStore.whisperProviderId === 'groq'">
@@ -2742,6 +2753,7 @@ onBeforeUnmount(() => {
                 </SelectItem>
               </SelectContent>
             </Select>
+            <InlineFeedback :feedback="whisperModelFeedback.state.value" class="block" />
             <p class="text-xs text-muted-foreground">{{ whisperModelDescription }}</p>
             <ConnectionTestButton
               :on-test="() => testWhisperConnection(settingsStore.selectedWhisperModelId, settingsStore.getApiKey())"
@@ -2772,11 +2784,15 @@ onBeforeUnmount(() => {
                 </SelectItem>
               </SelectContent>
             </Select>
+            <InlineFeedback :feedback="geminiTranscriptionModelFeedback.state.value" class="block" />
             <p class="text-xs text-muted-foreground">{{ geminiTranscriptionModelDescription }}</p>
             <p class="text-xs text-muted-foreground">
               {{ $t("settings.model.geminiTranscriptionHint") }}
             </p>
-            <Label for="gemini-whisper-api-key">{{ $t("settings.providerApiKey.geminiTitle") }}</Label>
+            <div class="flex items-baseline">
+              <Label for="gemini-whisper-api-key">{{ $t("settings.providerApiKey.geminiTitle") }}</Label>
+              <InlineFeedback :feedback="geminiWhisperApiKeyFeedback.state.value" class="ms-2" />
+            </div>
             <div v-if="settingsStore.geminiApiKey" class="flex items-center gap-2">
               <Input
                 id="gemini-whisper-api-key"
@@ -2787,7 +2803,7 @@ onBeforeUnmount(() => {
               <Button variant="ghost" size="sm" @click="isGeminiApiKeyVisible = !isGeminiApiKeyVisible">
                 {{ isGeminiApiKeyVisible ? $t('settings.apiKey.hide') : $t('settings.apiKey.show') }}
               </Button>
-              <Button variant="ghost" size="sm" class="text-destructive" @click="handleDeleteGeminiApiKey">
+              <Button variant="ghost" size="sm" class="text-destructive" @click="handleDeleteGeminiApiKey('whisper')">
                 {{ $t('settings.apiKey.delete') }}
               </Button>
             </div>
@@ -2799,7 +2815,7 @@ onBeforeUnmount(() => {
                 :placeholder="findProviderConfig('gemini')?.apiKeyPrefix + '...'"
                 class="flex-1 font-mono text-xs"
               />
-              <Button size="sm" :disabled="!geminiApiKeyInput.trim()" @click="handleSaveGeminiApiKey">
+              <Button size="sm" :disabled="!geminiApiKeyInput.trim()" @click="handleSaveGeminiApiKey('whisper')">
                 {{ $t('common.save') }}
               </Button>
             </div>
@@ -2814,7 +2830,10 @@ onBeforeUnmount(() => {
             />
 
             <!-- 免費額度（Google 未公開，只能由使用者自 AI Studio 查得後填入） -->
-            <Label for="gemini-free-quota">{{ $t("settings.model.geminiQuotaLabel") }}</Label>
+            <div class="flex items-baseline">
+              <Label for="gemini-free-quota">{{ $t("settings.model.geminiQuotaLabel") }}</Label>
+              <InlineFeedback :feedback="geminiQuotaFeedback.state.value" class="ms-2" />
+            </div>
             <div class="flex gap-2">
               <Input
                 id="gemini-free-quota"
@@ -2849,7 +2868,10 @@ onBeforeUnmount(() => {
 
           <!-- Azure OpenAI Whisper 部署 -->
           <template v-else-if="settingsStore.whisperProviderId === 'azure'">
-            <Label for="azure-whisper-deployment">{{ $t("settings.azure.whisperDeploymentLabel") }}</Label>
+            <div class="flex items-baseline">
+              <Label for="azure-whisper-deployment">{{ $t("settings.azure.whisperDeploymentLabel") }}</Label>
+              <InlineFeedback :feedback="azureWhisperDeploymentFeedback.state.value" class="ms-2" />
+            </div>
             <div class="flex gap-2">
               <Input
                 id="azure-whisper-deployment"
@@ -2887,6 +2909,7 @@ onBeforeUnmount(() => {
               class="font-mono text-xs"
             />
             <p class="text-xs text-muted-foreground">{{ $t("settings.azure.maiHint") }}</p>
+            <InlineFeedback :feedback="maiOptionsFeedback.state.value" class="block" />
 
             <div class="space-y-2">
               <Label for="azure-speech-endpoint">{{ $t("settings.azure.speechEndpointLabel") }}</Label>
@@ -2911,7 +2934,7 @@ onBeforeUnmount(() => {
                 </Button>
               </div>
             </div>
-            <div class="flex justify-end">
+            <SettingsActionRow :feedback="azureSpeechFeedback.state.value">
               <Button
                 size="sm"
                 :disabled="!azureSpeechEndpointInput.trim() || (azureAuthModeInput === 'key' && !azureSpeechApiKeyInput.trim())"
@@ -2919,7 +2942,7 @@ onBeforeUnmount(() => {
               >
                 {{ $t("common.save") }}
               </Button>
-            </div>
+            </SettingsActionRow>
 
             <div class="space-y-2">
               <Label for="mai-input-locale">{{ $t("settings.azure.maiCandidateLocalesLabel") }}</Label>
@@ -2989,6 +3012,7 @@ onBeforeUnmount(() => {
               <span class="text-sm font-medium">{{ $t(`settings.provider.${provider.id}`) }}</span>
             </Label>
           </RadioGroup>
+          <InlineFeedback :feedback="llmProviderFeedback.state.value" class="block" />
         </div>
 
         <!-- Provider-specific API Key -->
@@ -2997,7 +3021,10 @@ onBeforeUnmount(() => {
         </div>
 
         <div v-else-if="settingsStore.selectedLlmProviderId === 'openai'" class="space-y-2">
-          <Label for="openai-api-key">{{ $t("settings.providerApiKey.openaiTitle") }}</Label>
+          <div class="flex items-baseline">
+            <Label for="openai-api-key">{{ $t("settings.providerApiKey.openaiTitle") }}</Label>
+            <InlineFeedback :feedback="openaiApiKeyFeedback.state.value" class="ms-2" />
+          </div>
           <div v-if="settingsStore.openaiApiKey" class="flex items-center gap-2">
             <Input
               id="openai-api-key"
@@ -3032,7 +3059,10 @@ onBeforeUnmount(() => {
         </div>
 
         <div v-else-if="settingsStore.selectedLlmProviderId === 'anthropic'" class="space-y-2">
-          <Label for="anthropic-api-key">{{ $t("settings.providerApiKey.anthropicTitle") }}</Label>
+          <div class="flex items-baseline">
+            <Label for="anthropic-api-key">{{ $t("settings.providerApiKey.anthropicTitle") }}</Label>
+            <InlineFeedback :feedback="anthropicApiKeyFeedback.state.value" class="ms-2" />
+          </div>
           <div v-if="settingsStore.anthropicApiKey" class="flex items-center gap-2">
             <Input
               id="anthropic-api-key"
@@ -3067,7 +3097,10 @@ onBeforeUnmount(() => {
         </div>
 
         <div v-else-if="settingsStore.selectedLlmProviderId === 'gemini'" class="space-y-2">
-          <Label for="gemini-api-key">{{ $t("settings.providerApiKey.geminiTitle") }}</Label>
+          <div class="flex items-baseline">
+            <Label for="gemini-api-key">{{ $t("settings.providerApiKey.geminiTitle") }}</Label>
+            <InlineFeedback :feedback="geminiLlmApiKeyFeedback.state.value" class="ms-2" />
+          </div>
           <div v-if="settingsStore.geminiApiKey" class="flex items-center gap-2">
             <Input
               id="gemini-api-key"
@@ -3078,7 +3111,7 @@ onBeforeUnmount(() => {
             <Button variant="ghost" size="sm" @click="isGeminiApiKeyVisible = !isGeminiApiKeyVisible">
               {{ isGeminiApiKeyVisible ? $t('settings.apiKey.hide') : $t('settings.apiKey.show') }}
             </Button>
-            <Button variant="ghost" size="sm" class="text-destructive" @click="handleDeleteGeminiApiKey">
+            <Button variant="ghost" size="sm" class="text-destructive" @click="handleDeleteGeminiApiKey('llm')">
               {{ $t('settings.apiKey.delete') }}
             </Button>
           </div>
@@ -3090,7 +3123,7 @@ onBeforeUnmount(() => {
               :placeholder="findProviderConfig('gemini')?.apiKeyPrefix + '...'"
               class="flex-1 font-mono text-xs"
             />
-            <Button size="sm" :disabled="!geminiApiKeyInput.trim()" @click="handleSaveGeminiApiKey">
+            <Button size="sm" :disabled="!geminiApiKeyInput.trim()" @click="handleSaveGeminiApiKey('llm')">
               {{ $t('common.save') }}
             </Button>
           </div>
@@ -3102,7 +3135,10 @@ onBeforeUnmount(() => {
         </div>
 
         <div v-else-if="settingsStore.selectedLlmProviderId === 'azure'" class="space-y-2">
-          <Label for="azure-chat-deployment-list">{{ $t("settings.azure.chatDeploymentLabel") }}</Label>
+          <div class="flex items-baseline">
+            <Label for="azure-chat-deployment-list">{{ $t("settings.azure.chatDeploymentLabel") }}</Label>
+            <InlineFeedback :feedback="azureChatDeploymentFeedback.state.value" class="ms-2" />
+          </div>
           <div class="flex items-center gap-2">
             <Button
               variant="outline"
@@ -3212,7 +3248,10 @@ onBeforeUnmount(() => {
           <p v-else class="text-xs text-muted-foreground">{{ $t("settings.azure.chatHint") }}</p>
 
           <div class="space-y-2 pt-2">
-            <Label for="azure-chat-model-family">{{ $t("settings.azure.modelFamilyLabel") }}</Label>
+            <div class="flex items-baseline">
+              <Label for="azure-chat-model-family">{{ $t("settings.azure.modelFamilyLabel") }}</Label>
+              <InlineFeedback :feedback="azureModelFamilyFeedback.state.value" class="ms-2" />
+            </div>
             <Select
               :model-value="settingsStore.azureChatModelFamily"
               @update:model-value="handleAzureChatModelFamilyChange($event as AzureChatModelFamilyId)"
@@ -3247,17 +3286,19 @@ onBeforeUnmount(() => {
             </p>
           </div>
 
-          <div class="flex items-center justify-between pt-2">
-            <div>
+          <SettingsControlRow :feedback="azureOmitTemperatureFeedback.state.value">
+            <template #label>
               <Label for="azure-omit-temperature">{{ $t("settings.azure.omitTemperatureLabel") }}</Label>
+            </template>
+            <template #description>
               <p class="text-sm text-muted-foreground">{{ $t("settings.azure.omitTemperatureDescription") }}</p>
-            </div>
+            </template>
             <Switch
               id="azure-omit-temperature"
               :model-value="settingsStore.azureOmitTemperature"
               @update:model-value="handleToggleAzureOmitTemperature"
             />
-          </div>
+          </SettingsControlRow>
         </div>
 
         <ConnectionTestButton
@@ -3271,22 +3312,15 @@ onBeforeUnmount(() => {
           {{ azureConnectionIssue(settingsStore.azureChatDeployment) }}
         </p>
 
-        <transition name="feedback-fade">
-          <p
-            v-if="providerFeedback.message.value !== ''"
-            class="text-sm"
-            :class="providerFeedback.type.value === 'success' ? 'text-green-400' : 'text-red-400'"
-          >
-            {{ providerFeedback.message.value }}
-          </p>
-        </transition>
-
         <template v-if="settingsStore.selectedLlmProviderId !== 'azure' && (settingsStore.selectedLlmProviderId === 'groq' || settingsStore.hasLlmApiKey)">
           <Separator />
 
           <!-- LLM 模型 -->
           <div class="space-y-2">
-            <Label for="llm-model">{{ $t("settings.model.llmLabel") }}</Label>
+            <div class="flex items-baseline">
+              <Label for="llm-model">{{ $t("settings.model.llmLabel") }}</Label>
+              <InlineFeedback :feedback="llmModelFeedback.state.value" class="ms-2" />
+            </div>
             <Select
               :model-value="settingsStore.selectedLlmModelId"
               @update:model-value="handleLlmModelChange($event as LlmModelId)"
@@ -3310,20 +3344,6 @@ onBeforeUnmount(() => {
             <p class="text-xs text-muted-foreground">{{ llmModelDescription }}</p>
           </div>
         </template>
-
-        <transition name="feedback-fade">
-          <p
-            v-if="modelFeedback.message.value !== ''"
-            class="text-sm"
-            :class="
-              modelFeedback.type.value === 'success'
-                ? 'text-green-400'
-                : 'text-red-400'
-            "
-          >
-            {{ modelFeedback.message.value }}
-          </p>
-        </transition>
       </CardContent>
     </Card>
 
@@ -3387,7 +3407,7 @@ onBeforeUnmount(() => {
           @input="handlePromptInput"
         />
 
-        <div class="flex justify-end gap-2">
+        <SettingsActionRow :feedback="promptFeedback.state.value">
           <Button
             :disabled="isSubmittingPrompt || (selectedPromptMode !== 'custom' && !isPresetDirty)"
             @click="handleSavePrompt"
@@ -3406,21 +3426,7 @@ onBeforeUnmount(() => {
           >
             {{ isConfirmingResetPrompt ? $t('settings.prompt.confirmReset') : $t('settings.prompt.reset') }}
           </Button>
-        </div>
-
-        <transition name="feedback-fade">
-          <p
-            v-if="promptFeedback.message.value !== ''"
-            class="text-sm"
-            :class="
-              promptFeedback.type.value === 'success'
-                ? 'text-green-400'
-                : 'text-red-400'
-            "
-          >
-            {{ promptFeedback.message.value }}
-          </p>
-        </transition>
+        </SettingsActionRow>
       </CardContent>
     </Card>
 
@@ -3434,16 +3440,22 @@ onBeforeUnmount(() => {
           {{ $t("settings.threshold.description") }}
         </p>
 
-        <div class="flex items-center justify-between">
-          <Label for="threshold-toggle">{{ thresholdEnabled ? $t('settings.threshold.enabled') : $t('settings.threshold.disabled') }}</Label>
+        <SettingsControlRow :feedback="thresholdToggleFeedback.state.value">
+          <template #label>
+            <Label for="threshold-toggle">{{ thresholdEnabled ? $t('settings.threshold.enabled') : $t('settings.threshold.disabled') }}</Label>
+          </template>
           <Switch
             id="threshold-toggle"
             :model-value="thresholdEnabled"
             @update:model-value="handleToggleEnhancementThreshold"
           />
-        </div>
+        </SettingsControlRow>
 
-        <div v-if="thresholdEnabled" class="flex items-center gap-3">
+        <SettingsActionRow
+          v-if="thresholdEnabled"
+          :feedback="thresholdCharCountFeedback.state.value"
+          align="start"
+        >
           <Label for="threshold-char-count">{{ $t("settings.threshold.charCount") }}</Label>
           <Input
             id="threshold-char-count"
@@ -3458,21 +3470,7 @@ onBeforeUnmount(() => {
           >
             {{ $t("common.save") }}
           </Button>
-        </div>
-
-        <transition name="feedback-fade">
-          <p
-            v-if="enhancementThresholdFeedback.message.value !== ''"
-            class="text-sm"
-            :class="
-              enhancementThresholdFeedback.type.value === 'success'
-                ? 'text-green-400'
-                : 'text-red-400'
-            "
-          >
-            {{ enhancementThresholdFeedback.message.value }}
-          </p>
-        </transition>
+        </SettingsActionRow>
       </CardContent>
     </Card>
 
@@ -3597,7 +3595,7 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <div class="flex justify-end">
+          <SettingsActionRow :feedback="replacementFormFeedback.state.value">
             <Button
               type="button"
               :disabled="isSavingReplacementRule"
@@ -3608,8 +3606,14 @@ onBeforeUnmount(() => {
               <Plus v-else class="mr-1 size-4" />
               {{ isEditingReplacementRule ? $t("settings.replacements.updateButton") : $t("settings.replacements.addButton") }}
             </Button>
-          </div>
+          </SettingsActionRow>
         </div>
+
+        <InlineFeedback
+          :feedback="replacementListFeedback.state.value"
+          class="block"
+          data-testid="replacement-list-feedback"
+        />
 
         <div v-if="replacementStore.rules.length === 0" class="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground" data-testid="replacement-empty-state">
           {{ $t("settings.replacements.emptyState") }}
@@ -3792,20 +3796,6 @@ onBeforeUnmount(() => {
             </TableBody>
           </Table>
         </div>
-
-        <transition name="feedback-fade">
-          <p
-            v-if="replacementFeedback.message.value !== ''"
-            class="text-sm"
-            :class="
-              replacementFeedback.type.value === 'error'
-                ? 'text-destructive'
-                : 'text-muted-foreground'
-            "
-          >
-            {{ replacementFeedback.message.value }}
-          </p>
-        </transition>
       </CardContent>
     </Card>
 
@@ -3819,32 +3809,20 @@ onBeforeUnmount(() => {
           {{ $t("settings.smartDictionary.description") }}
         </p>
 
-        <div class="flex items-center justify-between">
-          <Label for="smart-dictionary-toggle">{{ $t("settings.smartDictionary.title") }}</Label>
+        <SettingsControlRow :feedback="smartDictionaryFeedback.state.value">
+          <template #label>
+            <Label for="smart-dictionary-toggle">{{ $t("settings.smartDictionary.title") }}</Label>
+          </template>
           <Switch
             id="smart-dictionary-toggle"
             :model-value="settingsStore.isSmartDictionaryEnabled"
             @update:model-value="handleToggleSmartDictionary"
           />
-        </div>
+        </SettingsControlRow>
 
         <p class="text-xs text-muted-foreground">
           {{ $t("settings.smartDictionary.privacyNote") }}
         </p>
-
-        <transition name="feedback-fade">
-          <p
-            v-if="smartDictionaryFeedback.message.value !== ''"
-            class="text-sm"
-            :class="
-              smartDictionaryFeedback.type.value === 'success'
-                ? 'text-green-400'
-                : 'text-red-400'
-            "
-          >
-            {{ smartDictionaryFeedback.message.value }}
-          </p>
-        </transition>
       </CardContent>
     </Card>
 
@@ -3858,33 +3836,21 @@ onBeforeUnmount(() => {
           {{ $t("settings.contextInjection.description") }}
         </p>
 
-        <div class="flex items-center justify-between gap-4">
-          <Label for="context-injection-toggle">{{ $t("settings.contextInjection.title") }}</Label>
+        <SettingsControlRow :feedback="contextInjectionFeedback.state.value">
+          <template #label>
+            <Label for="context-injection-toggle">{{ $t("settings.contextInjection.title") }}</Label>
+          </template>
           <Switch
             id="context-injection-toggle"
             :model-value="settingsStore.contextInjectionEnabled"
             data-testid="context-injection-switch"
             @update:model-value="handleToggleContextInjection"
           />
-        </div>
+        </SettingsControlRow>
 
         <p class="text-xs text-muted-foreground" data-testid="context-injection-privacy-note">
           {{ $t("settings.contextInjection.privacyNote") }}
         </p>
-
-        <transition name="feedback-fade">
-          <p
-            v-if="contextInjectionFeedback.message.value !== ''"
-            class="text-sm"
-            :class="
-              contextInjectionFeedback.type.value === 'success'
-                ? 'text-green-400'
-                : 'text-red-400'
-            "
-          >
-            {{ contextInjectionFeedback.message.value }}
-          </p>
-        </transition>
       </CardContent>
     </Card>
 
@@ -3898,7 +3864,10 @@ onBeforeUnmount(() => {
           {{ $t("settings.audioInput.description") }}
         </p>
         <div class="space-y-2">
-          <Label for="audio-input-device">{{ $t("settings.audioInput.deviceLabel") }}</Label>
+          <div class="flex items-baseline">
+            <Label for="audio-input-device">{{ $t("settings.audioInput.deviceLabel") }}</Label>
+            <InlineFeedback :feedback="audioInputFeedback.state.value" class="ms-2" />
+          </div>
           <div class="flex items-center gap-2">
             <Select
               :model-value="settingsStore.selectedAudioInputDeviceName || '_default'"
@@ -3953,15 +3922,6 @@ onBeforeUnmount(() => {
             />
           </div>
         </div>
-        <transition name="feedback-fade">
-          <p
-            v-if="audioInputFeedback.message.value !== ''"
-            class="text-sm"
-            :class="audioInputFeedback.type.value === 'success' ? 'text-green-400' : 'text-destructive'"
-          >
-            {{ audioInputFeedback.message.value }}
-          </p>
-        </transition>
       </CardContent>
     </Card>
 
@@ -3975,19 +3935,25 @@ onBeforeUnmount(() => {
           {{ $t("settings.recording.description") }}
         </p>
 
-        <div class="flex items-center justify-between">
-          <div>
+        <SettingsControlRow :feedback="recordingAutoCleanupFeedback.state.value">
+          <template #label>
             <Label for="recording-auto-cleanup">{{ $t("settings.recording.autoCleanup") }}</Label>
+          </template>
+          <template #description>
             <p class="text-sm text-muted-foreground">{{ $t("settings.recording.autoCleanupDescription") }}</p>
-          </div>
+          </template>
           <Switch
             id="recording-auto-cleanup"
             :model-value="recordingAutoCleanupEnabled"
             @update:model-value="handleToggleRecordingAutoCleanup"
           />
-        </div>
+        </SettingsControlRow>
 
-        <div v-if="recordingAutoCleanupEnabled" class="flex items-center gap-3">
+        <SettingsActionRow
+          v-if="recordingAutoCleanupEnabled"
+          :feedback="recordingCleanupDaysFeedback.state.value"
+          align="start"
+        >
           <Label for="cleanup-days">{{ $t("settings.recording.retentionDays") }}</Label>
           <Input
             id="cleanup-days"
@@ -4003,49 +3969,37 @@ onBeforeUnmount(() => {
           >
             {{ $t("common.save") }}
           </Button>
-        </div>
+        </SettingsActionRow>
 
         <div class="border-t border-border" />
 
-        <AlertDialog>
-          <AlertDialogTrigger as-child>
-            <Button
-              variant="destructive"
-              :disabled="isDeletingRecordings"
-            >
-              <Trash2 class="h-4 w-4 mr-2" />
-              {{ $t("settings.recording.deleteAll") }}
-            </Button>
-          </AlertDialogTrigger>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>{{ $t("settings.recording.deleteConfirmTitle") }}</AlertDialogTitle>
-              <AlertDialogDescription>
-                {{ $t("settings.recording.deleteConfirmDescription") }}
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>{{ $t("common.cancel") }}</AlertDialogCancel>
-              <AlertDialogAction @click="handleDeleteAllRecordings">
-                {{ $t("common.delete") }}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-
-        <transition name="feedback-fade">
-          <p
-            v-if="recordingCleanupFeedback.message.value !== ''"
-            class="text-sm"
-            :class="
-              recordingCleanupFeedback.type.value === 'success'
-                ? 'text-green-400'
-                : 'text-red-400'
-            "
-          >
-            {{ recordingCleanupFeedback.message.value }}
-          </p>
-        </transition>
+        <SettingsActionRow :feedback="recordingDeleteFeedback.state.value" align="start">
+          <AlertDialog>
+            <AlertDialogTrigger as-child>
+              <Button
+                variant="destructive"
+                :disabled="isDeletingRecordings"
+              >
+                <Trash2 class="h-4 w-4 mr-2" />
+                {{ $t("settings.recording.deleteAll") }}
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>{{ $t("settings.recording.deleteConfirmTitle") }}</AlertDialogTitle>
+                <AlertDialogDescription>
+                  {{ $t("settings.recording.deleteConfirmDescription") }}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>{{ $t("common.cancel") }}</AlertDialogCancel>
+                <AlertDialogAction @click="handleDeleteAllRecordings">
+                  {{ $t("common.delete") }}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </SettingsActionRow>
       </CardContent>
     </Card>
 
@@ -4056,8 +4010,10 @@ onBeforeUnmount(() => {
       </CardHeader>
       <CardContent class="space-y-4">
         <!-- 佈景主題 -->
-        <div class="flex items-center justify-between">
-          <Label for="theme-select">{{ $t("settings.app.theme") }}</Label>
+        <SettingsControlRow :feedback="themeFeedback.state.value">
+          <template #label>
+            <Label for="theme-select">{{ $t("settings.app.theme") }}</Label>
+          </template>
           <Select
             :model-value="settingsStore.themeMode"
             @update:model-value="handleThemeChange($event as ThemeMode)"
@@ -4075,25 +4031,13 @@ onBeforeUnmount(() => {
               </SelectItem>
             </SelectContent>
           </Select>
-        </div>
-
-        <transition name="feedback-fade">
-          <p
-            v-if="themeFeedback.message.value !== ''"
-            class="text-sm"
-            :class="
-              themeFeedback.type.value === 'success'
-                ? 'text-green-400'
-                : 'text-red-400'
-            "
-          >
-            {{ themeFeedback.message.value }}
-          </p>
-        </transition>
+        </SettingsControlRow>
 
         <!-- 介面語言 -->
-        <div class="flex items-center justify-between">
-          <Label for="locale-select">{{ $t("settings.app.language") }}</Label>
+        <SettingsControlRow :feedback="localeFeedback.state.value">
+          <template #label>
+            <Label for="locale-select">{{ $t("settings.app.language") }}</Label>
+          </template>
           <Select
             :model-value="settingsStore.selectedLocale"
             @update:model-value="handleLocaleChange($event as SupportedLocale)"
@@ -4111,28 +4055,16 @@ onBeforeUnmount(() => {
               </SelectItem>
             </SelectContent>
           </Select>
-        </div>
-
-        <transition name="feedback-fade">
-          <p
-            v-if="localeFeedback.message.value !== ''"
-            class="text-sm"
-            :class="
-              localeFeedback.type.value === 'success'
-                ? 'text-green-400'
-                : 'text-red-400'
-            "
-          >
-            {{ localeFeedback.message.value }}
-          </p>
-        </transition>
+        </SettingsControlRow>
 
         <!-- 轉錄語言 -->
-        <div class="flex items-center justify-between">
-          <div>
+        <SettingsControlRow :feedback="transcriptionLocaleFeedback.state.value">
+          <template #label>
             <Label for="transcription-locale-select">{{ $t("settings.app.transcriptionLanguage") }}</Label>
+          </template>
+          <template #description>
             <p class="text-sm text-muted-foreground">{{ $t("settings.app.transcriptionLanguageDescription") }}</p>
-          </div>
+          </template>
           <Select
             :model-value="settingsStore.selectedTranscriptionLocale"
             @update:model-value="handleTranscriptionLocaleChange($event as TranscriptionLocale)"
@@ -4150,57 +4082,33 @@ onBeforeUnmount(() => {
               </SelectItem>
             </SelectContent>
           </Select>
-        </div>
-
-        <transition name="feedback-fade">
-          <p
-            v-if="transcriptionLocaleFeedback.message.value !== ''"
-            class="text-sm"
-            :class="
-              transcriptionLocaleFeedback.type.value === 'success'
-                ? 'text-green-400'
-                : 'text-red-400'
-            "
-          >
-            {{ transcriptionLocaleFeedback.message.value }}
-          </p>
-        </transition>
+        </SettingsControlRow>
 
         <div class="border-t border-border" />
 
-        <div class="flex items-center justify-between">
-          <div>
+        <SettingsControlRow :feedback="muteOnRecordingFeedback.state.value">
+          <template #label>
             <Label for="mute-on-recording">{{ $t("settings.app.muteOnRecording") }}</Label>
+          </template>
+          <template #description>
             <p class="text-sm text-muted-foreground">{{ $t("settings.app.muteDescription") }}</p>
-          </div>
+          </template>
           <Switch
             id="mute-on-recording"
             :model-value="settingsStore.isMuteOnRecordingEnabled"
             @update:model-value="handleToggleMuteOnRecording"
           />
-        </div>
-
-        <transition name="feedback-fade">
-          <p
-            v-if="muteOnRecordingFeedback.message.value !== ''"
-            class="text-sm"
-            :class="
-              muteOnRecordingFeedback.type.value === 'success'
-                ? 'text-green-400'
-                : 'text-red-400'
-            "
-          >
-            {{ muteOnRecordingFeedback.message.value }}
-          </p>
-        </transition>
+        </SettingsControlRow>
 
         <div class="border-t border-border" />
 
-        <div class="flex items-center justify-between">
-          <div class="pr-4">
+        <SettingsControlRow :feedback="copyTranscriptionToClipboardFeedback.state.value">
+          <template #label>
             <Label for="copy-transcription-to-clipboard">{{
               $t("settings.app.copyTranscriptionToClipboard.label")
             }}</Label>
+          </template>
+          <template #description>
             <p class="text-sm text-muted-foreground">
               {{
                 settingsStore.isCopyTranscriptionToClipboardEnabled
@@ -4212,115 +4120,65 @@ onBeforeUnmount(() => {
                   )
               }}
             </p>
-          </div>
+          </template>
           <Switch
             id="copy-transcription-to-clipboard"
             :model-value="settingsStore.isCopyTranscriptionToClipboardEnabled"
             @update:model-value="handleToggleCopyTranscriptionToClipboard"
           />
-        </div>
-
-        <transition name="feedback-fade">
-          <p
-            v-if="copyTranscriptionToClipboardFeedback.message.value !== ''"
-            class="text-sm"
-            :class="
-              copyTranscriptionToClipboardFeedback.type.value === 'success'
-                ? 'text-green-400'
-                : 'text-red-400'
-            "
-          >
-            {{ copyTranscriptionToClipboardFeedback.message.value }}
-          </p>
-        </transition>
+        </SettingsControlRow>
 
         <div class="border-t border-border" />
 
-        <div class="flex items-center justify-between">
-          <div>
+        <SettingsControlRow :feedback="soundFeedbackFeedback.state.value">
+          <template #label>
             <Label for="sound-feedback">{{ $t("settings.app.soundFeedback") }}</Label>
+          </template>
+          <template #description>
             <p class="text-sm text-muted-foreground">{{ $t("settings.app.soundFeedbackDescription") }}</p>
-          </div>
+          </template>
           <Switch
             id="sound-feedback"
             :model-value="settingsStore.isSoundEffectsEnabled"
             @update:model-value="handleToggleSoundFeedback"
           />
-        </div>
-
-        <transition name="feedback-fade">
-          <p
-            v-if="soundFeedbackFeedback.message.value !== ''"
-            class="text-sm"
-            :class="
-              soundFeedbackFeedback.type.value === 'success'
-                ? 'text-green-400'
-                : 'text-red-400'
-            "
-          >
-            {{ soundFeedbackFeedback.message.value }}
-          </p>
-        </transition>
+        </SettingsControlRow>
 
         <template v-if="isMac">
           <div class="border-t border-border" />
 
-          <div class="flex items-center justify-between">
-            <div>
+          <SettingsControlRow :feedback="hideDockIconFeedback.state.value">
+            <template #label>
               <Label for="hide-dock-icon">{{ $t("settings.app.hideDockIcon") }}</Label>
+            </template>
+            <template #description>
               <p class="text-sm text-muted-foreground">{{ $t("settings.app.hideDockIconDescription") }}</p>
-            </div>
+            </template>
             <Switch
               id="hide-dock-icon"
               :model-value="settingsStore.isHideDockIconEnabled"
               :disabled="isHideDockIconPending"
               @update:model-value="handleToggleHideDockIcon"
             />
-          </div>
-
-          <transition name="feedback-fade">
-            <p
-              v-if="hideDockIconFeedback.message.value !== ''"
-              class="text-sm"
-              :class="
-                hideDockIconFeedback.type.value === 'success'
-                  ? 'text-green-400'
-                  : 'text-red-400'
-              "
-            >
-              {{ hideDockIconFeedback.message.value }}
-            </p>
-          </transition>
+          </SettingsControlRow>
         </template>
 
         <div class="border-t border-border" />
 
-        <div class="flex items-center justify-between">
-          <div>
+        <SettingsControlRow :feedback="autoStartFeedback.state.value">
+          <template #label>
             <Label for="auto-start">{{ $t("settings.app.autoStart") }}</Label>
+          </template>
+          <template #description>
             <p class="text-sm text-muted-foreground">{{ $t("settings.app.autoStartDescription") }}</p>
-          </div>
+          </template>
           <Switch
             id="auto-start"
             :model-value="settingsStore.isAutoStartEnabled"
             :disabled="isTogglingAutoStart"
             @update:model-value="handleToggleAutoStart"
           />
-        </div>
-
-        <transition name="feedback-fade">
-          <p
-            v-if="autoStartFeedback.message.value !== ''"
-            class="text-sm"
-            :class="
-              autoStartFeedback.type.value === 'success'
-                ? 'text-green-400'
-                : 'text-red-400'
-            "
-          >
-            {{ autoStartFeedback.message.value }}
-          </p>
-        </transition>
+        </SettingsControlRow>
       </CardContent>
     </Card>
 
@@ -4420,21 +4278,26 @@ onBeforeUnmount(() => {
             </p>
           </div>
 
-          <Button
-            :disabled="!canExport || isExporting"
-            @click="handleBackupExport"
-          >
-            <Download class="mr-1 h-4 w-4" />{{ $t("settings.backup.exportButton") }}
-          </Button>
+          <SettingsActionRow :feedback="backupExportFeedback.state.value" align="start">
+            <Button
+              :disabled="!canExport || isExporting"
+              @click="handleBackupExport"
+            >
+              <Download class="mr-1 h-4 w-4" />{{ $t("settings.backup.exportButton") }}
+            </Button>
+          </SettingsActionRow>
         </div>
 
         <div class="border-t border-border" />
 
         <!-- 匯入 -->
         <div class="space-y-4">
-          <h3 class="text-sm font-medium text-foreground">
-            {{ $t("settings.backup.importSection") }}
-          </h3>
+          <div class="flex items-baseline">
+            <h3 class="text-sm font-medium text-foreground">
+              {{ $t("settings.backup.importSection") }}
+            </h3>
+            <InlineFeedback :feedback="backupImportFeedback.state.value" class="ms-2" />
+          </div>
 
           <Button
             variant="outline"
@@ -4529,28 +4392,16 @@ onBeforeUnmount(() => {
           <p class="text-sm text-muted-foreground">
             {{ $t("settings.backup.dictImportDescription") }}
           </p>
-          <Button
-            variant="outline"
-            :disabled="isDictionaryImporting || isRecording"
-            @click="handleExternalDictionaryImport"
-          >
-            <Upload class="mr-1 h-4 w-4" />{{ $t("settings.backup.dictImportButton") }}
-          </Button>
+          <SettingsActionRow :feedback="backupDictionaryImportFeedback.state.value" align="start">
+            <Button
+              variant="outline"
+              :disabled="isDictionaryImporting || isRecording"
+              @click="handleExternalDictionaryImport"
+            >
+              <Upload class="mr-1 h-4 w-4" />{{ $t("settings.backup.dictImportButton") }}
+            </Button>
+          </SettingsActionRow>
         </div>
-
-        <transition name="feedback-fade">
-          <p
-            v-if="backupFeedback.message.value !== ''"
-            class="text-sm"
-            :class="
-              backupFeedback.type.value === 'success'
-                ? 'text-green-400'
-                : 'text-red-400'
-            "
-          >
-            {{ backupFeedback.message.value }}
-          </p>
-        </transition>
       </CardContent>
     </Card>
 
@@ -4567,19 +4418,25 @@ onBeforeUnmount(() => {
           {{ $t("settings.debugLog.description") }}
         </p>
 
-        <div class="flex items-center justify-between">
-          <div>
+        <SettingsControlRow :feedback="debugLogToggleFeedback.state.value">
+          <template #label>
             <Label for="debug-log-enabled">{{ $t("settings.debugLog.enable") }}</Label>
+          </template>
+          <template #description>
             <p class="text-sm text-muted-foreground">{{ $t("settings.debugLog.enableDescription") }}</p>
-          </div>
+          </template>
           <Switch
             id="debug-log-enabled"
             :model-value="debugLogEnabled"
             @update:model-value="handleToggleDebugLog"
           />
-        </div>
+        </SettingsControlRow>
 
-        <div v-if="debugLogEnabled" class="flex items-center gap-3">
+        <SettingsActionRow
+          v-if="debugLogEnabled"
+          :feedback="debugLogDaysFeedback.state.value"
+          align="start"
+        >
           <Label for="debug-log-days">{{ $t("settings.debugLog.retentionDays") }}</Label>
           <Input
             id="debug-log-days"
@@ -4592,41 +4449,17 @@ onBeforeUnmount(() => {
           <Button size="sm" @click="handleSaveDebugLogDays">
             {{ $t("common.save") }}
           </Button>
-        </div>
+        </SettingsActionRow>
 
         <div class="border-t border-border" />
 
-        <Button variant="outline" @click="handleOpenLogFolder">
-          <FolderOpen class="h-4 w-4 mr-2" />
-          {{ $t("settings.debugLog.openFolder") }}
-        </Button>
-
-        <transition name="feedback-fade">
-          <p
-            v-if="debugLogFeedback.message.value !== ''"
-            class="text-sm"
-            :class="
-              debugLogFeedback.type.value === 'success'
-                ? 'text-green-400'
-                : 'text-red-400'
-            "
-          >
-            {{ debugLogFeedback.message.value }}
-          </p>
-        </transition>
+        <SettingsActionRow :feedback="debugLogFolderFeedback.state.value" align="start">
+          <Button variant="outline" @click="handleOpenLogFolder">
+            <FolderOpen class="h-4 w-4 mr-2" />
+            {{ $t("settings.debugLog.openFolder") }}
+          </Button>
+        </SettingsActionRow>
       </CardContent>
     </Card>
   </div>
 </template>
-
-<style scoped>
-.feedback-fade-enter-active,
-.feedback-fade-leave-active {
-  transition: opacity 180ms ease;
-}
-
-.feedback-fade-enter-from,
-.feedback-fade-leave-to {
-  opacity: 0;
-}
-</style>
