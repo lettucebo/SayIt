@@ -162,6 +162,23 @@ describe("useSettingsStore — exportSettings / importSettings", () => {
       expect(h.mockClearAzureTokenCache).toHaveBeenCalled();
     });
 
+    it("[P0] 舊備份換 chat deployment 卻缺 profile 時不得沿用本機 profile", async () => {
+      h.mockStoreData.set("azureChatModelFamily", "deepseek");
+      h.mockStoreData.set("azureChatModelFamilySource", "auto");
+      const store = useSettingsStore();
+      await store.loadSettings();
+
+      await store.importSettings({
+        azureChatDeployment: "legacy-gpt-deployment",
+        azureOmitTemperature: false,
+      });
+
+      expect(h.mockStoreData.get("azureChatModelFamily")).toBe("azure-openai");
+      expect(h.mockStoreData.get("azureChatModelFamilySource")).toBe("manual");
+      expect(store.azureChatModelFamily).toBe("azure-openai");
+      expect(store.azureChatModelFamilySource).toBe("manual");
+    });
+
     it("[P0] 匯入後 emit SETTINGS_UPDATED", async () => {
       const store = useSettingsStore();
       // 正式流程在 mount 前就 await loadSettings()；未載入完成時匯入會被守門擋下

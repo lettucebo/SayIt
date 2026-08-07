@@ -1,16 +1,23 @@
 import { fetch } from "@tauri-apps/plugin-http";
 import type { ChatUsageData, EnhanceResult } from "../types/transcription";
-import { DEFAULT_LLM_MODEL_ID, type LlmProviderId } from "./modelRegistry";
+import {
+  DEFAULT_LLM_MODEL_ID,
+  findAzureChatModelFamilyConfig,
+  getEffectiveAzureChatModelFamilyId,
+  type LlmProviderId,
+} from "./modelRegistry";
 import {
   buildFetchParams,
   parseProviderResponse,
   getProviderIdForModel,
   getProviderTimeout,
   getDefaultMaxTokens,
+  shouldSendAzureTemperature,
   type LlmChatRequest,
   type LlmChatMessage,
   type AzureRequestOptions,
 } from "./llmProvider";
+import { setAzureTemperatureCapability } from "./azureTemperatureCapability";
 import { getMinimalPromptForLocale } from "../i18n/prompts";
 import type { SupportedLocale } from "../i18n/languageConfig";
 import i18n from "../i18n";
@@ -41,6 +48,91 @@ export class EnhancerApiError extends Error {
   }
 }
 
+export class EnhancerEmptyOutputError extends Error {
+  readonly code = "ENHANCEMENT_EMPTY_OUTPUT";
+
+  constructor(
+    public readonly finishReason?: string,
+    public readonly usage: ChatUsageData | null = null,
+  ) {
+    super("Reasoning model produced no final answer");
+    this.name = "EnhancerEmptyOutputError";
+  }
+}
+
+type EnhancementErrorWithUsage = Error & {
+  usage?: ChatUsageData | null;
+  code?: string;
+};
+
+function attachEnhancementUsage<T extends Error>(
+  error: T,
+  usage: ChatUsageData | null,
+): T {
+  (error as EnhancementErrorWithUsage).usage = usage;
+  return error;
+}
+
+export function getEnhancementErrorUsage(
+  error: unknown,
+): ChatUsageData | null {
+  return error instanceof Error &&
+    "usage" in error &&
+    (error as EnhancementErrorWithUsage).usage
+    ? (error as EnhancementErrorWithUsage).usage ?? null
+    : null;
+}
+
+function createEnhancementTimeoutError(
+  usage: ChatUsageData | null,
+): EnhancementErrorWithUsage {
+  const timeoutError = new Error(
+    "Enhancement timeout",
+  ) as EnhancementErrorWithUsage;
+  timeoutError.code = "ENHANCEMENT_TIMEOUT";
+  timeoutError.usage = usage;
+  return timeoutError;
+}
+
+interface AzureApiErrorBody {
+  error?: {
+    code?: unknown;
+    message?: unknown;
+    param?: unknown;
+  };
+}
+
+/**
+ * 已知 Azure OpenAI 與 DeepSeek 對不支援 temperature 的錯誤格式不一致：
+ * DeepSeek 常回 `param: null`，所以不能只依 param 或 code 判斷。
+ */
+export function isTemperatureRejection(body: string): boolean {
+  let error: AzureApiErrorBody["error"];
+  try {
+    error = (JSON.parse(body) as AzureApiErrorBody).error;
+  } catch {
+    return false;
+  }
+
+  const code = typeof error?.code === "string" ? error.code : "";
+  const param = typeof error?.param === "string" ? error.param : "";
+  const message =
+    typeof error?.message === "string" ? error.message.toLowerCase() : "";
+  if (
+    param === "temperature" &&
+    (code === "unsupported_value" || code === "unsupported_parameter")
+  ) {
+    return true;
+  }
+
+  return (
+    message.includes("temperature") &&
+    (message.includes("not supported") ||
+      message.includes("unsupported") ||
+      message.includes("does not support"))
+  );
+}
+
 export function getDefaultSystemPrompt(): string {
   return getMinimalPromptForLocale(i18n.global.locale.value as SupportedLocale);
 }
@@ -52,6 +144,8 @@ export interface EnhanceOptions {
   appName?: string;
   modelId?: string;
   signal?: AbortSignal;
+  /** 同一語音整理流程的絕對 deadline，供內部空輸出重試共用。 */
+  deadlineAtMs?: number;
   maxTokens?: number;
   // azure 時由呼叫端明確指定 provider 與連線設定（不經 model 反查）
   provider?: LlmProviderId;
@@ -64,42 +158,38 @@ export interface PromptContextOptions {
 }
 
 async function withTimeout<T>(
-  promise: Promise<T>,
+  operation: (signal: AbortSignal) => Promise<T>,
   ms: number,
-  signal?: AbortSignal,
+  externalSignal?: AbortSignal,
 ): Promise<T> {
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  const raceList: Promise<T>[] = [promise];
-
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timeoutId = setTimeout(() => {
-      const err = new Error("Enhancement timeout");
-      (err as Error & { code: string }).code = "ENHANCEMENT_TIMEOUT";
-      reject(err);
-    }, ms);
-  });
-  raceList.push(timeoutPromise as Promise<T>);
-
-  let abortHandler: (() => void) | undefined;
-  if (signal) {
-    const abortPromise = new Promise<never>((_, reject) => {
-      if (signal.aborted) {
-        reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
-        return;
-      }
-      abortHandler = () =>
-        reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
-      signal.addEventListener("abort", abortHandler, { once: true });
-    });
-    raceList.push(abortPromise as Promise<T>);
+  if (externalSignal?.aborted) {
+    throw externalSignal.reason ?? new DOMException("Aborted", "AbortError");
   }
 
+  const controller = new AbortController();
+  let rejectCancellation!: (reason?: unknown) => void;
+  const cancellation = new Promise<never>((_, reject) => {
+    rejectCancellation = reject;
+  });
+  const abortHandler = () => {
+    const reason =
+      externalSignal?.reason ?? new DOMException("Aborted", "AbortError");
+    controller.abort(reason);
+    rejectCancellation(reason);
+  };
+  externalSignal?.addEventListener("abort", abortHandler, { once: true });
+  const timeoutId = setTimeout(() => {
+    const timeoutError = new Error("Enhancement timeout");
+    (timeoutError as Error & { code: string }).code = "ENHANCEMENT_TIMEOUT";
+    controller.abort(timeoutError);
+    rejectCancellation(timeoutError);
+  }, ms);
+
   try {
-    return await Promise.race(raceList);
+    return await Promise.race([operation(controller.signal), cancellation]);
   } finally {
-    if (timeoutId !== undefined) clearTimeout(timeoutId);
-    if (abortHandler && signal)
-      signal.removeEventListener("abort", abortHandler);
+    clearTimeout(timeoutId);
+    externalSignal?.removeEventListener("abort", abortHandler);
   }
 }
 
@@ -212,7 +302,58 @@ export function detectContextLeak(
  * 只保留最終輸出內容。
  */
 export function stripReasoningTags(text: string): string {
-  return text.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+  // length 截斷可能讓 <think> 沒有 closing tag；這時整段都仍是 reasoning，
+  // 不可貼到使用者游標，也必須讓空輸出補救流程正確觸發。
+  return text.replace(/<think>[\s\S]*?(?:<\/think>|$)/g, "").trim();
+}
+
+function toChatUsage(
+  usage: ReturnType<typeof parseProviderResponse>["usage"],
+): ChatUsageData | null {
+  return usage
+    ? {
+        promptTokens: usage.promptTokens,
+        completionTokens: usage.completionTokens,
+        totalTokens: usage.totalTokens,
+        promptTimeMs: usage.promptTimeMs,
+        completionTimeMs: usage.completionTimeMs,
+        totalTimeMs: usage.totalTimeMs,
+      }
+    : null;
+}
+
+function addOptionalMilliseconds(
+  first: number | undefined,
+  second: number | undefined,
+): number | undefined {
+  if (first === undefined && second === undefined) return undefined;
+  return (first ?? 0) + (second ?? 0);
+}
+
+export function combineChatUsage(
+  accumulated: ChatUsageData | null,
+  next: ChatUsageData | null,
+): ChatUsageData | null {
+  if (!accumulated) return next;
+  if (!next) return accumulated;
+
+  return {
+    promptTokens: accumulated.promptTokens + next.promptTokens,
+    completionTokens: accumulated.completionTokens + next.completionTokens,
+    totalTokens: accumulated.totalTokens + next.totalTokens,
+    promptTimeMs: addOptionalMilliseconds(
+      accumulated.promptTimeMs,
+      next.promptTimeMs,
+    ),
+    completionTimeMs: addOptionalMilliseconds(
+      accumulated.completionTimeMs,
+      next.completionTimeMs,
+    ),
+    totalTimeMs: addOptionalMilliseconds(
+      accumulated.totalTimeMs,
+      next.totalTimeMs,
+    ),
+  };
 }
 
 export async function enhanceText(
@@ -255,59 +396,157 @@ export async function enhanceText(
     messageList.push({ role: "user", content: rawText });
   }
 
-  const request: LlmChatRequest = {
-    model: modelId,
-    messages: messageList,
-    temperature: 0.1,
-    maxTokens: options?.maxTokens ?? getDefaultMaxTokens(providerId),
-  };
-
-  const { url, init } = buildFetchParams(
+  const azureFamily =
+    providerId === "azure" && options?.azure
+      ? findAzureChatModelFamilyConfig(
+          getEffectiveAzureChatModelFamilyId(options.azure.modelFamily),
+        )
+      : undefined;
+  let maxTokens = options?.maxTokens ?? getDefaultMaxTokens(
     providerId,
-    request,
-    apiKey,
     options?.azure,
   );
+  if (azureFamily) {
+    maxTokens = Math.min(maxTokens, azureFamily.maxCompletionTokens);
+  }
 
-  const response = await withTimeout(
-    fetch(url, {
-      ...init,
-      signal: options?.signal,
-    }),
-    getProviderTimeout(providerId),
-    options?.signal,
-  );
+  let usage: ChatUsageData | null = null;
+  let finalText!: string;
+  let attempt = 0;
+  let didRetryTemperature = false;
+  let azureRequestOptions = options?.azure;
 
-  if (!response.ok) {
-    let errorBody = "";
-    try {
-      errorBody = await response.text();
-    } catch {
-      // ignore
+  while (true) {
+    const providerTimeoutMs = getProviderTimeout(
+      providerId,
+      options?.azure,
+    );
+    const remainingDeadlineMs =
+      options?.deadlineAtMs === undefined
+        ? providerTimeoutMs
+        : Math.min(
+            providerTimeoutMs,
+            Math.floor(options.deadlineAtMs - performance.now()),
+          );
+    if (remainingDeadlineMs <= 0) {
+      throw createEnhancementTimeoutError(usage);
     }
-    throw new EnhancerApiError(response.status, response.statusText, errorBody);
-  }
 
-  const json = await response.json();
-  const result = parseProviderResponse(providerId, json);
-
-  const usage: ChatUsageData | null = result.usage
-    ? {
-        promptTokens: result.usage.promptTokens,
-        completionTokens: result.usage.completionTokens,
-        totalTokens: result.usage.totalTokens,
-        promptTimeMs: result.usage.promptTimeMs,
-        completionTimeMs: result.usage.completionTimeMs,
-        totalTimeMs: result.usage.totalTimeMs,
+    const request: LlmChatRequest = {
+      model: modelId,
+      messages: messageList,
+      temperature: 0.1,
+      maxTokens,
+    };
+    const { url, init } = buildFetchParams(
+      providerId,
+      request,
+      apiKey,
+      azureRequestOptions,
+    );
+    let response: Awaited<ReturnType<typeof fetch>>;
+    let json: unknown;
+    let errorBody: string | undefined;
+    try {
+      const outcome = await withTimeout(
+        async (signal) => {
+          const nextResponse = await fetch(url, { ...init, signal });
+          if (!nextResponse.ok) {
+            let body = "";
+            try {
+              body = await nextResponse.text();
+            } catch (err) {
+              if (signal.aborted) throw err;
+            }
+            return { response: nextResponse, errorBody: body };
+          }
+          return {
+            response: nextResponse,
+            json: await nextResponse.json(),
+          };
+        },
+        remainingDeadlineMs,
+        options?.signal,
+      );
+      response = outcome.response;
+      json = outcome.json;
+      errorBody = outcome.errorBody;
+    } catch (err) {
+      if (
+        err instanceof Error &&
+        (err as EnhancementErrorWithUsage).code === "ENHANCEMENT_TIMEOUT"
+      ) {
+        throw attachEnhancementUsage(err, usage);
       }
-    : null;
+      throw err;
+    }
 
-  if (!result.text) {
-    return { text: rawText, usage };
+    if (errorBody !== undefined) {
+      if (
+        providerId === "azure" &&
+        azureRequestOptions &&
+        response.status === 400 &&
+        !didRetryTemperature &&
+        shouldSendAzureTemperature(azureRequestOptions, request.temperature) &&
+        isTemperatureRejection(errorBody)
+      ) {
+        didRetryTemperature = true;
+        try {
+          await setAzureTemperatureCapability(
+            azureRequestOptions.endpoint,
+            modelId,
+            false,
+          );
+        } catch (err) {
+          console.warn(
+            "[enhancer] failed to cache Azure temperature capability:",
+            err,
+          );
+        }
+        azureRequestOptions = {
+          ...azureRequestOptions,
+          supportsTemperature: false,
+        };
+        continue;
+      }
+      throw attachEnhancementUsage(
+        new EnhancerApiError(
+          response.status,
+          response.statusText,
+          errorBody,
+        ),
+        usage,
+      );
+    }
+
+    const result = parseProviderResponse(providerId, json);
+    usage = combineChatUsage(usage, toChatUsage(result.usage));
+    finalText = stripReasoningTags(result.text);
+    if (finalText) break;
+
+    const isReasoningAzure = providerId === "azure" && azureFamily?.isReasoning;
+    const canRetry =
+      isReasoningAzure &&
+      attempt === 0 &&
+      result.finishReason !== "content_filter" &&
+      (result.finishReason !== "length" ||
+        maxTokens < azureFamily.maxCompletionTokens);
+    if (!canRetry) {
+      if (isReasoningAzure) {
+        throw new EnhancerEmptyOutputError(result.finishReason, usage);
+      }
+      return { text: rawText, usage };
+    }
+
+    attempt += 1;
+    if (result.finishReason === "length") {
+      maxTokens = Math.min(
+        maxTokens * 2,
+        azureFamily.maxCompletionTokens,
+      );
+    }
   }
 
-  const enhancedContent = stripReasoningTags(result.text);
-  let finalText = enhancedContent || rawText;
   // #38 方案 C：context 洩漏偵測——比對「模型實際收到的 payload」（含 appName、經
   // sanitize/截斷），若輸出抄入其獨有的長片段（可能是被注入或無意複製的螢幕文字），
   // fallback 回原逐字稿，避免螢幕內容外洩到輸出。
@@ -318,7 +557,11 @@ export async function enhanceText(
     console.warn("[enhancer] context leak detected in output; falling back");
     finalText = rawText;
   }
-  return { text: finalText, usage };
+  return {
+    text: finalText,
+    usage,
+    temperatureAdjusted: didRetryTemperature || undefined,
+  };
 }
 
 export interface EnhanceWithGuardResult {
@@ -340,6 +583,7 @@ export async function enhanceWithAnomalyGuard(
   maxRetries = DEFAULT_ENHANCEMENT_RETRY_COUNT,
 ): Promise<EnhanceWithGuardResult> {
   let enhanceResult = await enhanceText(rawText, apiKey, options);
+  let cumulativeUsage = enhanceResult.usage;
 
   let retryCount = 0;
   while (
@@ -348,7 +592,18 @@ export async function enhanceWithAnomalyGuard(
       .isAnomaly
   ) {
     retryCount++;
-    enhanceResult = await enhanceText(rawText, apiKey, options);
+    try {
+      enhanceResult = await enhanceText(rawText, apiKey, options);
+    } catch (err) {
+      if (err instanceof Error) {
+        throw attachEnhancementUsage(
+          err,
+          combineChatUsage(cumulativeUsage, getEnhancementErrorUsage(err)),
+        );
+      }
+      throw err;
+    }
+    cumulativeUsage = combineChatUsage(cumulativeUsage, enhanceResult.usage);
   }
 
   const finalAnomaly = detectEnhancementAnomaly({
@@ -357,12 +612,12 @@ export async function enhanceWithAnomalyGuard(
   });
 
   if (finalAnomaly.isAnomaly) {
-    return { text: rawText, usage: enhanceResult.usage, wasAnomalous: true };
+    return { text: rawText, usage: cumulativeUsage, wasAnomalous: true };
   }
 
   return {
     text: enhanceResult.text,
-    usage: enhanceResult.usage,
+    usage: cumulativeUsage,
     wasAnomalous: false,
   };
 }

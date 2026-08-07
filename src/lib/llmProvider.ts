@@ -1,5 +1,12 @@
-import type { LlmProviderId } from "./modelRegistry";
-import { findLlmModelConfig } from "./modelRegistry";
+import type {
+  AzureChatModelFamilyId,
+  LlmProviderId,
+} from "./modelRegistry";
+import {
+  findAzureChatModelFamilyConfig,
+  findLlmModelConfig,
+  getEffectiveAzureChatModelFamilyId,
+} from "./modelRegistry";
 import type { AzureAuthHeaderMode } from "../types/settings";
 
 // ── Provider 設定 ─────────────────────────────────────────
@@ -67,7 +74,19 @@ const PROVIDER_TIMEOUT_MS: Record<LlmProviderId, number> = {
   azure: 30_000,
 };
 
-export function getProviderTimeout(providerId: LlmProviderId): number {
+function getAzureModelFamilyConfig(options?: AzureRequestOptions) {
+  return findAzureChatModelFamilyConfig(
+    getEffectiveAzureChatModelFamilyId(options?.modelFamily),
+  )!;
+}
+
+export function getProviderTimeout(
+  providerId: LlmProviderId,
+  azureOptions?: AzureRequestOptions,
+): number {
+  if (providerId === "azure") {
+    return getAzureModelFamilyConfig(azureOptions).timeoutMs;
+  }
   return PROVIDER_TIMEOUT_MS[providerId];
 }
 
@@ -82,7 +101,13 @@ const PROVIDER_DEFAULT_MAX_TOKENS: Record<LlmProviderId, number> = {
   azure: 16384,
 };
 
-export function getDefaultMaxTokens(providerId: LlmProviderId): number {
+export function getDefaultMaxTokens(
+  providerId: LlmProviderId,
+  azureOptions?: AzureRequestOptions,
+): number {
+  if (providerId === "azure") {
+    return getAzureModelFamilyConfig(azureOptions).defaultMaxTokens;
+  }
   return PROVIDER_DEFAULT_MAX_TOKENS[providerId];
 }
 
@@ -112,6 +137,7 @@ export interface LlmUsageData {
 export interface LlmChatResult {
   text: string;
   usage: LlmUsageData | null;
+  finishReason?: string;
 }
 
 // ── Provider-aware fetch 組裝 ─────────────────────────────
@@ -127,8 +153,32 @@ export interface AzureRequestOptions {
   authMode: AzureAuthHeaderMode;
   // key 模式：api-key 值；bearer 模式：已取得的 access token
   authValue: string;
-  // 開啟時省略 temperature（Azure GPT-5 系列推理部署送 temperature 會回 400）
+  /** 部署對應的 Foundry 模型行為 profile。 */
+  modelFamily?: AzureChatModelFamilyId;
+  /** 由實測結果快取的參數能力；未設定時才採用模型類型的初始提示。 */
+  supportsTemperature?: boolean;
+  // 開啟時強制省略 temperature；推理 profile 不論此值都一律省略。
   omitTemperature?: boolean;
+}
+
+/**
+ * 短操作（連線測試、字典分析、編輯模式）原本的固定 token budget 太小，
+ * 推理模型可能把額度全花在 hidden reasoning 而沒有 final content。
+ */
+export function getAzureOperationMaxTokens(
+  azureOptions: AzureRequestOptions | undefined,
+  requestedTokens: number,
+): number {
+  if (!azureOptions) return requestedTokens;
+
+  const family = getAzureModelFamilyConfig(azureOptions);
+  const minimumTokens = family.isReasoning
+    ? Math.min(4_096, family.maxCompletionTokens)
+    : requestedTokens;
+  return Math.min(
+    Math.max(requestedTokens, minimumTokens),
+    family.maxCompletionTokens,
+  );
 }
 
 export function buildFetchParams(
@@ -169,6 +219,38 @@ export function normalizeAzureEndpoint(endpoint: string): string {
   }
 }
 
+export interface AzureProjectEndpoint {
+  endpoint: string;
+  projectName: string;
+}
+
+/**
+ * Foundry Portal 提供的專案端點格式是
+ * `https://{resource}.services.ai.azure.com/api/projects/{project}`。
+ * Chat 仍需資源 origin，因此把 project name 另行解析與持久化。
+ */
+export function parseAzureProjectEndpoint(endpoint: string): AzureProjectEndpoint {
+  const normalizedEndpoint = normalizeAzureEndpoint(endpoint);
+  try {
+    const url = new URL(endpoint.trim());
+    const match = url.pathname.match(/^\/api\/projects\/([^/]+)\/?$/);
+    return {
+      endpoint: normalizedEndpoint,
+      projectName: match ? decodeURIComponent(match[1]) : "",
+    };
+  } catch {
+    return { endpoint: normalizedEndpoint, projectName: "" };
+  }
+}
+
+export function shouldSendAzureTemperature(
+  options: AzureRequestOptions,
+  temperature: number | undefined,
+): boolean {
+  if (temperature === undefined || options.omitTemperature) return false;
+  return options.supportsTemperature ?? !getAzureModelFamilyConfig(options).isReasoning;
+}
+
 function buildAzureFetchParams(
   request: LlmChatRequest,
   opts: AzureRequestOptions,
@@ -183,15 +265,20 @@ function buildAzureFetchParams(
     model: request.model, // Azure 的 model = 部署名稱
     messages: request.messages,
   };
-  // Azure/Foundry 的推理模型（GPT-5 系列）送 temperature 會回 400；由設定開關決定是否省略。
+  const family = getAzureModelFamilyConfig(opts);
+  // Azure/Foundry 的推理模型送 temperature 會回 400；進階開關僅能額外強制省略，
+  // 後續由實測快取覆寫模型 profile 的初始提示。
   // 刻意不自動補 reasoning_effort：原始 GPT-5 部署未必支援 "none"（會換成另一個 400），
-  // gpt-5-pro 只接受 "high"。effort 若要支援，須另做「帶明確值」的獨立能力。
-  if (!opts.omitTemperature && request.temperature !== undefined) {
+  // 且 Microsoft 未文件化 DeepSeek / Kimi 對此參數的支援。
+  if (shouldSendAzureTemperature(opts, request.temperature)) {
     body.temperature = request.temperature;
   }
   if (request.maxTokens !== undefined) {
     // v1 / GPT-5 系列要求 max_completion_tokens
-    body.max_completion_tokens = request.maxTokens;
+    body.max_completion_tokens = Math.min(
+      request.maxTokens,
+      family.maxCompletionTokens,
+    );
   }
 
   const headers: Record<string, string> = {
@@ -378,7 +465,10 @@ function buildGeminiFetchParams(
 // ── Provider-aware response 解析 ──────────────────────────
 
 interface OpenAiCompatibleResponse {
-  choices?: { message: { content: string } }[];
+  choices?: {
+    message?: { content?: string | null; reasoning_content?: string | null };
+    finish_reason?: string | null;
+  }[];
   usage?: {
     prompt_tokens: number;
     completion_tokens: number;
@@ -440,6 +530,7 @@ function parseOpenAiCompatibleResponse(
   data: OpenAiCompatibleResponse,
 ): LlmChatResult {
   const text = data.choices?.[0]?.message?.content?.trim() ?? "";
+  const finishReason = data.choices?.[0]?.finish_reason ?? undefined;
   let usage: LlmUsageData | null = null;
 
   if (data.usage) {
@@ -458,7 +549,7 @@ function parseOpenAiCompatibleResponse(
     }
   }
 
-  return { text, usage };
+  return finishReason ? { text, usage, finishReason } : { text, usage };
 }
 
 function parseAnthropicResponse(data: AnthropicResponse): LlmChatResult {

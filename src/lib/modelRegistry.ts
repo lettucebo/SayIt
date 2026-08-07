@@ -4,6 +4,292 @@ export type LlmProviderId = "groq" | "openai" | "anthropic" | "gemini" | "azure"
 
 export const DEFAULT_LLM_PROVIDER_ID: LlmProviderId = "groq";
 
+// ── Azure / Microsoft Foundry chat 模型類型 ────────────────
+
+/**
+ * Azure OpenAI v1 的 `model` 是使用者取的部署名稱，無法從名稱可靠推斷底層模型。
+ * 這個類型讓使用者明確選擇部署的 wire 行為，而不是以字串猜測。
+ */
+export type AzureChatModelFamilyId =
+  | "azure-openai"
+  | "azure-openai-reasoning"
+  | "deepseek"
+  | "kimi"
+  | "grok"
+  | "grok-reasoning"
+  | "llama"
+  | "mistral"
+  | "cohere"
+  | "other"
+  | "other-reasoning";
+
+/**
+ * 模型類型的來源。舊設定一律視為 manual，避免新版本在背景覆寫使用者既有選擇。
+ */
+export type AzureChatModelFamilySource = "auto" | "manual";
+
+export interface AzureFoundryModelMetadata {
+  modelName?: string;
+  modelPublisher?: string;
+}
+
+export interface AzureChatModelFamilyResolution {
+  familyId: AzureChatModelFamilyId;
+  confidence: "high" | "low";
+}
+
+export interface AzureChatModelFamilyConfig {
+  id: AzureChatModelFamilyId;
+  displayName: string;
+  descriptionKey: string;
+  isReasoning: boolean;
+  /** 單一 HTTP 請求的產品逾時上限；不是服務端的最大允許值。 */
+  timeoutMs: number;
+  /** 同步貼上流程全部 retry 合計的上限，避免多次 retry 無限延長等待。 */
+  totalDeadlineMs: number;
+  /** 一般文字整理的預設 max_completion_tokens。 */
+  defaultMaxTokens: number;
+  /**
+   * 此類型內最保守的官方 Output token 上限。服務端對超限的行為未文件化，
+   * 因此 client 端先 clamp，避免部分模型直接回 400。
+   */
+  maxCompletionTokens: number;
+}
+
+const NON_REASONING_TIMEOUT_MS = 30_000;
+const REASONING_TIMEOUT_MS = 60_000;
+const NON_REASONING_TOTAL_DEADLINE_MS = 60_000;
+const REASONING_TOTAL_DEADLINE_MS = 120_000;
+
+export const DEFAULT_AZURE_CHAT_MODEL_FAMILY_ID: AzureChatModelFamilyId =
+  "azure-openai";
+
+export const DEFAULT_AZURE_CHAT_MODEL_FAMILY_SOURCE: AzureChatModelFamilySource =
+  "manual";
+
+/**
+ * Azure 直售模型的行為 profile。
+ *
+ * maxCompletionTokens 取該 family 已文件化模型的最低 output 上限。例如 Grok、
+ * Llama 3.3 與 Cohere Command A 分別只有 8,192、8,192、8,182 token。
+ */
+export const AZURE_CHAT_MODEL_FAMILY_LIST: AzureChatModelFamilyConfig[] = [
+  {
+    id: "azure-openai",
+    displayName: "Azure OpenAI (GPT-4o / GPT-4.1)",
+    descriptionKey: "settings.azure.modelFamilyDescription.azureOpenai",
+    isReasoning: false,
+    timeoutMs: NON_REASONING_TIMEOUT_MS,
+    totalDeadlineMs: NON_REASONING_TOTAL_DEADLINE_MS,
+    defaultMaxTokens: 8_192,
+    maxCompletionTokens: 16_384,
+  },
+  {
+    id: "azure-openai-reasoning",
+    displayName: "Azure OpenAI reasoning (GPT-5)",
+    descriptionKey: "settings.azure.modelFamilyDescription.azureOpenaiReasoning",
+    isReasoning: true,
+    timeoutMs: REASONING_TIMEOUT_MS,
+    totalDeadlineMs: REASONING_TOTAL_DEADLINE_MS,
+    defaultMaxTokens: 8_192,
+    maxCompletionTokens: 32_768,
+  },
+  {
+    id: "deepseek",
+    displayName: "DeepSeek (V3.2 / V4)",
+    descriptionKey: "settings.azure.modelFamilyDescription.deepseek",
+    isReasoning: true,
+    timeoutMs: REASONING_TIMEOUT_MS,
+    totalDeadlineMs: REASONING_TOTAL_DEADLINE_MS,
+    defaultMaxTokens: 8_192,
+    maxCompletionTokens: 128_000,
+  },
+  {
+    id: "kimi",
+    displayName: "Moonshot Kimi (K2)",
+    descriptionKey: "settings.azure.modelFamilyDescription.kimi",
+    isReasoning: true,
+    timeoutMs: REASONING_TIMEOUT_MS,
+    totalDeadlineMs: REASONING_TOTAL_DEADLINE_MS,
+    defaultMaxTokens: 8_192,
+    maxCompletionTokens: 262_144,
+  },
+  {
+    id: "grok",
+    displayName: "xAI Grok (non-reasoning)",
+    descriptionKey: "settings.azure.modelFamilyDescription.grok",
+    isReasoning: false,
+    timeoutMs: NON_REASONING_TIMEOUT_MS,
+    totalDeadlineMs: NON_REASONING_TOTAL_DEADLINE_MS,
+    defaultMaxTokens: 8_192,
+    maxCompletionTokens: 8_192,
+  },
+  {
+    id: "grok-reasoning",
+    displayName: "xAI Grok (reasoning)",
+    descriptionKey: "settings.azure.modelFamilyDescription.grokReasoning",
+    isReasoning: true,
+    timeoutMs: REASONING_TIMEOUT_MS,
+    totalDeadlineMs: REASONING_TOTAL_DEADLINE_MS,
+    defaultMaxTokens: 8_192,
+    maxCompletionTokens: 8_192,
+  },
+  {
+    id: "llama",
+    displayName: "Meta Llama",
+    descriptionKey: "settings.azure.modelFamilyDescription.llama",
+    isReasoning: false,
+    timeoutMs: NON_REASONING_TIMEOUT_MS,
+    totalDeadlineMs: NON_REASONING_TOTAL_DEADLINE_MS,
+    defaultMaxTokens: 8_192,
+    maxCompletionTokens: 8_192,
+  },
+  {
+    id: "mistral",
+    displayName: "Mistral",
+    descriptionKey: "settings.azure.modelFamilyDescription.mistral",
+    isReasoning: false,
+    timeoutMs: NON_REASONING_TIMEOUT_MS,
+    totalDeadlineMs: NON_REASONING_TOTAL_DEADLINE_MS,
+    // Mistral Large 3 的 Foundry model card 未列 output 上限，採保守值。
+    defaultMaxTokens: 8_192,
+    maxCompletionTokens: 8_192,
+  },
+  {
+    id: "cohere",
+    displayName: "Cohere Command A",
+    descriptionKey: "settings.azure.modelFamilyDescription.cohere",
+    isReasoning: false,
+    timeoutMs: NON_REASONING_TIMEOUT_MS,
+    totalDeadlineMs: NON_REASONING_TOTAL_DEADLINE_MS,
+    defaultMaxTokens: 8_192,
+    maxCompletionTokens: 8_182,
+  },
+  {
+    id: "other",
+    displayName: "Other OpenAI-compatible model",
+    descriptionKey: "settings.azure.modelFamilyDescription.other",
+    isReasoning: false,
+    timeoutMs: NON_REASONING_TIMEOUT_MS,
+    totalDeadlineMs: NON_REASONING_TOTAL_DEADLINE_MS,
+    defaultMaxTokens: 8_192,
+    maxCompletionTokens: 8_192,
+  },
+  {
+    id: "other-reasoning",
+    displayName: "Other reasoning model",
+    descriptionKey: "settings.azure.modelFamilyDescription.otherReasoning",
+    isReasoning: true,
+    timeoutMs: REASONING_TIMEOUT_MS,
+    totalDeadlineMs: REASONING_TOTAL_DEADLINE_MS,
+    defaultMaxTokens: 8_192,
+    maxCompletionTokens: 16_384,
+  },
+];
+
+export function findAzureChatModelFamilyConfig(
+  id: string,
+): AzureChatModelFamilyConfig | undefined {
+  return AZURE_CHAT_MODEL_FAMILY_LIST.find((family) => family.id === id);
+}
+
+export function isAzureChatModelFamilyId(
+  id: unknown,
+): id is AzureChatModelFamilyId {
+  return typeof id === "string" && findAzureChatModelFamilyConfig(id) !== undefined;
+}
+
+export function isAzureChatModelFamilySource(
+  source: unknown,
+): source is AzureChatModelFamilySource {
+  return source === "auto" || source === "manual";
+}
+
+/** 未知值（舊備份／手動編輯的 store）一律安全退回 Azure OpenAI profile。 */
+export function getEffectiveAzureChatModelFamilyId(
+  savedId: string | null | undefined,
+): AzureChatModelFamilyId {
+  return savedId && isAzureChatModelFamilyId(savedId)
+    ? savedId
+    : DEFAULT_AZURE_CHAT_MODEL_FAMILY_ID;
+}
+
+/** 缺少來源欄位代表舊設定，必須保留使用者既有模型類型。 */
+export function getEffectiveAzureChatModelFamilySource(
+  savedSource: unknown,
+): AzureChatModelFamilySource {
+  return isAzureChatModelFamilySource(savedSource)
+    ? savedSource
+    : DEFAULT_AZURE_CHAT_MODEL_FAMILY_SOURCE;
+}
+
+export function mapFoundryModelToFamily(
+  publisher: string | null | undefined,
+  modelName: string | null | undefined,
+): AzureChatModelFamilyId | undefined {
+  const normalizedPublisher = publisher?.trim().toLowerCase() ?? "";
+  const normalizedModelName = modelName?.trim().toLowerCase() ?? "";
+  const has = (...valueList: string[]) =>
+    valueList.some(
+      (value) =>
+        normalizedPublisher.includes(value) || normalizedModelName.includes(value),
+    );
+
+  if (has("deepseek")) return "deepseek";
+  if (has("moonshot", "kimi")) return "kimi";
+  if (has("xai", "grok")) {
+    return normalizedModelName.includes("reasoning") ||
+      normalizedModelName.includes("thinking")
+      ? "grok-reasoning"
+      : "grok";
+  }
+  if (has("meta", "llama")) return "llama";
+  if (has("mistral")) return "mistral";
+  if (has("cohere", "command")) return "cohere";
+  if (has("openai", "gpt-", "o1", "o3", "o4")) {
+    return normalizedModelName.startsWith("o") ||
+      normalizedModelName.includes("gpt-5") ||
+      normalizedModelName.includes("reasoning")
+      ? "azure-openai-reasoning"
+      : "azure-openai";
+  }
+  return undefined;
+}
+
+/**
+ * 部署名稱完全由使用者自訂，這只能是 UI 建議，絕不可自動持久化。
+ */
+export function suggestAzureChatModelFamily(
+  deploymentName: string,
+): AzureChatModelFamilyId | undefined {
+  return mapFoundryModelToFamily(undefined, deploymentName);
+}
+
+/**
+ * 僅使用 Foundry 回傳的 metadata 來自動選擇 profile。
+ * 未知模型使用保守 profile，絕不沿用前一個部署的模型類型。
+ */
+export function resolveAzureFamilyFromDeployment(
+  deployment: AzureFoundryModelMetadata,
+): AzureChatModelFamilyResolution {
+  const familyId = mapFoundryModelToFamily(
+    deployment.modelPublisher,
+    deployment.modelName,
+  );
+  if (familyId) return { familyId, confidence: "high" };
+
+  const normalizedModelName = deployment.modelName?.trim().toLowerCase() ?? "";
+  const isReasoning =
+    normalizedModelName.includes("reasoning") ||
+    normalizedModelName.includes("thinking") ||
+    /(?:^|[-_])r1(?:$|[-_])/.test(normalizedModelName);
+
+  return {
+    familyId: isReasoning ? "other-reasoning" : "other",
+    confidence: "low",
+  };
+}
+
 // ── LLM 模型（文字整理用）────────────────────────────────
 
 export type LlmModelId =

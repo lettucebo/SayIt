@@ -6,7 +6,11 @@ import type { VocabularyExportFile } from "../types/vocabulary";
 import type { ReplacementRule } from "../types/replacement";
 import { isAzureAuthMode } from "../types/settings";
 import { normalizeMaiCandidateLocales } from "../i18n/languageConfig";
-import { getEffectiveMaiTranscribeStyle } from "./modelRegistry";
+import {
+  getEffectiveMaiTranscribeStyle,
+  isAzureChatModelFamilyId,
+  isAzureChatModelFamilySource,
+} from "./modelRegistry";
 
 export const BACKUP_FORMAT = "sayit-backup" as const;
 export const BACKUP_VERSION = 1 as const;
@@ -61,6 +65,7 @@ export const EXPORTABLE_SETTING_KEYS = [
   "geminiApiKey",
   "azureEnabled",
   "azureEndpoint",
+  "azureProjectName",
   "azureAuthMode",
   "azureApiKey",
   "azureTenantId",
@@ -68,6 +73,8 @@ export const EXPORTABLE_SETTING_KEYS = [
   "azureClientSecret",
   "azureApiVersion",
   "azureChatDeployment",
+  "azureChatModelFamily",
+  "azureChatModelFamilySource",
   "azureWhisperDeployment",
   "azureOmitTemperature",
   "azureSpeechEndpoint",
@@ -281,6 +288,7 @@ const SETTING_VALUE_TYPES: Record<string, ExpectedType> = {
   geminiApiKey: "string",
   azureEnabled: "boolean",
   azureEndpoint: "string",
+  azureProjectName: "string",
   azureAuthMode: "string",
   azureApiKey: "string",
   azureTenantId: "string",
@@ -288,6 +296,8 @@ const SETTING_VALUE_TYPES: Record<string, ExpectedType> = {
   azureClientSecret: "string",
   azureApiVersion: "string",
   azureChatDeployment: "string",
+  azureChatModelFamily: "string",
+  azureChatModelFamilySource: "string",
   azureWhisperDeployment: "string",
   azureOmitTemperature: "boolean",
   azureSpeechEndpoint: "string",
@@ -332,6 +342,15 @@ export function sanitizeSettingsPayload(
     // 列舉型欄位光靠 typeof 檢查不夠：備份是可任意編輯的 JSON，
     // 未知的驗證模式會一路帶進 store 並讓下游 header 判斷失準。
     if (key === "azureAuthMode" && !isAzureAuthMode(value)) continue;
+    if (key === "azureChatModelFamily" && !isAzureChatModelFamilyId(value)) {
+      continue;
+    }
+    if (
+      key === "azureChatModelFamilySource" &&
+      !isAzureChatModelFamilySource(value)
+    ) {
+      continue;
+    }
     if (key === "maiCandidateLocales") {
       result[key] = normalizeMaiCandidateLocales(value);
       continue;

@@ -59,8 +59,13 @@ import {
 } from "../lib/keycodeMap";
 import {
   WHISPER_MODEL_LIST,
+  AZURE_CHAT_MODEL_FAMILY_LIST,
   findLlmModelConfig,
+  findAzureChatModelFamilyConfig,
+  resolveAzureFamilyFromDeployment,
+  suggestAzureChatModelFamily,
   findWhisperModelConfig,
+  type AzureChatModelFamilyId,
   getModelListByProvider,
   type LlmModelId,
   type LlmProviderId,
@@ -74,6 +79,10 @@ import {
   findGeminiTranscriptionModelConfig,
 } from "../lib/modelRegistry";
 import { LLM_PROVIDER_LIST, findProviderConfig } from "../lib/llmProvider";
+import type {
+  AzureChatDeployment,
+  AzureDeploymentListResult,
+} from "../lib/foundryDeployments";
 import {
   LANGUAGE_OPTIONS,
   TRANSCRIPTION_LANGUAGE_OPTIONS,
@@ -837,10 +846,79 @@ const azureWhisperDeploymentInput = ref("");
 const azureSpeechEndpointInput = ref("");
 const azureSpeechApiKeyInput = ref("");
 const isAzureSpeechApiKeyVisible = ref(false);
+const isLoadingAzureDeployments = ref(false);
+const azureDeploymentList = ref<AzureChatDeployment[]>([]);
+const azureDeploymentListResult = ref<AzureDeploymentListResult | null>(null);
+const isManualAzureChatDeploymentInputVisible = ref(false);
+const hasAttemptedAzureAutoLoad = ref(false);
+const azureChatModelFamilyConfig = computed(() =>
+  findAzureChatModelFamilyConfig(settingsStore.azureChatModelFamily),
+);
+const azureDeploymentOptions = computed(() => {
+  const savedDeployment = azureChatDeploymentInput.value.trim();
+  if (
+    savedDeployment === "" ||
+    azureDeploymentList.value.some(
+      (deployment) => deployment.name === savedDeployment,
+    )
+  ) {
+    return azureDeploymentList.value;
+  }
+
+  return [
+    {
+      name: savedDeployment,
+      source: "v1" as const,
+    },
+    ...azureDeploymentList.value,
+  ];
+});
+const selectedAzureDeployment = computed(() =>
+  azureDeploymentList.value.find(
+    (deployment) => deployment.name === azureChatDeploymentInput.value,
+  ),
+);
+const azureDetectedModelFamily = computed(() => {
+  const deployment = selectedAzureDeployment.value;
+  return deployment?.source === "foundry" && deployment.modelName
+    ? resolveAzureFamilyFromDeployment(deployment)
+    : null;
+});
+const azureModelFamilySuggestion = computed(() => {
+  if (azureDetectedModelFamily.value) return null;
+  const familyId = suggestAzureChatModelFamily(
+    selectedAzureDeployment.value?.name ?? azureChatDeploymentInput.value,
+  );
+  if (!familyId) return null;
+  return {
+    familyId,
+  };
+});
+const isStoredAzureDeploymentMissingFromList = computed(
+  () =>
+    azureDeploymentListResult.value !== null &&
+    azureChatDeploymentInput.value.trim() !== "" &&
+    selectedAzureDeployment.value === undefined,
+);
+const isAzureDetectedFamilyDifferent = computed(
+  () =>
+    azureDetectedModelFamily.value !== null &&
+    azureDetectedModelFamily.value.familyId !==
+      settingsStore.azureChatModelFamily,
+);
+const canAutoLoadAzureDeployments = computed(
+  () =>
+    settingsStore.selectedLlmProviderId === "azure" &&
+    settingsStore.azureEnabled &&
+    settingsStore.azureEndpoint !== "" &&
+    settingsStore.hasAzureCredentials,
+);
 
 function loadAzureInputsFromStore() {
   azureEnabledInput.value = settingsStore.azureEnabled;
-  azureEndpointInput.value = settingsStore.azureEndpoint;
+  azureEndpointInput.value = settingsStore.azureProjectName
+    ? `${settingsStore.azureEndpoint}/api/projects/${encodeURIComponent(settingsStore.azureProjectName)}`
+    : settingsStore.azureEndpoint;
   azureAuthModeInput.value = settingsStore.azureAuthMode;
   azureApiKeyInput.value = settingsStore.azureApiKey;
   azureTenantIdInput.value = settingsStore.azureTenantId;
@@ -864,6 +942,8 @@ async function handleSaveAzureConnection() {
     isSubmittingAzure.value = true;
     await handleSaveAzureConnectionOrThrow();
     azureFeedback.show("success", t("settings.azure.saved"));
+    hasAttemptedAzureAutoLoad.value = false;
+    void tryAutoLoadAzureDeployments();
   } catch (err) {
     azureFeedback.show("error", extractErrorMessage(err));
   } finally {
@@ -994,6 +1074,114 @@ const isSignedInForCurrentInput = computed(() =>
 async function handleSaveAzureChatDeployment() {
   try {
     await settingsStore.saveAzureChatDeployment(azureChatDeploymentInput.value);
+    providerFeedback.show("success", t("settings.azure.deploymentSaved"));
+  } catch (err) {
+    providerFeedback.show("error", extractErrorMessage(err));
+  }
+}
+
+async function loadAzureDeployments({
+  saveConnection,
+  showFeedback,
+}: {
+  saveConnection: boolean;
+  showFeedback: boolean;
+}) {
+  try {
+    isLoadingAzureDeployments.value = true;
+    if (saveConnection) {
+      await handleSaveAzureConnectionOrThrow();
+    }
+    const result = await settingsStore.listAzureChatDeployments();
+    azureDeploymentList.value = result.deploymentList;
+    azureDeploymentListResult.value = result;
+    if (showFeedback) {
+      providerFeedback.show(
+        "success",
+        result.deploymentList.length === 0
+          ? t("settings.azure.deploymentListEmpty")
+          : t("settings.azure.deploymentListLoaded", {
+              count: result.deploymentList.length,
+            }),
+      );
+    }
+  } catch (err) {
+    if (showFeedback) {
+      azureDeploymentList.value = [];
+      azureDeploymentListResult.value = null;
+      providerFeedback.show("error", extractErrorMessage(err));
+    } else {
+      console.warn(
+        "[SettingsView] automatic Azure deployment load failed:",
+        extractErrorMessage(err),
+      );
+    }
+  } finally {
+    isLoadingAzureDeployments.value = false;
+  }
+}
+
+async function handleLoadAzureDeployments() {
+  await loadAzureDeployments({ saveConnection: true, showFeedback: true });
+}
+
+async function tryAutoLoadAzureDeployments() {
+  if (
+    hasAttemptedAzureAutoLoad.value ||
+    isLoadingAzureDeployments.value ||
+    !canAutoLoadAzureDeployments.value
+  ) {
+    return;
+  }
+
+  hasAttemptedAzureAutoLoad.value = true;
+  await loadAzureDeployments({ saveConnection: false, showFeedback: false });
+}
+
+async function handleAzureDeploymentSelection(name: string) {
+  const previousDeployment = azureChatDeploymentInput.value;
+  azureChatDeploymentInput.value = name;
+  try {
+    const deployment = azureDeploymentList.value.find(
+      (item) => item.name === name,
+    );
+    if (deployment?.source === "foundry" && deployment.modelName) {
+      const resolution = resolveAzureFamilyFromDeployment(deployment);
+      await settingsStore.saveAzureChatDeploymentSelection({
+        deployment: name,
+        modelFamily: resolution.familyId,
+        familySource: "auto",
+      });
+    } else {
+      await settingsStore.saveAzureChatDeployment(name);
+    }
+    providerFeedback.show("success", t("settings.azure.deploymentSaved"));
+  } catch (err) {
+    azureChatDeploymentInput.value = previousDeployment;
+    providerFeedback.show("error", extractErrorMessage(err));
+  }
+}
+
+async function handleAzureChatModelFamilyChange(
+  modelFamily: AzureChatModelFamilyId,
+) {
+  try {
+    await settingsStore.saveAzureChatModelFamily(modelFamily);
+    providerFeedback.show("success", t("settings.azure.deploymentSaved"));
+  } catch (err) {
+    providerFeedback.show("error", extractErrorMessage(err));
+  }
+}
+
+async function handleRestoreAzureModelFamilyAuto() {
+  const resolution = azureDetectedModelFamily.value;
+  if (!resolution) return;
+  try {
+    await settingsStore.saveAzureChatDeploymentSelection({
+      deployment: azureChatDeploymentInput.value,
+      modelFamily: resolution.familyId,
+      familySource: "auto",
+    });
     providerFeedback.show("success", t("settings.azure.deploymentSaved"));
   } catch (err) {
     providerFeedback.show("error", extractErrorMessage(err));
@@ -1911,7 +2099,21 @@ async function applyBackupImport() {
 watch(
   () => settingsStore.isSettingsLoaded,
   (loaded) => {
-    if (loaded) loadAzureInputsFromStore();
+    if (loaded) {
+      loadAzureInputsFromStore();
+      void tryAutoLoadAzureDeployments();
+    }
+  },
+);
+
+watch(
+  () => settingsStore.selectedLlmProviderId,
+  (providerId) => {
+    if (providerId !== "azure") {
+      hasAttemptedAzureAutoLoad.value = false;
+      return;
+    }
+    void tryAutoLoadAzureDeployments();
   },
 );
 
@@ -1929,6 +2131,7 @@ onMounted(async () => {
     apiKeyInput.value = settingsStore.getApiKey();
   }
   loadAzureInputsFromStore();
+  void tryAutoLoadAzureDeployments();
   thresholdEnabled.value = settingsStore.isEnhancementThresholdEnabled;
   thresholdCharCount.value = settingsStore.enhancementThresholdCharCount;
   recordingAutoCleanupEnabled.value =
@@ -2306,6 +2509,9 @@ onBeforeUnmount(() => {
             :placeholder="$t('settings.azure.endpointPlaceholder')"
             class="font-mono text-xs"
           />
+          <p class="text-xs text-muted-foreground">
+            {{ $t("settings.azure.endpointHint") }}
+          </p>
         </div>
 
         <div class="space-y-2">
@@ -2896,22 +3102,150 @@ onBeforeUnmount(() => {
         </div>
 
         <div v-else-if="settingsStore.selectedLlmProviderId === 'azure'" class="space-y-2">
-          <Label for="azure-chat-deployment">{{ $t("settings.azure.chatDeploymentLabel") }}</Label>
-          <div class="flex gap-2">
-            <Input
-              id="azure-chat-deployment"
-              v-model="azureChatDeploymentInput"
-              :placeholder="$t('settings.azure.chatDeploymentPlaceholder')"
-              class="flex-1 font-mono text-xs"
-            />
-            <Button size="sm" :disabled="!azureChatDeploymentInput.trim()" @click="handleSaveAzureChatDeployment">
-              {{ $t('common.save') }}
+          <Label for="azure-chat-deployment-list">{{ $t("settings.azure.chatDeploymentLabel") }}</Label>
+          <div class="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              :disabled="isLoadingAzureDeployments || !azureEndpointInput.trim()"
+              @click="handleLoadAzureDeployments"
+            >
+              <LoaderCircle v-if="isLoadingAzureDeployments" class="mr-1 size-4 animate-spin" />
+              {{ $t(azureDeploymentListResult ? "settings.azure.reloadDeployments" : "settings.azure.loadDeployments") }}
+            </Button>
+            <span
+              v-if="azureDeploymentListResult?.source === 'foundry'"
+              class="text-xs text-muted-foreground"
+            >
+              {{ azureDeploymentListResult.capabilityFiltered
+                ? $t("settings.azure.deploymentListVerified")
+                : $t("settings.azure.deploymentListUnverified") }}
+            </span>
+          </div>
+          <div v-if="azureDeploymentList.length > 0" class="space-y-2">
+            <Select
+              :model-value="azureChatDeploymentInput"
+              @update:model-value="handleAzureDeploymentSelection(String($event))"
+            >
+              <SelectTrigger id="azure-chat-deployment-list" class="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem
+                  v-for="deployment in azureDeploymentOptions"
+                  :key="deployment.name"
+                  :value="deployment.name"
+                >
+                  {{ deployment.name }}<template v-if="deployment.modelName"> — {{ deployment.modelPublisher }} {{ deployment.modelName }}</template><template v-else-if="isStoredAzureDeploymentMissingFromList && deployment.name === azureChatDeploymentInput"> — {{ $t("settings.azure.deploymentMissingFromList") }}</template>
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div
+            v-if="azureDeploymentList.length === 0 || isManualAzureChatDeploymentInputVisible"
+            class="space-y-2"
+          >
+            <Label for="azure-chat-deployment">{{ $t("settings.azure.manualChatDeploymentLabel") }}</Label>
+            <div class="flex gap-2">
+              <Input
+                id="azure-chat-deployment"
+                v-model="azureChatDeploymentInput"
+                :placeholder="$t('settings.azure.chatDeploymentPlaceholder')"
+                class="flex-1 font-mono text-xs"
+              />
+              <Button size="sm" :disabled="!azureChatDeploymentInput.trim()" @click="handleSaveAzureChatDeployment">
+                {{ $t('common.save') }}
+              </Button>
+            </div>
+          </div>
+          <Button
+            v-else
+            variant="link"
+            size="sm"
+            class="h-auto w-fit px-0 text-muted-foreground"
+            @click="isManualAzureChatDeploymentInputVisible = true"
+          >
+            {{ $t("settings.azure.enterDeploymentManually") }}
+          </Button>
+          <p
+            v-if="azureDeploymentListResult?.fallbackReason && azureDeploymentListResult.fallbackReason !== 'capability-unverified'"
+            class="text-xs text-amber-400"
+          >
+            {{ azureDeploymentListResult.fallbackReason === 'project-not-configured' ? $t("settings.azure.deploymentListFallbackProject") : $t("settings.azure.deploymentListFallbackRequest") }}
+          </p>
+          <div
+            v-if="azureDetectedModelFamily"
+            class="flex items-center justify-between gap-2 rounded-md border border-border bg-muted/30 p-2"
+          >
+            <p class="text-xs text-muted-foreground">
+              {{ azureDetectedModelFamily.confidence === "high"
+                ? $t("settings.azure.modelFamilyDetected", {
+                  publisher: selectedAzureDeployment?.modelPublisher ?? "",
+                  model: selectedAzureDeployment?.modelName ?? "",
+                  family: findAzureChatModelFamilyConfig(azureDetectedModelFamily.familyId)?.displayName ?? "",
+                })
+                : $t("settings.azure.modelFamilyDetectedLowConfidence", {
+                  model: selectedAzureDeployment?.modelName ?? "",
+                  family: findAzureChatModelFamilyConfig(azureDetectedModelFamily.familyId)?.displayName ?? "",
+                }) }}
+            </p>
+            <Button
+              v-if="isAzureDetectedFamilyDifferent"
+              variant="outline"
+              size="sm"
+              @click="handleRestoreAzureModelFamilyAuto"
+            >
+              {{ $t("settings.azure.restoreAutoModelFamily") }}
             </Button>
           </div>
+          <p
+            v-else-if="azureModelFamilySuggestion"
+            class="text-xs text-muted-foreground"
+          >
+            {{ $t("settings.azure.modelFamilySuggested", {
+              family: findAzureChatModelFamilyConfig(azureModelFamilySuggestion.familyId)?.displayName ?? "",
+            }) }}
+          </p>
           <p v-if="!settingsStore.azureEnabled" class="text-xs text-amber-400">
             {{ $t("settings.azure.notConfiguredHint") }}
           </p>
           <p v-else class="text-xs text-muted-foreground">{{ $t("settings.azure.chatHint") }}</p>
+
+          <div class="space-y-2 pt-2">
+            <Label for="azure-chat-model-family">{{ $t("settings.azure.modelFamilyLabel") }}</Label>
+            <Select
+              :model-value="settingsStore.azureChatModelFamily"
+              @update:model-value="handleAzureChatModelFamilyChange($event as AzureChatModelFamilyId)"
+            >
+              <SelectTrigger id="azure-chat-model-family" class="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem
+                  v-for="modelFamily in AZURE_CHAT_MODEL_FAMILY_LIST"
+                  :key="modelFamily.id"
+                  :value="modelFamily.id"
+                >
+                  {{ modelFamily.displayName }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <p class="text-xs text-muted-foreground">
+              {{ azureChatModelFamilyConfig ? $t(azureChatModelFamilyConfig.descriptionKey) : $t("settings.azure.modelFamilyHint") }}
+            </p>
+            <p
+              v-if="settingsStore.azureChatModelFamilySource === 'auto' && !isAzureDetectedFamilyDifferent"
+              class="text-xs text-muted-foreground"
+            >
+              {{ $t("settings.azure.modelFamilySourceAuto") }}
+            </p>
+            <p
+              v-else-if="settingsStore.azureChatModelFamilySource === 'manual'"
+              class="text-xs text-muted-foreground"
+            >
+              {{ $t("settings.azure.modelFamilySourceManual") }}
+            </p>
+          </div>
 
           <div class="flex items-center justify-between pt-2">
             <div>

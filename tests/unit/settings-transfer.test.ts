@@ -36,8 +36,11 @@ describe("EXPORTABLE_SETTING_KEYS 完整性", () => {
       "geminiFreeQuotaPeriod",
       "azureSpeechEndpoint",
       "azureSpeechApiKey",
+      "azureProjectName",
       "maiCandidateLocales",
       "maiTranscribeStyle",
+      "azureChatModelFamily",
+      "azureChatModelFamilySource",
     ];
     for (const key of required) {
       expect(
@@ -54,6 +57,9 @@ describe("EXPORTABLE_SETTING_KEYS 完整性", () => {
       geminiFreeQuotaPeriod: "daily",
       azureSpeechEndpoint: "https://speech.cognitiveservices.azure.com",
       azureSpeechApiKey: "speech-key",
+      azureChatModelFamily: "deepseek",
+      azureChatModelFamilySource: "auto",
+      azureProjectName: "voice-project",
       maiCandidateLocales: ["zh-TW"],
       maiTranscribeStyle: "verbatim",
     };
@@ -65,6 +71,23 @@ describe("EXPORTABLE_SETTING_KEYS 完整性", () => {
       "https://speech.cognitiveservices.azure.com",
     );
     expect(cleaned.maiCandidateLocales).toEqual(["zh-TW"]);
+    expect(cleaned.azureChatModelFamily).toBe("deepseek");
+    expect(cleaned.azureChatModelFamilySource).toBe("auto");
+    expect(cleaned.azureProjectName).toBe("voice-project");
+  });
+
+  it("[P0] Azure 模型類型未知時必須在匯入前拒絕", () => {
+    const cleaned = _sanitizeCheck({
+      azureChatModelFamily: "untrusted-model-family",
+    });
+    expect(cleaned.azureChatModelFamily).toBeUndefined();
+  });
+
+  it("[P0] Azure 模型類型來源未知時必須在匯入前拒絕", () => {
+    const cleaned = _sanitizeCheck({
+      azureChatModelFamilySource: "untrusted-source",
+    });
+    expect(cleaned.azureChatModelFamilySource).toBeUndefined();
   });
 });
 

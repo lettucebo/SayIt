@@ -1,7 +1,11 @@
 import { describe, it, expect } from "vitest";
 import {
   buildFetchParams,
+  getAzureOperationMaxTokens,
+  getDefaultMaxTokens,
+  getProviderTimeout,
   normalizeAzureEndpoint,
+  parseAzureProjectEndpoint,
   parseProviderResponse,
   type LlmChatRequest,
   type AzureRequestOptions,
@@ -28,6 +32,28 @@ describe("Azure provider", () => {
       expect(normalizeAzureEndpoint("https://r.openai.azure.com/")).toBe(
         "https://r.openai.azure.com",
       );
+    });
+
+    describe("parseAzureProjectEndpoint", () => {
+      it("[P0] 從完整 Foundry 專案端點拆出 origin 與 project 名稱", () => {
+        expect(
+          parseAzureProjectEndpoint(
+            "https://r.services.ai.azure.com/api/projects/my-project",
+          ),
+        ).toEqual({
+          endpoint: "https://r.services.ai.azure.com",
+          projectName: "my-project",
+        });
+      });
+
+      it("[P1] 資源層 endpoint 沒有 project 時保留空 project 名稱", () => {
+        expect(
+          parseAzureProjectEndpoint("https://r.openai.azure.com/"),
+        ).toEqual({
+          endpoint: "https://r.openai.azure.com",
+          projectName: "",
+        });
+      });
     });
 
     it("[P1] 去掉多餘的 /openai/v1/chat/completions", () => {
@@ -158,6 +184,80 @@ describe("Azure provider", () => {
       expect(body.reasoning_effort).toBeUndefined();
       // 其餘照送
       expect(body.max_completion_tokens).toBe(1024);
+    });
+
+    it("[P0] DeepSeek profile：不論進階開關都省略 temperature", () => {
+      const azure: AzureRequestOptions = {
+        endpoint: "https://r.services.ai.azure.com",
+        authMode: "key",
+        authValue: "k",
+        modelFamily: "deepseek",
+        omitTemperature: false,
+      };
+      const { init } = buildFetchParams("azure", REQUEST, "", azure);
+      const body = JSON.parse(init.body as string);
+
+      expect(body.temperature).toBeUndefined();
+      expect(body.max_completion_tokens).toBe(1024);
+      expect(body.reasoning_effort).toBeUndefined();
+    });
+
+    it("[P0] Grok profile：將 max_completion_tokens clamp 到官方 8192 上限", () => {
+      const azure: AzureRequestOptions = {
+        endpoint: "https://r.services.ai.azure.com",
+        authMode: "key",
+        authValue: "k",
+        modelFamily: "grok",
+      };
+      const { init } = buildFetchParams(
+        "azure",
+        { ...REQUEST, maxTokens: 16_384 },
+        "",
+        azure,
+      );
+      const body = JSON.parse(init.body as string);
+
+      expect(body.max_completion_tokens).toBe(8_192);
+      expect(body.temperature).toBe(0.1);
+    });
+
+    it("[P1] 回應保留 finish_reason，供推理空輸出補救判斷", () => {
+      const result = parseProviderResponse("azure", {
+        choices: [
+          {
+            message: { content: "" },
+            finish_reason: "length",
+          },
+        ],
+      });
+
+      expect(result.text).toBe("");
+      expect(result.finishReason).toBe("length");
+    });
+  });
+
+  describe("Azure model family helpers", () => {
+    it("[P0] 推理 family 使用較長 timeout 與預設 token budget", () => {
+      const azure: AzureRequestOptions = {
+        endpoint: "https://r.services.ai.azure.com",
+        authMode: "key",
+        authValue: "k",
+        modelFamily: "kimi",
+      };
+
+      expect(getProviderTimeout("azure", azure)).toBe(60_000);
+      expect(getDefaultMaxTokens("azure", azure)).toBe(8_192);
+    });
+
+    it("[P0] 推理短操作將 50 token 預算提高到 4096", () => {
+      const azure: AzureRequestOptions = {
+        endpoint: "https://r.services.ai.azure.com",
+        authMode: "key",
+        authValue: "k",
+        modelFamily: "deepseek",
+      };
+
+      expect(getAzureOperationMaxTokens(azure, 50)).toBe(4_096);
     });
   });
 });

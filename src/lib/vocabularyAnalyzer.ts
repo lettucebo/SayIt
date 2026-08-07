@@ -5,6 +5,7 @@ import {
   parseProviderResponse,
   getProviderIdForModel,
   getProviderTimeout,
+  getAzureOperationMaxTokens,
   type LlmChatRequest,
   type LlmUsageData,
   type AzureRequestOptions,
@@ -114,6 +115,7 @@ export async function analyzeCorrections(
 ): Promise<VocabularyAnalysisResult> {
   const modelId = options?.modelId ?? DEFAULT_LLM_MODEL_ID;
   const providerId = options?.provider ?? getProviderIdForModel(modelId);
+  const maxTokens = getAzureOperationMaxTokens(options?.azure, 256);
 
   const request: LlmChatRequest = {
     model: modelId,
@@ -125,7 +127,7 @@ export async function analyzeCorrections(
       },
     ],
     temperature: 0,
-    maxTokens: 256,
+    maxTokens,
   };
 
   const { url, init } = buildFetchParams(
@@ -135,7 +137,7 @@ export async function analyzeCorrections(
     options?.azure,
   );
 
-  const timeoutMs = getProviderTimeout(providerId);
+  const timeoutMs = getProviderTimeout(providerId, options?.azure);
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   let response: Awaited<ReturnType<typeof fetch>>;

@@ -59,6 +59,8 @@ export interface ChatUsageData {
 export interface EnhanceResult {
   text: string;
   usage: ChatUsageData | null;
+  /** Azure 因明確拒絕 temperature 而移除參數重試成功。 */
+  temperatureAdjusted?: boolean;
 }
 
 export interface ApiUsageRecord {

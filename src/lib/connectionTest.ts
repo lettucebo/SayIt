@@ -4,7 +4,10 @@ import type {
   LlmProviderId,
   TranscriptionProviderId,
 } from "./modelRegistry";
-import type { AzureRequestOptions } from "./llmProvider";
+import {
+  getAzureOperationMaxTokens,
+  type AzureRequestOptions,
+} from "./llmProvider";
 import type { AzureAuthHeaderMode } from "../types/settings";
 import type {
   MaiCandidateLocale,
@@ -52,7 +55,7 @@ export async function testLlmConnection(
       provider: extras?.provider,
       azure: extras?.azure,
       systemPrompt: "Reply with the word OK only.",
-      maxTokens: 50,
+      maxTokens: getAzureOperationMaxTokens(extras?.azure, 50),
     });
     return { ok: true, durationMs: elapsed(start) };
   } catch (err) {
