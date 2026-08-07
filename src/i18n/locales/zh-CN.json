@@ -663,7 +663,9 @@
     },
     "upgradeNotice": {
       "title": "SayIt 更新摘要",
-      "item1": "MAI-Transcribe 1.5 转录：新增 Azure AI Speech 的 MAI-Transcribe 1.5 来源，可通过独立的 Speech endpoint 和密钥进行转录；使用 Entra ID 时也会提示 Speech 资源所需的角色，避免完成登录后才因权限不足失败。",
+      "item1": "Microsoft Foundry 部署选择：粘贴完整项目终结点后，现在可直接从部署列表选择聊天模型；SayIt 会自动应用兼容的模型类型和请求设置，也会保留你的手动覆盖。",
+      "item2": "Foundry 文本整理更可靠：推理模型的输出被截断或返回空白时，现在会尝试补发并清晰提示；也会避开不兼容的 token 上限和 `temperature` 设置。",
+      "item3": "设置操作反馈更清晰：保存、测试或清除后的成功与失败消息现在显示在操作按钮旁，不再随页面滚动而难以对应。",
       "dismiss": "了解"
     }
   },

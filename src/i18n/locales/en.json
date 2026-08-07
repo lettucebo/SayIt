@@ -663,7 +663,9 @@
     },
     "upgradeNotice": {
       "title": "SayIt Update Summary",
-      "item1": "MAI-Transcribe 1.5 transcription: Add Azure AI Speech's MAI-Transcribe 1.5 as a transcription source with its own Speech endpoint and credential. When using Entra ID, SayIt now identifies the required Speech resource role before a missing permission turns into a failed request.",
+      "item1": "Microsoft Foundry deployments: Paste a full project endpoint to choose a chat model from its deployment list. SayIt applies a compatible model profile and request settings automatically while retaining manual overrides.",
+      "item2": "More reliable Foundry cleanup: When a reasoning model truncates its output or returns nothing, SayIt retries when appropriate and reports the outcome clearly — it also avoids incompatible token limits and `temperature` settings.",
+      "item3": "Clearer settings feedback: Results for save, test, and clear actions now appear beside the button that triggered them, so they remain easy to identify while the page scrolls.",
       "dismiss": "Got it"
     }
   },
