@@ -23,7 +23,8 @@ describe("Foundry deployments data plane", () => {
   });
 
   const options = {
-    endpoint: "https://resource.services.ai.azure.com",
+    foundryEndpoint: "https://resource.services.ai.azure.com",
+    v1Endpoint: "https://resource.openai.azure.com",
     projectName: "voice-project",
     authMode: "key" as const,
     authValue: "api-key",
@@ -113,6 +114,9 @@ describe("Foundry deployments data plane", () => {
       source: "v1",
       fallbackReason: "foundry-request-failed",
     });
+    expect(mockFetch.mock.calls[1][0]).toBe(
+      "https://resource.openai.azure.com/openai/v1/models",
+    );
   });
 
   it("[P1] 未提供 project 名稱時直接使用 v1 名稱清單", async () => {
@@ -177,7 +181,8 @@ describe("Foundry deployments data plane", () => {
 
     await expect(
       listAzureV1Models({
-        endpoint: options.endpoint,
+        v1Endpoint: options.v1Endpoint,
+        foundryEndpoint: options.foundryEndpoint,
         authMode: "bearer",
         authValue: "token",
       }),

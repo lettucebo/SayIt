@@ -46,6 +46,7 @@ export type SettingsKey =
   | "azureChatModelFamilySource"
   | "azureWhisperDeployment"
   | "azureSpeechConnection"
+  | "azureTranscriptionResources"
   | "maiCandidateLocales"
   | "maiTranscribeStyle"
   | "azureOmitTemperature"

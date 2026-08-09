@@ -2,6 +2,12 @@
 
 SayIt 版本更新紀錄。
 
+## Unreleased
+
+### Changed
+
+- Azure / Microsoft Foundry 設定改為以 resource name 與選填的 Foundry project name 為主，不再要求辨識 Azure OpenAI、Foundry project 或 Speech endpoint URL 的差異。SayIt 會依 chat、部署清單、Azure OpenAI Whisper 與 MAI-Transcribe 的 API 路徑自動推導正確的 Azure host。轉錄可另外指定 Whisper 或 Speech resource，並保留進階完整 endpoint 覆寫給 private DNS 與既有部署；舊設定會自動遷移且保留原本實際使用的 host。
+
 ## [0.16.0] - 2026-08-07
 
 ### Added
