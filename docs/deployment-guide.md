@@ -3,7 +3,7 @@
 > CI/CD pipeline、Apple Code Signing、Notarization、發版流程
 > 掃描日期：2026-05-08 · 版本：0.9.5
 
-> ⚠️ **本文件部分內容已過時（描述上游 `chenjackle45` 設定）。** 本 fork（`lettucebo/SayIt`）自走 release 的權威程序見 `AGENTS.md`「CI/CD 與發版」段：macOS 改**未簽名**（不需 Apple secrets）、updater 用 **fork 專屬金鑰**並指向本 repo、Sentry 等非機密改用 GitHub **variable**。
+> ⚠️ **本文件部分內容已過時（描述上游 `chenjackle45` 設定）。** 本 fork（`lettucebo/SayIt`）自走 release 的權威程序見 `.github/copilot-instructions.md`「CI/CD 與發版」段：macOS 改**未簽名**（不需 Apple secrets）、updater 用 **fork 專屬金鑰**並指向本 repo、Sentry 等非機密改用 GitHub **variable**。
 
 ---
 

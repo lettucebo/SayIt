@@ -183,5 +183,6 @@ describe("DictionaryView", () => {
     const wrapper = mountView();
     expect(wrapper.findAll("table")).toHaveLength(0);
     expect(wrapper.text()).toContain(i18n.global.t("dictionary.emptyState"));
+    expect(wrapper.get('[data-testid="dictionary-list-feedback"]').text()).toBe("");
   });
 });

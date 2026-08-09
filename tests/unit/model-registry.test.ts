@@ -12,6 +12,13 @@ import {
   GEMINI_TRANSCRIPTION_MODEL_LIST,
   getEffectiveGeminiTranscriptionModelId,
   getEffectiveGeminiTranscriptionRpd,
+  getEffectiveMaiTranscribeStyle,
+  AZURE_CHAT_MODEL_FAMILY_LIST,
+  DEFAULT_AZURE_CHAT_MODEL_FAMILY_ID,
+  getEffectiveAzureChatModelFamilyId,
+  mapFoundryModelToFamily,
+  resolveAzureFamilyFromDeployment,
+  suggestAzureChatModelFamily,
 } from "../../src/lib/modelRegistry";
 import zhTW from "../../src/i18n/locales/zh-TW.json";
 import zhCN from "../../src/i18n/locales/zh-CN.json";
@@ -39,6 +46,91 @@ const LOCALE_ENTRIES: [string, unknown][] = [
   ["ja", ja],
   ["ko", ko],
 ];
+
+describe("modelRegistry — Azure Foundry 模型類型", () => {
+  it("[P0] 每個 profile 都有正向 timeout、deadline 與 token 上限", () => {
+    for (const family of AZURE_CHAT_MODEL_FAMILY_LIST) {
+      expect(family.timeoutMs, `${family.id} 缺 timeout`).toBeGreaterThan(0);
+      expect(
+        family.totalDeadlineMs,
+        `${family.id} 缺 total deadline`,
+      ).toBeGreaterThanOrEqual(family.timeoutMs);
+      expect(
+        family.defaultMaxTokens,
+        `${family.id} 缺 default max tokens`,
+      ).toBe(8_192);
+      expect(
+        family.maxCompletionTokens,
+        `${family.id} 缺 max completion tokens`,
+      ).toBeGreaterThan(0);
+    }
+  });
+
+  it("[P0] profile 的 descriptionKey 在五語系都存在", () => {
+    for (const family of AZURE_CHAT_MODEL_FAMILY_LIST) {
+      for (const [localeName, messages] of LOCALE_ENTRIES) {
+        const value = resolveKey(messages, family.descriptionKey);
+        expect(
+          typeof value === "string" && value.length > 0,
+          `${localeName} 缺少 ${family.descriptionKey}（${family.id}）`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it("[P0] 未知或空設定 fail-closed 回 Azure OpenAI profile", () => {
+    expect(getEffectiveAzureChatModelFamilyId("not-a-family")).toBe(
+      DEFAULT_AZURE_CHAT_MODEL_FAMILY_ID,
+    );
+    expect(getEffectiveAzureChatModelFamilyId(null)).toBe(
+      DEFAULT_AZURE_CHAT_MODEL_FAMILY_ID,
+    );
+  });
+
+  it("[P0] Foundry publisher 與模型名稱應映射到正確 family", () => {
+    expect(mapFoundryModelToFamily("DeepSeek", "DeepSeek-V4-Flash")).toBe(
+      "deepseek",
+    );
+    expect(mapFoundryModelToFamily("Moonshot AI", "Kimi-K2.6")).toBe("kimi");
+    expect(mapFoundryModelToFamily("xAI", "grok-4-20-reasoning")).toBe(
+      "grok-reasoning",
+    );
+    expect(mapFoundryModelToFamily("OpenAI", "gpt-5.4-mini")).toBe(
+      "azure-openai-reasoning",
+    );
+  });
+
+  it("[P1] 部署名稱啟發式只回傳建議，不會處理未知名稱", () => {
+    expect(suggestAzureChatModelFamily("team-deepseek-chat")).toBe(
+      "deepseek",
+    );
+    expect(suggestAzureChatModelFamily("my-chat")).toBeUndefined();
+  });
+
+  it("[P0] Foundry metadata 無法映射時必須使用保守 profile，不得沿用前一個部署", () => {
+    expect(
+      resolveAzureFamilyFromDeployment({
+        modelPublisher: "Contoso",
+        modelName: "chat-v1",
+      }),
+    ).toEqual({ familyId: "other", confidence: "low" });
+    expect(
+      resolveAzureFamilyFromDeployment({
+        modelPublisher: "Contoso",
+        modelName: "contoso-thinking-r1",
+      }),
+    ).toEqual({ familyId: "other-reasoning", confidence: "low" });
+  });
+
+  it("[P0] Foundry metadata 映射到已知 family 時必須為高信心", () => {
+    expect(
+      resolveAzureFamilyFromDeployment({
+        modelPublisher: "DeepSeek",
+        modelName: "DeepSeek-V4-Flash",
+      }),
+    ).toEqual({ familyId: "deepseek", confidence: "high" });
+  });
+});
 
 describe("modelRegistry — Gemini 轉錄模型", () => {
   it("[P0] 預設模型必須在清單內且被標為 isDefault", () => {
@@ -152,6 +244,7 @@ describe("modelRegistry — 轉錄 provider", () => {
     expect(getEffectiveTranscriptionProviderId("groq")).toBe("groq");
     expect(getEffectiveTranscriptionProviderId("azure")).toBe("azure");
     expect(getEffectiveTranscriptionProviderId("gemini")).toBe("gemini");
+    expect(getEffectiveTranscriptionProviderId("mai")).toBe("mai");
   });
 
   it("[P0] 未知/空值 fail-closed 退回預設（避免金鑰送到非預期服務）", () => {
@@ -172,6 +265,13 @@ describe("modelRegistry — 轉錄 provider", () => {
   it("[P0] Gemini 轉錄模型不得是 Whisper 模型 id（會打到不存在的端點）", () => {
     expect(GEMINI_TRANSCRIPTION_MODEL).toMatch(/^gemini-/);
     expect(GEMINI_TRANSCRIPTION_MODEL).not.toMatch(/whisper/);
+  });
+
+  it("[P0] MAI 逐字稿風格只接受 verbatim，未知值安全退回 default", () => {
+    expect(getEffectiveMaiTranscribeStyle("verbatim")).toBe("verbatim");
+    expect(getEffectiveMaiTranscribeStyle("default")).toBe("default");
+    expect(getEffectiveMaiTranscribeStyle("unexpected")).toBe("default");
+    expect(getEffectiveMaiTranscribeStyle(null)).toBe("default");
   });
 });
 

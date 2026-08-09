@@ -40,8 +40,15 @@ export type SettingsKey =
   | "copyTranscriptionToClipboard"
   | "hideDockIcon"
   | "azureConnection"
+  | "azureProjectName"
   | "azureChatDeployment"
+  | "azureChatModelFamily"
+  | "azureChatModelFamilySource"
   | "azureWhisperDeployment"
+  | "azureSpeechConnection"
+  | "azureTranscriptionResources"
+  | "maiCandidateLocales"
+  | "maiTranscribeStyle"
   | "azureOmitTemperature"
   | "whisperProvider"
   | "theme"
@@ -55,6 +62,13 @@ export interface SettingsUpdatedPayload {
 export interface VocabularyChangedPayload {
   action: "added" | "removed";
   term: string;
+}
+
+/** Entra 使用者登入狀態變更。`accountKey` 為 `{tenantId}::{clientId}`。 */
+export interface AzureAuthStateChangedPayload {
+  signedIn: boolean;
+  username: string | null;
+  accountKey: string | null;
 }
 
 export type ReplacementsChangedPayload = void;

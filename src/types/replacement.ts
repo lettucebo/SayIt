@@ -18,8 +18,9 @@ export interface ReplacementRule {
   timing: ReplacementTiming;
   enabled: boolean;
   /**
-   * 建立時間（epoch 毫秒）。選填以相容既有資料——v0.14.0 之前建立的規則沒有
-   * 這個欄位，UI 顯示為「—」，排序時視為最舊。
+   * 建立時間，ISO 8601 UTC 字串（`new Date().toISOString()`，帶 `Z`）。
+   * 與 SQLite 的 `created_at`（無時區後綴、需自行補 "Z"）不同，可直接 `new Date()` 解析。
+   * 本功能推出前建立的規則沒有此欄位 → 由 `migrateRuleCreatedAt()` 一次性補寫。
    */
-  createdAt?: number;
+  createdAt: string;
 }

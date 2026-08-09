@@ -2,6 +2,10 @@
 
 Status: done
 
+> ⚠️ **2026-07-29：本 Story 的「最近轉錄摘要」部分已被產品決策移除**——歷史記錄頁（HistoryView）已有完整列表，Dashboard 重複顯示價值不高。`recentTranscriptionList` / `fetchRecentTranscriptionList` / `SELECT_RECENT_SQL` 與對應 UI、i18n key 皆已刪除。
+>
+> 統計卡片與 `transcription:completed` 即時更新的部分仍然有效。以下內容保留作為當時的實作紀錄，**請勿依此重新實作最近轉錄列表**。
+
 ## Story
 
 As a 使用者,

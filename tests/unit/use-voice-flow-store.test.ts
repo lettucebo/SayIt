@@ -160,6 +160,9 @@ vi.mock("../../src/lib/enhancer", () => {
       this.name = "EnhancerApiError";
     }
   }
+  class EnhancerEmptyOutputError extends Error {
+    readonly code = "ENHANCEMENT_EMPTY_OUTPUT";
+  }
   return {
     enhanceText: mockEnhanceText,
     enhanceWithAnomalyGuard: async (
@@ -171,7 +174,21 @@ vi.mock("../../src/lib/enhancer", () => {
       return { text: r.text, usage: r.usage ?? null, wasAnomalous: false };
     },
     buildSystemPrompt: (basePrompt: string) => basePrompt,
+    combineChatUsage: (
+      first: {
+        promptTokens: number;
+        completionTokens: number;
+        totalTokens: number;
+      } | null,
+      second: {
+        promptTokens: number;
+        completionTokens: number;
+        totalTokens: number;
+      } | null,
+    ) => first ?? second,
     EnhancerApiError,
+    EnhancerEmptyOutputError,
+    getEnhancementErrorUsage: () => null,
   };
 });
 
@@ -543,6 +560,8 @@ describe("useVoiceFlowStore", () => {
       deployment: null,
       apiVersion: null,
       authMode: null,
+      candidateLocales: null,
+      transcribeStyle: null,
     });
     expect(store.status).toBe("success");
     expect(store.message).toBe("voiceFlow.pasteSuccess");
@@ -1962,6 +1981,8 @@ describe("useVoiceFlowStore", () => {
         deployment: null,
         apiVersion: null,
         authMode: null,
+        candidateLocales: null,
+        transcribeStyle: null,
       });
     });
 
@@ -1996,6 +2017,8 @@ describe("useVoiceFlowStore", () => {
         deployment: null,
         apiVersion: null,
         authMode: null,
+        candidateLocales: null,
+        transcribeStyle: null,
       });
     });
 
@@ -2062,6 +2085,8 @@ describe("useVoiceFlowStore", () => {
         deployment: null,
         apiVersion: null,
         authMode: null,
+        candidateLocales: null,
+        transcribeStyle: null,
       });
 
       // enhancer 也收到詞彙

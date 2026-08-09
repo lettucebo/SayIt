@@ -106,16 +106,17 @@ CI（`.github/workflows/ci.yml`）：`vue-tsc --noEmit` → `eslint src` → `pn
 
 | Command | Rust 位置 | 前端呼叫點 | 參數 | 回傳 |
 |---------|-----------|-----------|------|------|
-| `request_app_restart` | `lib.rs` | main-window.ts | — | `()` |
+| `request_app_restart` | `lib.rs` | autoUpdater.ts（更新安裝後） | — | `()` |
 | `update_hotkey_config` | `lib.rs` | useSettingsStore | `trigger_key: TriggerKey, trigger_mode: TriggerMode` | `Result<(), String>` |
 | `get_hud_target_position` | `lib.rs` | useVoiceFlowStore | `app: AppHandle` | `Result<HudTargetPosition, String>`（含 `space: "physical"\|"logical"`，Windows 回 physical 以避開 tao 跨 DPI 錯位） |
 | `ensure_hud_visible` | `lib.rs` | useVoiceFlowStore（showHud 後） | `app: AppHandle` | `()`（Windows：記錄可見性快照 + 安全恢復：最小化還原、重宣告 topmost；非 Windows：no-op） |
+| `get_os_theme` | `lib.rs` | theme.ts（`refreshOsTheme`） | — | `Option<String>`（`"dark"` / `"light"`；Windows 讀登錄檔為權威來源，非 Windows／讀取失敗回 `null` 讓前端 fallback 到 `window.theme()` → `matchMedia`） |
 | `set_file_logging_enabled` | `plugins/logging.rs` | useSettingsStore, logger.ts | `enabled: bool` | `()` |
 | `open_log_folder` | `plugins/logging.rs` | logger.ts（SettingsView） | — | `Result<(), String>` |
 | `cleanup_old_logs` | `plugins/logging.rs` | main-window.ts | `days: u32, app: AppHandle` | `Result<Vec<String>, String>` |
 | `mute_system_audio` | `plugins/audio_control.rs` | useVoiceFlowStore | `state: State<AudioControlState>` | `Result<(), String>` |
 | `restore_system_audio` | `plugins/audio_control.rs` | useVoiceFlowStore | `state: State<AudioControlState>` | `Result<(), String>` |
-| `paste_text` | `plugins/clipboard_paste.rs` | useVoiceFlowStore | `text: String` | `Result<(), ClipboardError>` |
+| `paste_text` | `plugins/clipboard_paste.rs` | useVoiceFlowStore | `text: String, restore_clipboard: bool`（`restore_clipboard` = 未開啟「轉錄結果複製到剪貼簿」時才還原原本剪貼簿內容） | `Result<(), ClipboardError>` |
 | `copy_to_clipboard` | `plugins/clipboard_paste.rs` | HistoryView | `text: String` | `Result<(), ClipboardError>` |
 | `capture_target_window` | `plugins/clipboard_paste.rs` | useVoiceFlowStore | — | `()` |
 | `check_accessibility_permission_command` | `plugins/hotkey_listener.rs` | AccessibilityGuide.vue | — | `bool` |
@@ -130,20 +131,26 @@ CI（`.github/workflows/ci.yml`）：`vue-tsc --noEmit` → `eslint src` → `pn
 | `read_focused_text_field` | `plugins/text_field_reader.rs` | useVoiceFlowStore | — | `Result<Option<String>, String>` |
 | `get_foreground_app_name` | `plugins/text_field_reader.rs` | useVoiceFlowStore | — | `Option<String>` |
 | `read_selected_text` | `plugins/text_field_reader.rs` | useVoiceFlowStore | — | `Result<Option<String>, String>` |
+| `read_selection_state` | `plugins/text_field_reader.rs` | useVoiceFlowStore（編輯模式偵測） | — | `SelectionState { kind: "selection" \| "noSelection" \| "unavailable", text: Option<String> }`（macOS 走 AX worker + `spawn_blocking`，避免阻塞主執行緒拖慢隨後的 `start_recording`；single-flight，重入回 `unavailable`；非 macOS 一律 `unavailable`） |
 | `get_default_input_device_name` | `plugins/audio_recorder.rs` | SettingsView | — | `Option<String>` |
 | `list_audio_input_devices` | `plugins/audio_recorder.rs` | SettingsView | — | `Vec<AudioInputDeviceInfo>` |
-| `start_audio_preview` | `plugins/audio_recorder.rs` | SettingsView | `app, preview_state: State<AudioPreviewState>, device_name: String` | `Result<(), String>` |
-| `stop_audio_preview` | `plugins/audio_recorder.rs` | SettingsView | `preview_state: State<AudioPreviewState>` | `()` |
+| `start_audio_preview` | `plugins/audio_recorder.rs` | useAudioPreview.ts（SettingsView） | `app, preview_state: State<AudioPreviewState>, device_name: String` | `Result<(), String>` |
+| `stop_audio_preview` | `plugins/audio_recorder.rs` | useAudioPreview.ts（SettingsView） | `preview_state: State<AudioPreviewState>` | `()` |
 | `start_recording` | `plugins/audio_recorder.rs` | useVoiceFlowStore | `app, state: State<AudioRecorderState>, device_name: String` | `Result<(), AudioRecorderError>` |
 | `stop_recording` | `plugins/audio_recorder.rs` | useVoiceFlowStore | `state: State<AudioRecorderState>` | `Result<StopRecordingResult, AudioRecorderError>` |
 | `save_recording_file` | `plugins/audio_recorder.rs` | useVoiceFlowStore | `id: String, app, state: State<AudioRecorderState>` | `Result<String, String>` |
 | `read_recording_file` | `plugins/audio_recorder.rs` | HistoryView | `id: String, app: AppHandle` | `Result<Response, String>` |
-| `delete_all_recordings` | `plugins/audio_recorder.rs` | SettingsView | `app: AppHandle` | `Result<u32, String>` |
+| `delete_all_recordings` | `plugins/audio_recorder.rs` | useHistoryStore（SettingsView 觸發） | `app: AppHandle` | `Result<u32, String>` |
 | `cleanup_old_recordings` | `plugins/audio_recorder.rs` | main-window.ts | `days: u32, app: AppHandle` | `Result<Vec<String>, String>` |
-| `transcribe_audio` | `plugins/transcription.rs` | useVoiceFlowStore | `state, transcription_state, api_key, vocabulary_term_list?, model_id?, language?, provider?（`"groq"`(預設)/`"azure"`/`"gemini"`；未知值 fail-closed 報錯）, endpoint?, deployment?, api_version?, auth_mode?` | `Result<TranscriptionResult, TranscriptionError>`（`noSpeechProbability: number \| null` — Gemini 無此信號回 `null`） |
-| `retranscribe_from_file` | `plugins/transcription.rs` | useVoiceFlowStore、useHistoryStore（retranscribeRecord） | `file_path, api_key, vocabulary_term_list?, model_id?, language?, provider?（同上）, endpoint?, deployment?, api_version?, auth_mode?` | `Result<TranscriptionResult, TranscriptionError>`（同上） |
-| `test_whisper_connection` | `plugins/transcription.rs` | connectionTest.ts（SettingsView） | `transcription_state, api_key, model_id?, provider?（同上）, endpoint?, deployment?, api_version?, auth_mode?` | `Result<(), TranscriptionError>` |
+| `transcribe_audio` | `plugins/transcription.rs` | useVoiceFlowStore | `state, transcription_state, api_key, vocabulary_term_list?, model_id?, language?, provider?（`"groq"`(預設)/`"azure"`/`"gemini"`/`"mai"`；未知值 fail-closed 報錯）, endpoint?, deployment?, api_version?, auth_mode?, candidate_locales?（MAI Fast 最多一個，空值＝多語自動）, transcribe_style?` | `Result<TranscriptionResult, TranscriptionError>`（`noSpeechProbability: number \| null` — Gemini／MAI 無此信號回 `null`） |
+| `retranscribe_from_file` | `plugins/transcription.rs` | useVoiceFlowStore、useHistoryStore（retranscribeRecord） | `file_path, api_key, vocabulary_term_list?, model_id?, language?, provider?（同上）, endpoint?, deployment?, api_version?, auth_mode?, candidate_locales?, transcribe_style?` | `Result<TranscriptionResult, TranscriptionError>`（同上） |
+| `test_whisper_connection` | `plugins/transcription.rs` | connectionTest.ts（SettingsView） | `transcription_state, api_key, model_id?, provider?（同上）, endpoint?, deployment?, api_version?, auth_mode?, candidate_locales?, transcribe_style?` | `Result<(), TranscriptionError>` |
 | `get_azure_entra_token` | `plugins/azure_auth.rs` | azureAuth.ts（getAzureAccessToken） | `tenant_id, client_id, client_secret, scope` | `Result<AzureTokenResult, String>`（`{ accessToken, expiresIn }`） |
+| `azure_user_sign_in` | `plugins/azure_user_session.rs` | azureUserAuth.ts（signInAzureUser） | `tenant_id, client_id, operation_id, state: State<AzureUserAuthState>` | `Result<AzureUserAccount, AzureUserAuthError>`（PKCE public client，開系統瀏覽器等 loopback callback；同時只允許一個進行中登入） |
+| `azure_user_cancel_sign_in` | `plugins/azure_user_session.rs` | azureUserAuth.ts（cancelAzureUserSignIn） | `operation_id, state: State<AzureUserAuthState>` | `()`（帶 operation_id 才不會取消到下一次登入） |
+| `azure_user_sign_out` | `plugins/azure_user_session.rs` | azureUserAuth.ts（signOutAzureUser） | `tenant_id, client_id, state: State<AzureUserAuthState>` | `Result<(), AzureUserAuthError>`（清 OS 憑證庫 + 該帳號所有 scope 的 token 快取） |
+| `azure_user_get_account` | `plugins/azure_user_session.rs` | azureUserAuth.ts（getAzureUserAccount） | `tenant_id, client_id, state: State<AzureUserAuthState>` | `Result<Option<AzureUserAccount>, AzureUserAuthError>`（`{ username, name, tenantId, clientId }`，身分欄位皆可為 null） |
+| `azure_user_get_token` | `plugins/azure_user_session.rs` | azureUserAuth.ts（getAzureUserToken） | `tenant_id, client_id, scope_kind（`"chat"`/`"whisper"`；scope 由 Rust 固定列舉，前端不可指定任意 audience）, state: State<AzureUserAuthState>` | `Result<String, AzureUserAuthError>`（記憶體快取 + single-flight refresh） |
 | `save_text_file` | `plugins/file_transfer.rs` | SettingsView（備份匯出） | `path: String, content: String` | `Result<(), String>` |
 | `read_text_file` | `plugins/file_transfer.rs` | SettingsView（備份匯入） | `path: String` | `Result<String, String>`（過大回符號錯誤字串 `"FILE_TOO_LARGE"`） |
 | `play_start_sound` | `plugins/sound_feedback.rs` | useVoiceFlowStore | — | `()` |
@@ -167,15 +174,18 @@ CI（`.github/workflows/ci.yml`）：`vue-tsc --noEmit` → `eslint src` → `pn
 | `correction-monitor:result` | keyboard_monitor.rs | `CORRECTION_MONITOR_RESULT` | `CorrectionMonitorResultPayload` |
 | `audio:waveform` | audio_recorder.rs | `AUDIO_WAVEFORM` | `WaveformPayload { levels: [f32; 6] }` |
 | `audio:preview-level` | audio_recorder.rs | `AUDIO_PREVIEW_LEVEL` | `AudioPreviewLevelPayload { level: f32 }` |
+| `theme:os-changed` | lib.rs（Windows 登錄檔輪詢） | `THEME_OS_CHANGED` | `"dark"` \| `"light"`（字串）— 透明且隱藏的 HUD 在 Windows 收不到 `WM_THEMECHANGED`，故改由 Rust 廣播 |
 
 ### Frontend-only Events（不經 Rust）
 
 | Event | 常量 | 發送方 | 接收方 |
 |-------|------|--------|--------|
-| `voice-flow:state-changed` | `VOICE_FLOW_STATE_CHANGED` | HUD VoiceFlow | Dashboard |
-| `transcription:completed` | `TRANSCRIPTION_COMPLETED` | VoiceFlow | Main Window |
-| `settings:updated` | `SETTINGS_UPDATED` | SettingsStore | All Windows |
+| `voice-flow:state-changed` | `VOICE_FLOW_STATE_CHANGED` | useVoiceFlowStore | **目前無接收方**（emit 保留，尚無 listener） |
+| `transcription:completed` | `TRANSCRIPTION_COMPLETED` | useHistoryStore（`emitToWindow("main-window", …)`） | DashboardView、HistoryView |
+| `settings:updated` | `SETTINGS_UPDATED` | useSettingsStore | HUD App.vue（目前唯一 listener） |
+| `azure-auth:state-changed` | `AZURE_AUTH_STATE_CHANGED` | useSettingsStore（登入/登出/清除連線後） | HUD App.vue（重讀 Entra 使用者登入狀態；不重讀的話 HUD 的 `hasWhisperConfig` 會停在登入前狀態） |
 | `vocabulary:changed` | `VOCABULARY_CHANGED` | VocabularyStore | All Windows |
+| `replacements:changed` | `REPLACEMENTS_CHANGED` | ReplacementStore（規則 CRUD 後） | HUD（App.vue，重載取代規則） |
 | `vocabulary:learned` | `VOCABULARY_LEARNED` | VoiceFlowStore | HUD NotchHud |
 | `database:ready` | `DATABASE_READY` | Dashboard（main-window.ts，DB migration 完成後） | HUD（App.vue / waitForDatabaseReady） |
 | `database:ready-ping` | `DATABASE_READY_PING` | HUD（請 Dashboard 重新廣播，解決競態） | Dashboard（收到後 replay `database:ready`） |
@@ -191,16 +201,18 @@ CI（`.github/workflows/ci.yml`）：`vue-tsc --noEmit` → `eslint src` → `pn
 
 ## 自動更新機制
 
-- **定時檢查** — `main-window.ts`：啟動 5 秒後首次檢查，之後每 4 小時（`setInterval`）。
+- **啟動時檢查** — `MainApp.vue` `onMounted`：App 啟動後 5 秒檢查一次，**不做定時輪詢**（Dashboard 關閉時只 hide 不 destroy，故本元件整個 App 生命週期僅 mount 一次 ≒ 每次啟動檢查一次）。排程刻意放在 `onMounted` 最前面，避免前面的 `await` 失敗連帶讓更新永不排程。
+- **失敗重試** — `checkForAppUpdate()` 吞例外回傳 `status: "error"`，故僅在**檢查失敗**時依 `src/lib/updateRetryPolicy.ts` 的 `AUTO_CHECK_RETRY_DELAYS_MS`（1／5／15 分）退避重試，用盡即 `captureError` 回報後停止（開機自啟時網路常未就緒，否則單次失敗＝本次啟動再也不檢查）。重試策略刻意獨立於 `autoUpdater.ts`，因為後者會拉進 updater plugin 而採動態 import，catch 路徑仍須能排重試。
+- **手動檢查與自動重試的關係** — 任何一次**檢查成功**（自動或手動）都會把重試階梯歸零，手動成功另外會取消待執行的重試；手動檢查**失敗**則重新武裝階梯（否則使用者離線時按一下按鈕，就會把自動更新的補救機制整個關掉）。`autoCheckTimeoutId` 是「是否還有排程在等」的權威旗標：階梯觸發時先設 `null`，`scheduleAutoCheckRetry` 見到非 `null` 就讓既有排程跑完，藉此避免重複排程與誤報「已用盡」。
 - **手動檢查** — `MainApp.vue` Sidebar Footer「檢查更新」按鈕，結果用 `useFeedbackMessage` 顯示。
 - **回傳型別** — `checkForAppUpdate()` → `Promise<UpdateCheckResult>`（`up-to-date` | `update-available` | `error`）。
-- **已知限制** — `autoUpdater.ts` 中 `window.confirm` 在 Tauri WKWebView 會被靜默忽略，未來需改用 in-app UI。
+- **勿用 `window.confirm`** — 在 Tauri WKWebView 會被靜默忽略；更新提示一律用 `MainApp.vue` 的 `AlertDialog`。
 
 ## Azure / Microsoft Foundry Provider
 
-- **Chat（LLM 整理）** — provider `"azure"`，走 Azure OpenAI v1 端點 `{endpoint}/openai/v1/chat/completions`（OpenAI 線相容，同路徑也能接 Foundry 上的 Grok/DeepSeek）。`buildFetchParams("azure", …, azureOptions)` 在 `llmProvider.ts`。
+- **資源設定與 Chat（LLM 整理）** — Azure 設定以 `azureResourceName` 和選填的 `azureProjectName` 為主。主 chat endpoint 推導為 `https://{resource}.openai.azure.com`，Foundry 部署清單則以 `https://{resource}.services.ai.azure.com/api/projects/{project}/deployments?api-version=v1` 請求；沒有 project 或 Foundry 請求失敗時，使用主 chat host 的 `/openai/v1/models` fallback。`azureEndpointOverride` 可保留既有 `.services.ai`／private DNS host，且優先於推導值；不要把 resource name 未驗證地拼成 URL。`model` 一律是使用者自訂的部署名稱。SettingsView 以清單為主要入口：選到帶 Foundry metadata 的部署時，原子寫入 deployment、family 與 `azureChatModelFamilySource="auto"`；手動改 family 或手動輸入 deployment 時標為 `"manual"`。重載清單不可改寫已存 family，且已存但不在清單的 deployment 必須保留虛擬選項。`azureChatModelFamily` 是可覆寫的 wire 行為提示；未知 metadata 使用保守 `other`／`other-reasoning` profile。初始 token 預設保守為 8192；明確 HTTP 400 temperature 拒絕時移除該參數重試一次，並以有效 endpoint + deployment 快取結論（快取不可備份）。`buildFetchParams("azure", …, azureOptions)` 在 `llmProvider.ts`。不要改用已退役的 `/models/chat/completions` 路由，也不要對非 OpenAI 模型送未經文件確認的 `reasoning_effort`。
 - **Whisper（轉錄）** — `whisperProviderId = "azure"` 時走 Rust `transcription.rs`：`{endpoint}/openai/deployments/{deployment}/audio/transcriptions?api-version=…`，保留 `verbose_json`/`no_speech_prob`。
-- **Gemini（轉錄）** — `whisperProviderId = "gemini"` 時走 Rust `transcription.rs`（reqwest，**非** Whisper multipart 協定）：`https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent`，`x-goog-api-key` header + inline base64 WAV + structured output `{ transcript }`。模型**固定**（Rust `GEMINI_TRANSCRIPTION_MODEL` 與 TS `modelRegistry.ts` 兩端必須一致），**不吃 `WhisperModelId`**（沿用會打到不存在的 `/models/whisper-large-v3:generateContent`）。無 `no_speech_prob` → `noSpeechProbability` 回 `null`，前端幻覺偵測 Layer 2b 跳過（Layer 1/2a 不受影響）。inline 上限 20MB request（raw WAV 上限 14 MiB，約 7 分 39 秒）。金鑰與 Gemini LLM 共用 `geminiApiKey`。
+- **Gemini（轉錄）** — `whisperProviderId = "gemini"` 時走 Rust `transcription.rs`（reqwest，**非** Whisper multipart 協定）：`https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent`，`x-goog-api-key` header + inline base64 WAV + structured output `{ transcript }`。模型走**獨立的 Gemini 轉錄清單**（Rust `GEMINI_TRANSCRIPTION_MODELS` allowlist：`gemini-3.5-flash-lite`（預設）／`gemini-3.6-flash`，須與 TS `modelRegistry.ts` 的 `GEMINI_TRANSCRIPTION_MODEL_LIST` 一致），**不吃 `WhisperModelId`**（沿用會打到不存在的 `/models/whisper-large-v3:generateContent`）；allowlist 外的值 fallback 回預設模型。無 `no_speech_prob` → `noSpeechProbability` 回 `null`，前端幻覺偵測 Layer 2b 跳過（Layer 1/2a 不受影響）。inline 上限 20MB request（raw WAV 上限 14 MiB，16kHz mono 約 7 分 39 秒）。金鑰與 Gemini LLM 共用 `geminiApiKey`。
 - **驗證** — API Key（`api-key` header）或 **Entra ID（client credentials）**（`Authorization: Bearer`）。token 由 **Rust** `plugins/azure_auth.rs` 的 `get_azure_entra_token` 取得（reqwest，不帶 browser `Origin`，避免 `AADSTS9002326`），快取在 `src/lib/azureAuth.ts`。
 - **scope 依 API 路徑（非 host）選**（`getAzureScopeForApiKind`，`src/lib/azureAuth.ts`）：v1 `/openai/v1/` chat → `ai.azure.com/.default`；deployments/Whisper 路徑 → `cognitiveservices.azure.com/.default`。
 - **設定解析** — `useSettingsStore` 的 `getLlmRequestConfig()` / `getWhisperRequestConfig()`（皆 async，Entra 需換 token）。設定（endpoint/authMode/key 或 tenant+client+secret/部署名）存 `tauri-plugin-store`，**不進 SQLite**。

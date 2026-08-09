@@ -4,6 +4,13 @@ import {
 } from "./vocabularyTransfer";
 import type { VocabularyExportFile } from "../types/vocabulary";
 import type { ReplacementRule } from "../types/replacement";
+import { isAzureAuthMode } from "../types/settings";
+import { normalizeMaiCandidateLocales } from "../i18n/languageConfig";
+import {
+  getEffectiveMaiTranscribeStyle,
+  isAzureChatModelFamilyId,
+  isAzureChatModelFamilySource,
+} from "./modelRegistry";
 
 export const BACKUP_FORMAT = "sayit-backup" as const;
 export const BACKUP_VERSION = 1 as const;
@@ -57,7 +64,13 @@ export const EXPORTABLE_SETTING_KEYS = [
   "anthropicApiKey",
   "geminiApiKey",
   "azureEnabled",
-  "azureEndpoint",
+  "azureResourceName",
+  "azureWhisperResourceName",
+  "azureSpeechResourceName",
+  "azureEndpointOverride",
+  "azureWhisperEndpointOverride",
+  "azureSpeechEndpointOverride",
+  "azureProjectName",
   "azureAuthMode",
   "azureApiKey",
   "azureTenantId",
@@ -65,8 +78,13 @@ export const EXPORTABLE_SETTING_KEYS = [
   "azureClientSecret",
   "azureApiVersion",
   "azureChatDeployment",
+  "azureChatModelFamily",
+  "azureChatModelFamilySource",
   "azureWhisperDeployment",
   "azureOmitTemperature",
+  "azureSpeechApiKey",
+  "maiCandidateLocales",
+  "maiTranscribeStyle",
 ] as const;
 
 export type ExportableSettingKey = (typeof EXPORTABLE_SETTING_KEYS)[number];
@@ -78,6 +96,7 @@ export const SENSITIVE_SETTING_KEYS: readonly ExportableSettingKey[] = [
   "anthropicApiKey",
   "geminiApiKey",
   "azureApiKey",
+  "azureSpeechApiKey",
   "azureClientSecret",
   "azureTenantId",
   "azureClientId",
@@ -97,8 +116,13 @@ export interface BackupContents {
 export interface BackupPayload {
   settings: SettingsPayload | null;
   dictionary: VocabularyExportFile | null;
-  /** 文字取代規則；舊備份為 null */
-  replacements?: ReplacementRule[] | null;
+  /**
+   * 文字取代規則；舊備份為 null。
+   * 解析端刻意用 `unknown[]`：這裡只做形狀檢查，逐條清洗（含補 `createdAt`）
+   * 交給 replacement store 的 `sanitizeRuleList`。若宣告成 `ReplacementRule[]`，
+   * 缺 `createdAt` 的舊備份會違反型別不變量。
+   */
+  replacements?: unknown[] | null;
 }
 
 export interface EncryptionMeta {
@@ -221,7 +245,13 @@ export function buildBackupFilename(date: Date): string {
   return `sayit-backup-${stamp}.json`;
 }
 
-type ExpectedType = "string" | "number" | "boolean" | "object" | "stringOrObject";
+type ExpectedType =
+  | "string"
+  | "stringArray"
+  | "number"
+  | "boolean"
+  | "object"
+  | "stringOrObject";
 
 /**
  * 各設定 key 的期望值型別（含合成 autoStartEnabled）。
@@ -261,7 +291,17 @@ const SETTING_VALUE_TYPES: Record<string, ExpectedType> = {
   anthropicApiKey: "string",
   geminiApiKey: "string",
   azureEnabled: "boolean",
+  // Legacy import-only fields. They are transformed before the store's
+  // exportable-key whitelist is applied and are never included in new backups.
   azureEndpoint: "string",
+  azureSpeechEndpoint: "string",
+  azureResourceName: "string",
+  azureWhisperResourceName: "string",
+  azureSpeechResourceName: "string",
+  azureEndpointOverride: "string",
+  azureWhisperEndpointOverride: "string",
+  azureSpeechEndpointOverride: "string",
+  azureProjectName: "string",
   azureAuthMode: "string",
   azureApiKey: "string",
   azureTenantId: "string",
@@ -269,8 +309,13 @@ const SETTING_VALUE_TYPES: Record<string, ExpectedType> = {
   azureClientSecret: "string",
   azureApiVersion: "string",
   azureChatDeployment: "string",
+  azureChatModelFamily: "string",
+  azureChatModelFamilySource: "string",
   azureWhisperDeployment: "string",
   azureOmitTemperature: "boolean",
+  azureSpeechApiKey: "string",
+  maiCandidateLocales: "stringArray",
+  maiTranscribeStyle: "string",
   autoStartEnabled: "boolean",
 };
 
@@ -278,6 +323,8 @@ function matchesExpectedType(value: unknown, expected: ExpectedType): boolean {
   switch (expected) {
     case "string":
       return typeof value === "string";
+    case "stringArray":
+      return Array.isArray(value) && value.every((item) => typeof item === "string");
     case "number":
       return typeof value === "number" && Number.isFinite(value);
     case "boolean":
@@ -304,6 +351,29 @@ export function sanitizeSettingsPayload(
     const expected = SETTING_VALUE_TYPES[key];
     if (!expected) continue; // 未知 key
     if (!matchesExpectedType(value, expected)) continue; // 型別不符
+    // 列舉型欄位光靠 typeof 檢查不夠：備份是可任意編輯的 JSON，
+    // 未知的驗證模式會一路帶進 store 並讓下游 header 判斷失準。
+    if (key === "azureAuthMode" && !isAzureAuthMode(value)) continue;
+    if (key === "azureChatModelFamily" && !isAzureChatModelFamilyId(value)) {
+      continue;
+    }
+    if (
+      key === "azureChatModelFamilySource" &&
+      !isAzureChatModelFamilySource(value)
+    ) {
+      continue;
+    }
+    if (key === "maiCandidateLocales") {
+      result[key] = normalizeMaiCandidateLocales(value);
+      continue;
+    }
+    if (
+      key === "maiTranscribeStyle" &&
+      (typeof value !== "string" ||
+        value !== getEffectiveMaiTranscribeStyle(value))
+    ) {
+      continue;
+    }
     result[key] = value;
   }
   return result;
@@ -502,7 +572,7 @@ function normalizePayload(raw: Partial<BackupPayload>): BackupPayload {
       : null;
   // 只做形狀檢查，逐條規則的清洗交給 replacement store 的 sanitizeRuleList
   const replacements = Array.isArray(raw.replacements)
-    ? (raw.replacements as ReplacementRule[])
+    ? raw.replacements
     : null;
   return { settings, dictionary, replacements };
 }

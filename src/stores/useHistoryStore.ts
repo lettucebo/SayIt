@@ -209,13 +209,6 @@ const DELETE_TRANSCRIPTION_SQL = `
   DELETE FROM transcriptions WHERE id = $1
 `;
 
-const SELECT_RECENT_SQL = `
-  SELECT ${TRANSCRIPTION_SELECT_COLUMNS}
-  FROM transcriptions
-  ORDER BY timestamp DESC
-  LIMIT $1
-`;
-
 const ASSUMED_TYPING_SPEED_CHARS_PER_MIN = 40;
 
 interface DashboardStatsRow {
@@ -391,7 +384,6 @@ export const useHistoryStore = defineStore("history", () => {
     dailyQuotaUsage: { ...EMPTY_QUOTA_USAGE },
     monthlyQuotaUsage: { ...EMPTY_QUOTA_USAGE },
   });
-  const recentTranscriptionList = ref<TranscriptionRecord[]>([]);
   const dailyUsageTrendList = ref<DailyUsageTrend[]>([]);
 
   async function fetchDashboardStats(): Promise<DashboardStats> {
@@ -519,42 +511,23 @@ export const useHistoryStore = defineStore("history", () => {
     return buildDailyUsageSeries(mapped, days, endDate);
   }
 
-  async function fetchRecentTranscriptionList(
-    limit = 10,
-  ): Promise<TranscriptionRecord[]> {
-    const db = getDatabase();
-    const rows = await db.select<RawTranscriptionRow[]>(SELECT_RECENT_SQL, [
-      limit,
-    ]);
-    return rows.map(mapRowToRecord);
-  }
-
   async function refreshDashboard() {
-    const results = await Promise.allSettled([
+    const [statsResult, trendResult] = await Promise.allSettled([
       fetchDashboardStats(),
-      fetchRecentTranscriptionList(10),
       fetchDailyUsageTrend(),
     ]);
-    if (results[0].status === "fulfilled") {
-      dashboardStats.value = results[0].value;
+    if (statsResult.status === "fulfilled") {
+      dashboardStats.value = statsResult.value;
     } else {
-      captureError(results[0].reason, {
+      captureError(statsResult.reason, {
         source: "history",
         step: "fetch-stats",
       });
     }
-    if (results[1].status === "fulfilled") {
-      recentTranscriptionList.value = results[1].value;
+    if (trendResult.status === "fulfilled") {
+      dailyUsageTrendList.value = trendResult.value;
     } else {
-      captureError(results[1].reason, {
-        source: "history",
-        step: "fetch-recent",
-      });
-    }
-    if (results[2].status === "fulfilled") {
-      dailyUsageTrendList.value = results[2].value;
-    } else {
-      captureError(results[2].reason, {
+      captureError(trendResult.reason, {
         source: "history",
         step: "fetch-trend",
       });
@@ -757,6 +730,10 @@ export const useHistoryStore = defineStore("history", () => {
         deployment: whisperCfg.deployment ?? null,
         apiVersion: whisperCfg.apiVersion ?? null,
         authMode: whisperCfg.authMode ?? null,
+        candidateLocales:
+          whisperCfg.provider === "mai" ? whisperCfg.candidateLocales : null,
+        transcribeStyle:
+          whisperCfg.provider === "mai" ? whisperCfg.transcribeStyle : null,
       });
     } catch (err) {
       captureError(err, { source: "history", step: "retranscribe-invoke" });
@@ -914,7 +891,6 @@ export const useHistoryStore = defineStore("history", () => {
     hasMore,
     currentOffset,
     dashboardStats,
-    recentTranscriptionList,
     dailyUsageTrendList,
     usageTrendDays: USAGE_TREND_DAYS,
     fetchTranscriptionList,
@@ -925,7 +901,6 @@ export const useHistoryStore = defineStore("history", () => {
     updateTranscriptionOnRetrySuccess,
     addApiUsage,
     fetchDashboardStats,
-    fetchRecentTranscriptionList,
     refreshDashboard,
     clearAllAudioFilePath,
     clearAudioFilePathByIdList,

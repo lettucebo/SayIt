@@ -26,11 +26,13 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useFeedbackMessage } from "./composables/useFeedbackMessage";
+import InlineFeedback from "./components/InlineFeedback.vue";
 import { listenToEvent, VOCABULARY_CHANGED } from "./composables/useTauriEvents";
 import { useSettingsStore } from "./stores/useSettingsStore";
 import { useVocabularyStore } from "./stores/useVocabularyStore";
 import { captureError } from "./lib/sentry";
 import { getDatabaseInitError } from "./lib/database";
+import { getAutoCheckRetryDelayMs } from "./lib/updateRetryPolicy";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import type { UpdateCheckResult } from "./lib/autoUpdater";
 import {
@@ -75,9 +77,8 @@ const updateState = ref<UpdateUiState>("idle");
 const availableVersion = ref("");
 const updateFeedback = useFeedbackMessage();
 const AUTO_CHECK_INITIAL_DELAY_MS = 5_000;
-const AUTO_CHECK_INTERVAL_MS = 15 * 60_000; // 15 分鐘
 let autoCheckTimeoutId: ReturnType<typeof setTimeout> | null = null;
-let autoCheckIntervalId: ReturnType<typeof setInterval> | null = null;
+let autoCheckRetryAttempt = 0;
 
 // AlertDialog 控制
 const showManualUpdateDialog = ref(false);
@@ -95,14 +96,37 @@ watch(() => settingsStore.showPromptUpgradeNotice, (shouldShow) => {
 });
 
 // ── 流程 1：自動偵測（靜默檢查 → 靜默下載 → 通知安裝） ──
+// 每次 App 啟動只跑一次；僅在「檢查失敗」時做有限次退避重試。
 async function autoCheckAndDownload() {
+  // 這個排程已觸發（或本次是啟動首檢）→ 標記為「目前無待執行的自動檢查」，
+  // 讓 autoCheckTimeoutId 能忠實代表階梯是否還有排程在等
+  autoCheckTimeoutId = null;
+
   if (updateState.value !== "idle") return;
+
+  // 佔用 checking 狀態，避免與 Sidebar「檢查更新」同時執行而競爭
+  // autoUpdater 內的全域 pendingUpdate（可能覆蓋掉已下載好的 Update 物件）
+  updateState.value = "checking";
 
   try {
     const { checkForAppUpdate, downloadUpdate } = await import("./lib/autoUpdater");
     const result = await checkForAppUpdate();
 
-    if (result.status !== "update-available" || !result.version) return;
+    // checkForAppUpdate 不會拋錯，失敗會回傳 status: "error"，
+    // 這裡必須自行處理，否則唯一一次檢查失敗就等於本次啟動再也不檢查更新
+    if (result.status === "error") {
+      updateState.value = "idle";
+      scheduleAutoCheckRetry(result.error);
+      return;
+    }
+
+    // 檢查成功（不論有無更新）→ 階梯歸零，日後若再失敗可重新獲得完整 1／5／15 額度
+    autoCheckRetryAttempt = 0;
+
+    if (result.status !== "update-available" || !result.version) {
+      updateState.value = "idle";
+      return;
+    }
 
     availableVersion.value = result.version;
     updateState.value = "downloading";
@@ -118,9 +142,46 @@ async function autoCheckAndDownload() {
 
     showAutoInstallDialog.value = true;
   } catch (err) {
+    // 只有「檢查階段」失敗才排重試；已進入下載／彈窗階段代表網路是通的，
+    // 重試只會造成重複下載與重複搶焦點的安裝提示
+    const failedWhileChecking = updateState.value === "checking";
+
     console.error("[main-window] Auto update check/download failed:", err);
     captureError(err, { source: "updater", step: "auto-check" });
     updateState.value = "idle";
+
+    if (failedWhileChecking) {
+      scheduleAutoCheckRetry(err instanceof Error ? err.message : String(err));
+    }
+  }
+}
+
+/** 排下一次自動重試；次數用盡則回報遙測後停止（本次啟動不再自動檢查）。 */
+function scheduleAutoCheckRetry(reason?: string) {
+  // 階梯已有排程在等（例如手動檢查失敗時自動重試還沒輪到）：讓它跑完就好。
+  // 不重排可避免把剩餘等待時間重設，也避免誤報「已用盡」
+  if (autoCheckTimeoutId !== null) return;
+
+  const delayMs = getAutoCheckRetryDelayMs(autoCheckRetryAttempt);
+
+  if (delayMs === null) {
+    // 重試用盡且確實沒有排程在等：本次啟動不再自動檢查，
+    // 回報以免「靜默永久失效」查無線索
+    captureError(
+      new Error(`Auto update check failed after all retries: ${reason ?? "unknown"}`),
+      { source: "updater", step: "auto-check-retry-exhausted" },
+    );
+    return;
+  }
+
+  autoCheckRetryAttempt += 1;
+  autoCheckTimeoutId = setTimeout(autoCheckAndDownload, delayMs);
+}
+
+function cancelPendingAutoCheck() {
+  if (autoCheckTimeoutId) {
+    clearTimeout(autoCheckTimeoutId);
+    autoCheckTimeoutId = null;
   }
 }
 
@@ -164,12 +225,24 @@ async function handleManualCheck() {
   try {
     const { checkForAppUpdate } = await import("./lib/autoUpdater");
     const result = await checkForAppUpdate();
+
+    if (result.status === "error") {
+      // 手動檢查也失敗（多半仍離線）：重新武裝自動重試階梯。
+      // 若在此直接取消待執行的重試，自動更新會在本次啟動就此永久停擺
+      scheduleAutoCheckRetry(result.error);
+    } else {
+      // 檢查成功代表網路已通，待執行的自動重試已無意義；階梯一併歸零
+      cancelPendingAutoCheck();
+      autoCheckRetryAttempt = 0;
+    }
+
     handleManualCheckResult(result);
   } catch (err) {
     console.error("[main-window] Manual update check failed:", err);
     captureError(err, { source: "updater", step: "manual-check" });
     updateFeedback.show("error", t("mainApp.update.checkError"));
     updateState.value = "idle";
+    scheduleAutoCheckRetry(err instanceof Error ? err.message : String(err));
   }
 }
 
@@ -223,6 +296,10 @@ const vocabularyStore = useVocabularyStore();
 let unlistenVocabularyChanged: UnlistenFn | null = null;
 
 onMounted(async () => {
+  // 更新檢查排在最前面：後面的 await（事件監聽、權限檢查）若拋錯，
+  // 不能連帶讓這個 App process 永遠不排程更新檢查
+  autoCheckTimeoutId = setTimeout(autoCheckAndDownload, AUTO_CHECK_INITIAL_DELAY_MS);
+
   // 監聽詞彙變更（HUD 視窗 AI 新增詞彙時同步 Dashboard）
   unlistenVocabularyChanged = await listenToEvent(VOCABULARY_CHANGED, () => {
     console.log("[main-window] VOCABULARY_CHANGED received, refreshing termList");
@@ -245,18 +322,11 @@ onMounted(async () => {
       captureError(error, { source: "accessibility", step: "check-permission" });
     }
   }
-
-  // 自動檢查更新：啟動 5 秒後首次檢查，之後每 15 分鐘重查
-  autoCheckTimeoutId = setTimeout(() => {
-    autoCheckAndDownload();
-    autoCheckIntervalId = setInterval(autoCheckAndDownload, AUTO_CHECK_INTERVAL_MS);
-  }, AUTO_CHECK_INITIAL_DELAY_MS);
 });
 
 onUnmounted(() => {
   unlistenVocabularyChanged?.();
-  if (autoCheckTimeoutId) clearTimeout(autoCheckTimeoutId);
-  if (autoCheckIntervalId) clearInterval(autoCheckIntervalId);
+  cancelPendingAutoCheck();
 });
 </script>
 
@@ -320,13 +390,12 @@ onUnmounted(() => {
             {{ $t("mainApp.update.installNow") }}
           </Button>
         </div>
-        <p
-          v-if="updateFeedback.message.value"
-          class="mt-1 text-xs"
-          :class="updateFeedback.type.value === 'success' ? 'text-primary' : 'text-destructive'"
-        >
-          {{ updateFeedback.message.value }}
-        </p>
+        <div class="mt-1 min-h-4">
+          <InlineFeedback
+            :feedback="updateFeedback.state.value"
+            class="block text-xs"
+          />
+        </div>
       </SidebarFooter>
     </Sidebar>
 

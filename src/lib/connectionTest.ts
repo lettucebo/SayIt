@@ -4,7 +4,15 @@ import type {
   LlmProviderId,
   TranscriptionProviderId,
 } from "./modelRegistry";
-import type { AzureRequestOptions } from "./llmProvider";
+import {
+  getAzureOperationMaxTokens,
+  type AzureRequestOptions,
+} from "./llmProvider";
+import type { AzureAuthHeaderMode } from "../types/settings";
+import type {
+  MaiCandidateLocale,
+} from "../i18n/languageConfig";
+import type { MaiTranscribeStyle } from "./modelRegistry";
 
 /**
  * 連線測試專用的錯誤格式化：盡量保留底層真實原因（HTTP 狀態碼 + 服務回應內容），
@@ -47,7 +55,7 @@ export async function testLlmConnection(
       provider: extras?.provider,
       azure: extras?.azure,
       systemPrompt: "Reply with the word OK only.",
-      maxTokens: 50,
+      maxTokens: getAzureOperationMaxTokens(extras?.azure, 50),
     });
     return { ok: true, durationMs: elapsed(start) };
   } catch (err) {
@@ -67,7 +75,9 @@ export async function testWhisperConnection(
     endpoint?: string;
     deployment?: string;
     apiVersion?: string;
-    authMode?: "key" | "entra";
+    authMode?: AzureAuthHeaderMode;
+    candidateLocales?: MaiCandidateLocale[];
+    transcribeStyle?: MaiTranscribeStyle;
   },
 ): Promise<TestResult> {
   const start = performance.now();
@@ -80,6 +90,8 @@ export async function testWhisperConnection(
       deployment: extras?.deployment ?? null,
       apiVersion: extras?.apiVersion ?? null,
       authMode: extras?.authMode ?? null,
+      candidateLocales: extras?.candidateLocales ?? null,
+      transcribeStyle: extras?.transcribeStyle ?? null,
     });
     return { ok: true, durationMs: elapsed(start) };
   } catch (err) {

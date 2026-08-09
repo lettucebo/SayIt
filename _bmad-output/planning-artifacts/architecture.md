@@ -306,7 +306,7 @@ CREATE TABLE IF NOT EXISTS schema_version (
 - Updater endpoint: `https://github.com/chenjackle45/SayIt/releases/latest/download/latest.json`
 - Public repo: `chenjackle45/SayIt`
 - 使用者體驗：
-  - **定時檢查** — 啟動 5 秒後首次檢查，之後每 4 小時背景檢查
+  - **啟動時檢查** — App 啟動後 5 秒背景檢查一次，不做定時輪詢；僅在檢查失敗時退避重試（1／5／15 分鐘），用盡後回報遙測並停止
   - **手動檢查** — Sidebar Footer 的「檢查更新」按鈕，結果以 inline feedback 顯示（2.5 秒自動消失）
   - **更新流程** — 自動下載 → 提示重啟 → 一鍵完成
 - `checkForAppUpdate()` 回傳 `UpdateCheckResult`（`up-to-date` | `update-available` | `error`），供 UI 顯示結果
@@ -537,7 +537,7 @@ async function processTranscription() {
 | AI 文字整理 | FR8-12 | enhancer.ts, useVoiceFlowStore.ts, useSettingsStore.ts | lib/, stores/ |
 | 文字輸出 | FR13-15 | clipboard_paste.rs, keyboard_monitor.rs | plugins/ |
 | 自訂詞彙字典 | FR16-19 | useVocabularyStore.ts, DictionaryView.vue | stores/, views/ |
-| 歷史記錄與統計 | FR20-25 | database.ts, useHistoryStore.ts, DashboardView.vue, HistoryView.vue | lib/, stores/, views/ |
+| 歷史記錄與統計 | FR20-24（FR25 已作廢） | database.ts, useHistoryStore.ts, DashboardView.vue, HistoryView.vue | lib/, stores/, views/ |
 | 狀態回饋 HUD | FR26-29 | NotchHud.vue, useHudState.ts, App.vue | components/, composables/, src/ |
 | 應用程式管理 | FR30-36 | lib.rs, useSettingsStore.ts, SettingsView.vue, updater.ts | src-tauri/src/, stores/, views/, lib/ |
 
@@ -583,7 +583,7 @@ sayit/
 │   │   └── useVoiceFlowStore.ts       # 錄音/轉錄/AI 整理流程狀態
 │   │
 │   ├── views/                          # Main Window 頁面 [新增目錄]
-│   │   ├── DashboardView.vue          # 統計卡片 + 最近轉錄列表
+│   │   ├── DashboardView.vue          # 統計卡片 + 額度卡片 + 每日使用趨勢圖
 │   │   ├── HistoryView.vue            # 歷史記錄搜尋與管理
 │   │   ├── DictionaryView.vue         # 詞彙字典 CRUD
 │   │   └── SettingsView.vue           # 快捷鍵 / API Key / AI Prompt 設定
@@ -728,7 +728,7 @@ useHistoryStore (save to SQLite) ──→ Main Window Dashboard refresh
 |----------|----------|------|----------|
 | Groq Whisper API | `transcription.rs` | Rust reqwest multipart | HUD 顯示錯誤訊息，使用者可重試 |
 | Groq LLM API | `enhancer.ts` | HTTPS POST JSON | 5 秒 timeout → 跳過 AI，貼上原始文字 |
-| 自動更新 Endpoint | `updater.ts` | HTTPS GET JSON | 靜默失敗，下次啟動再試 |
+| 自動更新 Endpoint | `autoUpdater.ts` | HTTPS GET JSON | 退避重試 3 次（1／5／15 分），仍失敗則遙測回報並停止，改由手動「檢查更新」補救 |
 
 ### File Organization Patterns
 
@@ -808,7 +808,7 @@ pnpm tauri build  # 1. Vite 打包前端 → dist/
 | FR8-12 | AI 文字整理 | enhancer.ts (Groq LLM) + useSettingsStore (prompt) + 詞彙/剪貼簿上下文注入 |
 | FR13-15 | 文字輸出 | clipboard_paste.rs (arboard + CGEvent Cmd+V / SendInput) + keyboard_monitor.rs |
 | FR16-19 | 自訂詞彙字典 | useVocabularyStore + DictionaryView.vue + SQLite vocabulary table |
-| FR20-25 | 歷史記錄與統計 | useHistoryStore + DashboardView.vue + HistoryView.vue + SQLite transcriptions table |
+| FR20-24 | 歷史記錄與統計 | useHistoryStore + DashboardView.vue + HistoryView.vue + SQLite transcriptions table（FR25「Dashboard 最近轉錄摘要」已於 2026-07-29 作廢） |
 | FR26-29 | 狀態回饋 HUD | NotchHud.vue (6-state) + useHudState.ts + voice-flow:state-changed events |
 | FR30-36 | 應用程式管理 | SettingsView.vue + useSettingsStore + lib.rs + updater.ts + tauri-plugin-autostart |
 

@@ -15,6 +15,9 @@ import {
   isCustomTriggerKey,
   isComboTriggerKey,
   isPresetTriggerKey,
+  type AzureAuthMode,
+  type AzureAuthHeaderMode,
+  toAzureAuthMode,
 } from "../types/settings";
 import {
   getKeyDisplayName,
@@ -26,6 +29,7 @@ import {
 } from "../lib/keycodeMap";
 import {
   extractErrorMessage,
+  isAzureUserAuthFailure,
   getHotkeyRecordingTimeoutMessage,
   getHotkeyUnsupportedKeyMessage,
   getHotkeyPresetHint,
@@ -42,13 +46,22 @@ import i18n, { switchLocale } from "../i18n";
 import {
   type SupportedLocale,
   type TranscriptionLocale,
+  type MaiCandidateLocale,
   FALLBACK_LOCALE,
   detectSystemLocale,
   getHtmlLangForLocale,
   getWhisperCodeForTranscriptionLocale,
+  normalizeMaiCandidateLocales,
 } from "../i18n/languageConfig";
-import { emitEvent, SETTINGS_UPDATED } from "../composables/useTauriEvents";
-import type { SettingsUpdatedPayload } from "../types/events";
+import {
+  emitEvent,
+  SETTINGS_UPDATED,
+  AZURE_AUTH_STATE_CHANGED,
+} from "../composables/useTauriEvents";
+import type {
+  SettingsUpdatedPayload,
+  AzureAuthStateChangedPayload,
+} from "../types/events";
 import { applyTheme, DEFAULT_THEME_MODE, isThemeMode } from "../lib/theme";
 import {
   DEFAULT_LLM_MODEL_ID,
@@ -64,20 +77,52 @@ import {
   type TranscriptionProviderId,
   type QuotaPeriod,
   type GeminiTranscriptionModelId,
+  type MaiTranscribeStyle,
+  type AzureChatModelFamilyId,
+  type AzureChatModelFamilySource,
   DEFAULT_QUOTA_PERIOD,
+  DEFAULT_AZURE_CHAT_MODEL_FAMILY_ID,
+  getEffectiveAzureChatModelFamilySource,
   GEMINI_TRANSCRIPTION_MODEL,
+  MAI_TRANSCRIPTION_MODEL_ID,
+  getEffectiveAzureChatModelFamilyId,
+  isAzureChatModelFamilyId,
   getEffectiveTranscriptionProviderId,
   getEffectiveGeminiTranscriptionModelId,
+  getEffectiveMaiTranscribeStyle,
 } from "../lib/modelRegistry";
+import type { AzureRequestOptions } from "../lib/llmProvider";
 import {
-  normalizeAzureEndpoint,
-  type AzureRequestOptions,
-} from "../lib/llmProvider";
+  isValidAzureResourceName,
+  migrateLegacyAzureEndpoints,
+  normalizeAzureEndpointOverride,
+  normalizeAzureResourceName,
+  resolveAzureResourceOrigins,
+} from "../lib/azureResource";
+import {
+  listAzureChatDeployments as fetchAzureChatDeployments,
+  type AzureDeploymentListResult,
+} from "../lib/foundryDeployments";
+import {
+  clearAzureTemperatureCapability,
+  getAzureTemperatureCapability,
+} from "../lib/azureTemperatureCapability";
 import {
   getAzureAccessToken,
   clearAzureTokenCache,
   getAzureScopeForApiKind,
 } from "../lib/azureAuth";
+import {
+  type AzureUserAccount,
+  getAzureUserAccount,
+  getAzureUserToken,
+  matchesCredentials,
+  newSignInOperationId,
+  signInAzureUser,
+  signOutAzureUser,
+  cancelAzureUserSignIn,
+  type AzureUserScopeKind,
+} from "../lib/azureUserAuth";
 import {
   EXPORTABLE_SETTING_KEYS,
   stripSensitiveKeys,
@@ -93,7 +138,11 @@ export const DEFAULT_ENHANCEMENT_THRESHOLD_ENABLED = false;
 export const DEFAULT_ENHANCEMENT_THRESHOLD_CHAR_COUNT = 10;
 export const DEFAULT_CONTEXT_INJECTION_ENABLED = false;
 export const DEFAULT_MUTE_ON_RECORDING = true;
-const DEFAULT_SMART_DICTIONARY_ENABLED = navigator.userAgent.includes("Mac"); // macOS only — Windows 尚未支援 text field 讀取
+// 全平台啟用：macOS 走 AXUIElement、Windows 走 UI Automation，兩邊都能讀游標所在
+// 輸入框（`text_field_reader.rs`）。
+// 密碼欄位守衛目前**不對稱**：Windows 用 `CurrentIsPassword` fail-closed 排除；
+// macOS 僅以 AXRole 過濾，倚賴系統不對 secure field 暴露 AXValue（追蹤中，見 issue 67）。
+const DEFAULT_SMART_DICTIONARY_ENABLED = true;
 const DEFAULT_SOUND_EFFECTS_ENABLED = true;
 const DEFAULT_HIDE_DOCK_ICON = false;
 const IS_MACOS = navigator.userAgent.includes("Mac");
@@ -159,11 +208,7 @@ export const useSettingsStore = defineStore("settings", () => {
           azureEnabled.value &&
           azureEndpoint.value !== "" &&
           azureChatDeployment.value !== "" &&
-          (azureAuthMode.value === "key"
-            ? azureApiKey.value !== ""
-            : azureTenantId.value !== "" &&
-              azureClientId.value !== "" &&
-              azureClientSecret.value !== "")
+          hasAzureCredentials.value
         );
       default:
         // exhaustiveness：若 LlmProviderId 新增成員，這行會 type error
@@ -200,8 +245,14 @@ export const useSettingsStore = defineStore("settings", () => {
   );
   // ── Azure / Microsoft Foundry ──
   const azureEnabled = ref<boolean>(false);
-  const azureEndpoint = ref<string>("");
-  const azureAuthMode = ref<"key" | "entra">("key");
+  const azureResourceName = ref<string>("");
+  const azureWhisperResourceName = ref<string>("");
+  const azureSpeechResourceName = ref<string>("");
+  const azureEndpointOverride = ref<string>("");
+  const azureWhisperEndpointOverride = ref<string>("");
+  const azureSpeechEndpointOverride = ref<string>("");
+  const azureProjectName = ref<string>("");
+  const azureAuthMode = ref<AzureAuthMode>("key");
   const azureApiKey = ref<string>("");
   const azureTenantId = ref<string>("");
   const azureClientId = ref<string>("");
@@ -209,8 +260,116 @@ export const useSettingsStore = defineStore("settings", () => {
   const azureApiVersion = ref<string>("");
   const azureOmitTemperature = ref<boolean>(false);
   const azureChatDeployment = ref<string>("");
+  const azureChatModelFamily = ref<AzureChatModelFamilyId>(
+    DEFAULT_AZURE_CHAT_MODEL_FAMILY_ID,
+  );
+  const azureChatModelFamilySource = ref<AzureChatModelFamilySource>(
+    "manual",
+  );
   const azureWhisperDeployment = ref<string>("");
+  const azureSpeechApiKey = ref<string>("");
+  const azureOrigins = computed(() =>
+    resolveAzureResourceOrigins({
+      resourceName: azureResourceName.value,
+      whisperResourceName: azureWhisperResourceName.value,
+      speechResourceName: azureSpeechResourceName.value,
+      endpointOverride: azureEndpointOverride.value,
+      whisperEndpointOverride: azureWhisperEndpointOverride.value,
+      speechEndpointOverride: azureSpeechEndpointOverride.value,
+    }),
+  );
+  /** 已解析的 main endpoint，供既有聊天流程和外部 UI 顯示使用。 */
+  const azureEndpoint = computed(() => azureOrigins.value.main);
+  /** 已解析的 Azure OpenAI Whisper endpoint。 */
+  const azureWhisperEndpoint = computed(() => azureOrigins.value.whisper);
+  /** 已解析的 Azure AI Speech endpoint，供既有 MAI 流程使用。 */
+  const azureSpeechEndpoint = computed(() => azureOrigins.value.speech);
+  /**
+   * `entraUser` 模式下目前已登入的帳號。真實來源在 Rust（OS 憑證庫），
+   * 這裡只是給 UI 與 computed 用的快照，由 `refreshAzureUserAccount()` 同步。
+   */
+  const azureUserAccount = ref<AzureUserAccount | null>(null);
+
+  /**
+   * 這一輪執行期間偵測到「登入已失效、需要使用者重新互動」。
+   *
+   * 憑證此時**仍在**憑證庫裡（Entra 的 `invalid_grant` 只代表必須改用互動
+   * 模式，不代表憑證永久失效），所以不能靠「憑證是否存在」推論可用性——
+   * 否則使用者只要存個設定或觸發一次跨視窗同步，綠色的「已登入」就會回來，
+   * 但每次實際使用還是失敗。
+   *
+   * 刻意**不持久化**：重開 App 後條件可能已解除（使用者已接受使用條款、
+   * 已符合條件式存取政策等），那時應該讓它再試一次，而不是永久標成過期。
+   */
+  const azureUserReauthRequired = ref(false);
+
+  /**
+   * 已登入的帳號是否對應「目前這組」tenant/client。
+   * 只判斷 account 非 null 不夠：使用者改了 Client ID 但快照還是舊帳號時會誤判已登入。
+   */
+  const isAzureUserSignedIn = computed(() =>
+    matchesCredentials(azureUserAccount.value, {
+      tenantId: azureTenantId.value,
+      clientId: azureClientId.value,
+    }),
+  );
+
+  /**
+   * 給設定頁用：**輸入框裡**的這組身分是不是目前已登入的帳號。
+   *
+   * `isAzureUserSignedIn` 比對的是「已儲存」的值，使用者在輸入框改了
+   * Tenant/Client ID 但還沒按儲存時，畫面會一邊顯示上一組帳號的「已登入」、
+   * 一邊把登入按鈕藏起來，讓人以為新設定已經生效。
+   */
+  function matchesSignedInAccount(tenantId: string, clientId: string) {
+    return matchesCredentials(azureUserAccount.value, {
+      tenantId: tenantId.trim(),
+      clientId: clientId.trim(),
+    });
+  }
+
+  /** 三種驗證模式各自的憑證完整性判斷。 */
+  const hasAzureCredentials = computed(() => {
+    switch (azureAuthMode.value) {
+      case "key":
+        return azureApiKey.value !== "";
+      case "entra":
+        return (
+          azureTenantId.value !== "" &&
+          azureClientId.value !== "" &&
+          azureClientSecret.value !== ""
+        );
+      case "entraUser":
+        return isAzureUserSignedIn.value;
+      default:
+        // exhaustiveness：若 AzureAuthMode 新增成員，這行會 type error
+        azureAuthMode.value satisfies never;
+        return false;
+    }
+  });
+  const effectiveTranscriptionApiKey = computed(
+    () => azureSpeechApiKey.value || azureApiKey.value,
+  );
+  const hasAzureTranscriptionCredentials = computed(() => {
+    switch (azureAuthMode.value) {
+      case "key":
+        return effectiveTranscriptionApiKey.value !== "";
+      case "entra":
+        return (
+          azureTenantId.value !== "" &&
+          azureClientId.value !== "" &&
+          azureClientSecret.value !== ""
+        );
+      case "entraUser":
+        return isAzureUserSignedIn.value;
+      default:
+        azureAuthMode.value satisfies never;
+        return false;
+    }
+  });
   const whisperProviderId = ref<TranscriptionProviderId>("groq");
+  const maiCandidateLocales = ref<MaiCandidateLocale[]>([]);
+  const maiTranscribeStyle = ref<MaiTranscribeStyle>("default");
   /** Gemini 轉錄模型（Flash-Lite 免費額度高、Flash 品質優先） */
   const geminiTranscriptionModelId = ref<GeminiTranscriptionModelId>(
     GEMINI_TRANSCRIPTION_MODEL,
@@ -220,19 +379,34 @@ export const useSettingsStore = defineStore("settings", () => {
   const geminiFreeQuotaPeriod = ref<QuotaPeriod>(DEFAULT_QUOTA_PERIOD);
   const hasWhisperConfig = computed(() => {
     if (whisperProviderId.value === "gemini") return geminiApiKey.value !== "";
+    if (whisperProviderId.value === "mai") {
+      return (
+        azureEnabled.value &&
+        azureSpeechEndpoint.value !== "" &&
+        hasAzureTranscriptionCredentials.value
+      );
+    }
     if (whisperProviderId.value !== "azure") return apiKey.value !== "";
     return (
       azureEnabled.value &&
-      azureEndpoint.value !== "" &&
+      azureWhisperEndpoint.value !== "" &&
       azureWhisperDeployment.value !== "" &&
-      (azureAuthMode.value === "key"
-        ? azureApiKey.value !== ""
-        : azureTenantId.value !== "" &&
-          azureClientId.value !== "" &&
-          azureClientSecret.value !== "")
+      hasAzureTranscriptionCredentials.value
     );
   });
   let isLoaded = false;
+  /**
+   * 設定載入狀態（三態）。
+   *
+   * 不能用單一布林：載入**失敗**時若標記為已載入，寫入守門就被解除，
+   * 下一次儲存仍可能用預設空值覆寫使用者原有的 endpoint/tenant/client/secret。
+   * 只有 `ready` 允許寫入；`failed` 需由使用者明確重試或重設。
+   */
+  const settingsLoadState = ref<"loading" | "ready" | "failed">("loading");
+  const isSettingsLoaded = computed(() => settingsLoadState.value === "ready");
+  const settingsLoadFailed = computed(
+    () => settingsLoadState.value === "failed",
+  );
 
   /** Resolve which SupportedLocale to use for prompt default (shared logic). */
   function getEffectivePromptLocale(): SupportedLocale {
@@ -260,14 +434,150 @@ export const useSettingsStore = defineStore("settings", () => {
     }
   }
 
-  function getAzureRequestOptions(authValue: string): AzureRequestOptions {
+  /**
+   * 取一份 Azure 連線設定的 immutable 快照。
+   *
+   * 換 token 是 async 的，等待期間另一個視窗可能改掉 endpoint / deployment /
+   * authMode。若 await 前後各讀一次 reactive 值，就可能把「帳號 A 的 token」
+   * 配上「資源 B 的 endpoint」，把內容送到非預期的 Azure 資源。
+   * 因此在任何 await 之前一次取完，後續只用這份快照。
+   */
+  function snapshotAzureConfig() {
+    const origins = azureOrigins.value;
     return {
-      endpoint: azureEndpoint.value,
-      apiVersion: azureApiVersion.value || undefined,
+      enabled: azureEnabled.value,
+      endpoint: origins.main,
+      whisperEndpoint: origins.whisper,
+      foundryEndpoint: origins.foundry,
+      projectName: azureProjectName.value,
+      apiVersion: azureApiVersion.value,
       authMode: azureAuthMode.value,
-      authValue,
+      apiKey: azureApiKey.value,
+      tenantId: azureTenantId.value,
+      clientId: azureClientId.value,
+      clientSecret: azureClientSecret.value,
+      chatDeployment: azureChatDeployment.value,
+      chatModelFamily: azureChatModelFamily.value,
+      whisperDeployment: azureWhisperDeployment.value,
+      speechEndpoint: origins.speech,
+      speechApiKey: azureSpeechApiKey.value,
+      maiCandidateLocales: [...maiCandidateLocales.value],
+      maiTranscribeStyle: maiTranscribeStyle.value,
       omitTemperature: azureOmitTemperature.value,
     };
+  }
+
+  type AzureConfigSnapshot = ReturnType<typeof snapshotAzureConfig>;
+
+  /**
+   * 取 Entra 使用者 token，並在登入失效時同步更新兩個視窗的顯示。
+   *
+   * 憑證失效時 Rust **不會**刪掉憑證（Entra 的 `invalid_grant` 只代表
+   * 「必須改用互動模式」，不代表憑證永久失效），所以顯示狀態不能靠
+   * 「憑證是否存在」推論——必須由這裡明確標記。
+   */
+  async function acquireAzureUserToken(
+    credentials: { tenantId: string; clientId: string },
+    scopeKind: AzureUserScopeKind,
+  ): Promise<string> {
+    try {
+      const token = await getAzureUserToken(credentials, scopeKind);
+      azureUserReauthRequired.value = false;
+      return token;
+    } catch (err) {
+      if (isAzureUserAuthFailure(extractErrorMessage(err))) {
+        azureUserReauthRequired.value = true;
+        azureUserAccount.value = null;
+        try {
+          await emitAzureAuthStateChanged();
+        } catch (emitErr) {
+          // 廣播失敗不可蓋掉原本的錯誤：使用者要看到的是「請重新登入」
+          console.warn(
+            "[useSettingsStore] failed to broadcast Azure auth state:",
+            extractErrorMessage(emitErr),
+          );
+        }
+      }
+      throw err;
+    }
+  }
+
+  async function saveAzureChatDeploymentSelection({
+    deployment,
+    modelFamily,
+    familySource,
+  }: {
+    deployment: string;
+    modelFamily: AzureChatModelFamilyId;
+    familySource: AzureChatModelFamilySource;
+  }) {
+    try {
+      const normalizedDeployment = deployment.trim();
+      const effectiveFamily = getEffectiveAzureChatModelFamilyId(modelFamily);
+      const effectiveSource = getEffectiveAzureChatModelFamilySource(
+        familySource,
+      );
+      const store = await load(STORE_NAME);
+      await store.set("azureChatDeployment", normalizedDeployment);
+      await store.set("azureChatModelFamily", effectiveFamily);
+      await store.set("azureChatModelFamilySource", effectiveSource);
+      await store.save();
+
+      azureChatDeployment.value = normalizedDeployment;
+      azureChatModelFamily.value = effectiveFamily;
+      azureChatModelFamilySource.value = effectiveSource;
+      await emitEvent(SETTINGS_UPDATED, {
+        key: "azureChatDeployment",
+        value: normalizedDeployment,
+      });
+    } catch (err) {
+      console.error(
+        "[useSettingsStore] saveAzureChatDeploymentSelection failed:",
+        extractErrorMessage(err),
+      );
+      throw err;
+    }
+  }
+
+  function azureOptionsFromSnapshot(
+    snap: AzureConfigSnapshot,
+    authValue: string,
+    authMode: AzureAuthHeaderMode,
+  ): AzureRequestOptions {
+    return {
+      endpoint: snap.endpoint,
+      apiVersion: snap.apiVersion || undefined,
+      authMode,
+      authValue,
+      modelFamily: snap.chatModelFamily,
+      omitTemperature: snap.omitTemperature,
+    };
+  }
+
+  async function resolveAzureChatAuth(
+    snap: AzureConfigSnapshot,
+  ): Promise<{ authValue: string; authMode: AzureAuthHeaderMode }> {
+    if (snap.authMode === "entraUser") {
+      const token = await acquireAzureUserToken(
+        { tenantId: snap.tenantId, clientId: snap.clientId },
+        "chat",
+      );
+      return { authValue: token, authMode: "bearer" };
+    }
+
+    if (snap.authMode === "entra") {
+      const token = await getAzureAccessToken(
+        {
+          tenantId: snap.tenantId,
+          clientId: snap.clientId,
+          clientSecret: snap.clientSecret,
+        },
+        getAzureScopeForApiKind("chat"),
+      );
+      return { authValue: token, authMode: "bearer" };
+    }
+
+    return { authValue: snap.apiKey, authMode: "key" };
   }
 
   /**
@@ -289,40 +599,58 @@ export const useSettingsStore = defineStore("settings", () => {
       };
     }
 
+    // 任何 await 之前先定格，之後只用這份快照（見 snapshotAzureConfig 說明）
+    const snap = snapshotAzureConfig();
+
     // Azure 設定不完整 → 回空 apiKey，呼叫端走「未設定」流程（不打 token / 不送請求）
-    if (
-      !azureEnabled.value ||
-      azureEndpoint.value === "" ||
-      azureChatDeployment.value === ""
-    ) {
-      return { apiKey: "", provider, modelId: azureChatDeployment.value };
+    if (!snap.enabled || snap.endpoint === "" || snap.chatDeployment === "") {
+      return { apiKey: "", provider, modelId: snap.chatDeployment };
     }
 
-    // chat 走 v1 路徑（/openai/v1/）→ ai.azure.com 受眾
-    const scope = getAzureScopeForApiKind("chat");
-    if (azureAuthMode.value === "entra") {
-      const token = await getAzureAccessToken(
-        {
-          tenantId: azureTenantId.value,
-          clientId: azureClientId.value,
-          clientSecret: azureClientSecret.value,
-        },
-        scope,
+    const auth = await resolveAzureChatAuth(snap);
+    let temperatureCapability: Awaited<
+      ReturnType<typeof getAzureTemperatureCapability>
+    > = undefined;
+    try {
+      temperatureCapability = await getAzureTemperatureCapability(
+        snap.endpoint,
+        snap.chatDeployment,
       );
-      return {
-        apiKey: token,
-        provider,
-        modelId: azureChatDeployment.value,
-        azure: getAzureRequestOptions(token),
-      };
+    } catch (err) {
+      console.warn(
+        "[useSettingsStore] failed to read Azure temperature capability:",
+        extractErrorMessage(err),
+      );
+    }
+    return {
+      apiKey: auth.authValue,
+      provider,
+      modelId: snap.chatDeployment,
+      azure: {
+        ...azureOptionsFromSnapshot(snap, auth.authValue, auth.authMode),
+        supportsTemperature: temperatureCapability?.supportsTemperature,
+      },
+    };
+  }
+
+  async function listAzureChatDeployments(): Promise<AzureDeploymentListResult> {
+    const snap = snapshotAzureConfig();
+    if (!snap.enabled || snap.endpoint === "") {
+      throw new Error("AZURE_CONNECTION_INCOMPLETE");
     }
 
-    return {
-      apiKey: azureApiKey.value,
-      provider,
-      modelId: azureChatDeployment.value,
-      azure: getAzureRequestOptions(azureApiKey.value),
-    };
+    const auth = await resolveAzureChatAuth(snap);
+    if (auth.authValue.trim() === "") {
+      throw new Error("AZURE_CREDENTIALS_INCOMPLETE");
+    }
+
+    return fetchAzureChatDeployments({
+      foundryEndpoint: snap.foundryEndpoint,
+      v1Endpoint: snap.endpoint,
+      projectName: snap.projectName,
+      authMode: auth.authMode,
+      authValue: auth.authValue,
+    });
   }
 
   /** 用於 usage 記錄/成本計算的有效 chat 模型：Azure 用部署名，其餘用 selectedLlmModelId。 */
@@ -337,17 +665,52 @@ export const useSettingsStore = defineStore("settings", () => {
    * Azure-Entra 用 cognitiveservices scope（deployments 路徑）。
    * modelId 由 provider 決定：Gemini 有自己的固定轉錄模型，不可沿用 WhisperModelId。
    */
-  async function getWhisperRequestConfig(): Promise<{
-    apiKey: string;
-    provider: TranscriptionProviderId;
-    modelId: string;
-    endpoint?: string;
-    deployment?: string;
-    apiVersion?: string;
-    authMode?: "key" | "entra";
-  }> {
+  type TranscriptionRequestConfig =
+    | {
+        apiKey: string;
+        provider: "groq";
+        modelId: WhisperModelId;
+        endpoint?: undefined;
+        deployment?: undefined;
+        apiVersion?: undefined;
+        authMode?: undefined;
+      }
+    | {
+        apiKey: string;
+        provider: "gemini";
+        modelId: GeminiTranscriptionModelId;
+        endpoint?: undefined;
+        deployment?: undefined;
+        apiVersion?: undefined;
+        authMode?: undefined;
+      }
+    | {
+        apiKey: string;
+        provider: "azure";
+        modelId: WhisperModelId;
+        endpoint?: string;
+        deployment?: string;
+        apiVersion?: string;
+        authMode?: AzureAuthHeaderMode;
+      }
+    | {
+        apiKey: string;
+        provider: "mai";
+        modelId: typeof MAI_TRANSCRIPTION_MODEL_ID;
+        endpoint?: string;
+        deployment?: undefined;
+        apiVersion?: undefined;
+        authMode?: AzureAuthHeaderMode;
+        candidateLocales: MaiCandidateLocale[];
+        transcribeStyle: MaiTranscribeStyle;
+      };
+
+  async function getWhisperRequestConfig(): Promise<TranscriptionRequestConfig> {
+    const provider = whisperProviderId.value;
+    const whisperModelId = selectedWhisperModelId.value;
+
     // Gemini 走 generateContent，模型固定（沿用 whisper-large-v3 會打到不存在的端點）
-    if (whisperProviderId.value === "gemini") {
+    if (provider === "gemini") {
       return {
         apiKey: geminiApiKey.value,
         provider: "gemini",
@@ -355,49 +718,103 @@ export const useSettingsStore = defineStore("settings", () => {
       };
     }
 
-    if (whisperProviderId.value !== "azure") {
+    if (provider === "groq") {
       return {
         apiKey: apiKey.value,
         provider: "groq",
-        modelId: selectedWhisperModelId.value,
+        modelId: whisperModelId,
+      };
+    }
+
+    // 任何 await 之前先定格（同 getLlmRequestConfig 的理由）
+    const snap = snapshotAzureConfig();
+
+    if (provider === "mai") {
+      const base = {
+        provider: "mai" as const,
+        modelId: MAI_TRANSCRIPTION_MODEL_ID,
+        endpoint: snap.speechEndpoint || undefined,
+        candidateLocales: snap.maiCandidateLocales,
+        transcribeStyle: snap.maiTranscribeStyle,
+      };
+      if (!snap.enabled || snap.speechEndpoint === "") {
+        return { ...base, apiKey: "" };
+      }
+
+      if (snap.authMode === "entraUser") {
+        const token = await acquireAzureUserToken(
+          { tenantId: snap.tenantId, clientId: snap.clientId },
+          "whisper",
+        );
+        return { ...base, apiKey: token, authMode: "bearer" };
+      }
+
+      if (snap.authMode === "entra") {
+        const token = await getAzureAccessToken(
+          {
+            tenantId: snap.tenantId,
+            clientId: snap.clientId,
+            clientSecret: snap.clientSecret,
+          },
+          getAzureScopeForApiKind("whisper"),
+        );
+        return { ...base, apiKey: token, authMode: "bearer" };
+      }
+
+      return {
+        ...base,
+        apiKey: snap.speechApiKey || snap.apiKey,
+        authMode: "key",
       };
     }
 
     if (
-      !azureEnabled.value ||
-      azureEndpoint.value === "" ||
-      azureWhisperDeployment.value === ""
+      !snap.enabled ||
+      snap.whisperEndpoint === "" ||
+      snap.whisperDeployment === ""
     ) {
       return {
         apiKey: "",
         provider: "azure",
-        modelId: selectedWhisperModelId.value,
+        modelId: whisperModelId,
       };
     }
 
     const base = {
       provider: "azure" as const,
-      modelId: selectedWhisperModelId.value,
-      endpoint: azureEndpoint.value,
-      deployment: azureWhisperDeployment.value,
-      apiVersion: azureApiVersion.value || undefined,
+      modelId: whisperModelId,
+      endpoint: snap.whisperEndpoint,
+      deployment: snap.whisperDeployment,
+      apiVersion: snap.apiVersion || undefined,
     };
 
     // whisper 走傳統 deployments 路徑 → cognitiveservices 受眾
+    if (snap.authMode === "entraUser") {
+      const token = await acquireAzureUserToken(
+        { tenantId: snap.tenantId, clientId: snap.clientId },
+        "whisper",
+      );
+      return { ...base, apiKey: token, authMode: "bearer" };
+    }
+
     const scope = getAzureScopeForApiKind("whisper");
-    if (azureAuthMode.value === "entra") {
+    if (snap.authMode === "entra") {
       const token = await getAzureAccessToken(
         {
-          tenantId: azureTenantId.value,
-          clientId: azureClientId.value,
-          clientSecret: azureClientSecret.value,
+          tenantId: snap.tenantId,
+          clientId: snap.clientId,
+          clientSecret: snap.clientSecret,
         },
         scope,
       );
-      return { ...base, apiKey: token, authMode: "entra" };
+      return { ...base, apiKey: token, authMode: "bearer" };
     }
 
-    return { ...base, apiKey: azureApiKey.value, authMode: "key" };
+    return {
+      ...base,
+      apiKey: snap.speechApiKey || snap.apiKey,
+      authMode: "key",
+    };
   }
 
   async function syncHotkeyConfigToRust(key: TriggerKey, mode: TriggerMode) {
@@ -415,11 +832,55 @@ export const useSettingsStore = defineStore("settings", () => {
     }
   }
 
+  async function migrateStoredAzureEndpointSettings(
+    store: Awaited<ReturnType<typeof load>>,
+  ): Promise<void> {
+    const keys = [
+      "azureEndpoint",
+      "azureSpeechEndpoint",
+      "azureResourceName",
+      "azureWhisperResourceName",
+      "azureSpeechResourceName",
+      "azureEndpointOverride",
+      "azureWhisperEndpointOverride",
+      "azureSpeechEndpointOverride",
+      "azureProjectName",
+    ] as const;
+    const entries = await Promise.all(
+      keys.map(async (key) => [key, await store.get(key)] as const),
+    );
+    const current = Object.fromEntries(
+      entries.filter(([, value]) => value !== undefined),
+    ) as Record<string, unknown>;
+    const migrated = migrateLegacyAzureEndpoints(current);
+    if (migrated.legacyKeysToDelete.length === 0) return;
+
+    for (const key of [
+      "azureResourceName",
+      "azureSpeechResourceName",
+      "azureEndpointOverride",
+      "azureSpeechEndpointOverride",
+      "azureProjectName",
+    ]) {
+      if (
+        Object.prototype.hasOwnProperty.call(migrated.settings, key) &&
+        migrated.settings[key] !== current[key]
+      ) {
+        await store.set(key, migrated.settings[key]);
+      }
+    }
+    for (const key of migrated.legacyKeysToDelete) {
+      await store.delete(key);
+    }
+    await store.save();
+  }
+
   async function loadSettings() {
     if (isLoaded) return;
 
     try {
       const store = await load(STORE_NAME);
+      await migrateStoredAzureEndpointSettings(store);
       const savedKey = await store.get<TriggerKey>("hotkeyTriggerKey");
       const savedMode = await store.get<TriggerMode>("hotkeyTriggerMode");
       const savedApiKey = await store.get<string>("groqApiKey");
@@ -534,10 +995,22 @@ export const useSettingsStore = defineStore("settings", () => {
 
       // Azure / Microsoft Foundry
       azureEnabled.value = (await store.get<boolean>("azureEnabled")) ?? false;
-      azureEndpoint.value =
-        (await store.get<string>("azureEndpoint"))?.trim() ?? "";
+      azureResourceName.value =
+        (await store.get<string>("azureResourceName"))?.trim() ?? "";
+      azureWhisperResourceName.value =
+        (await store.get<string>("azureWhisperResourceName"))?.trim() ?? "";
+      azureSpeechResourceName.value =
+        (await store.get<string>("azureSpeechResourceName"))?.trim() ?? "";
+      azureEndpointOverride.value =
+        (await store.get<string>("azureEndpointOverride"))?.trim() ?? "";
+      azureWhisperEndpointOverride.value =
+        (await store.get<string>("azureWhisperEndpointOverride"))?.trim() ?? "";
+      azureSpeechEndpointOverride.value =
+        (await store.get<string>("azureSpeechEndpointOverride"))?.trim() ?? "";
+      azureProjectName.value =
+        (await store.get<string>("azureProjectName"))?.trim() ?? "";
       azureAuthMode.value =
-        (await store.get<"key" | "entra">("azureAuthMode")) ?? "key";
+        toAzureAuthMode(await store.get("azureAuthMode"));
       azureApiKey.value = (await store.get<string>("azureApiKey"))?.trim() ?? "";
       azureTenantId.value =
         (await store.get<string>("azureTenantId"))?.trim() ?? "";
@@ -551,11 +1024,43 @@ export const useSettingsStore = defineStore("settings", () => {
         (await store.get<boolean>("azureOmitTemperature")) ?? false;
       azureChatDeployment.value =
         (await store.get<string>("azureChatDeployment"))?.trim() ?? "";
+      const savedAzureChatModelFamily = await store.get<string>(
+        "azureChatModelFamily",
+      );
+      // 舊版只有 omitTemperature；以它推導相容的 profile，但不在 load 時寫回，
+      // 避免兩個視窗同時啟動時對同一個 store 競寫。
+      azureChatModelFamily.value = getEffectiveAzureChatModelFamilyId(
+        savedAzureChatModelFamily ??
+          (azureOmitTemperature.value
+            ? "azure-openai-reasoning"
+            : "azure-openai"),
+      );
+      azureChatModelFamilySource.value =
+        getEffectiveAzureChatModelFamilySource(
+          await store.get<string>("azureChatModelFamilySource"),
+        );
       azureWhisperDeployment.value =
         (await store.get<string>("azureWhisperDeployment"))?.trim() ?? "";
-      whisperProviderId.value = getEffectiveTranscriptionProviderId(
+      azureSpeechApiKey.value =
+        (await store.get<string>("azureSpeechApiKey"))?.trim() ?? "";
+      maiCandidateLocales.value = normalizeMaiCandidateLocales(
+        await store.get("maiCandidateLocales"),
+      );
+      maiTranscribeStyle.value = getEffectiveMaiTranscribeStyle(
+        await store.get<string>("maiTranscribeStyle"),
+      );
+      const savedWhisperProviderId = getEffectiveTranscriptionProviderId(
         await store.get<string>("whisperProviderId"),
       );
+      whisperProviderId.value =
+        !azureEnabled.value &&
+        (savedWhisperProviderId === "azure" || savedWhisperProviderId === "mai")
+          ? "groq"
+          : savedWhisperProviderId;
+      if (whisperProviderId.value !== savedWhisperProviderId) {
+        await store.set("whisperProviderId", whisperProviderId.value);
+        await store.save();
+      }
       geminiFreeQuotaRequests.value =
         (await store.get<number>("geminiFreeQuotaRequests")) ?? 0;
       geminiFreeQuotaPeriod.value =
@@ -663,9 +1168,12 @@ export const useSettingsStore = defineStore("settings", () => {
       // Sync saved (or default) config to Rust on startup
       await syncHotkeyConfigToRust(key, mode);
       isLoaded = true;
+      settingsLoadState.value = "ready";
       console.log(
         `[useSettingsStore] Settings loaded: key=${JSON.stringify(key)}, mode=${mode}`,
       );
+      // tenant/client 已就緒 → 讀出 entraUser 模式的登入狀態供 UI 與 computed 使用
+      await refreshAzureUserAccount();
     } catch (err) {
       console.error(
         "[useSettingsStore] loadSettings failed:",
@@ -686,6 +1194,10 @@ export const useSettingsStore = defineStore("settings", () => {
       isCopyTranscriptionToClipboardEnabled.value =
         DEFAULT_COPY_TRANSCRIPTION_TO_CLIPBOARD;
       contextInjectionEnabled.value = DEFAULT_CONTEXT_INJECTION_ENABLED;
+      // 載入失敗**不可**視為已載入：此時 reactive 值是預設空值，若解除寫入
+      // 守門，下一次儲存就會用空值覆寫使用者原有的設定。維持 failed，
+      // 由 UI 提示使用者重試（`isLoaded` 保持 false 讓守門繼續生效）。
+      settingsLoadState.value = "failed";
     }
   }
 
@@ -1277,27 +1789,123 @@ export const useSettingsStore = defineStore("settings", () => {
     }
   }
 
+  function normalizeRequiredAzureResourceName(value: string): string {
+    const normalized = normalizeAzureResourceName(value);
+    if (value.trim() !== "" && !isValidAzureResourceName(value)) {
+      throw new Error("INVALID_AZURE_RESOURCE_NAME");
+    }
+    return normalized;
+  }
+
+  function normalizeAzureOverrideInput(value: string): string {
+    const normalized = normalizeAzureEndpointOverride(value);
+    if (value.trim() !== "" && normalized === "") {
+      throw new Error("INVALID_AZURE_ENDPOINT_OVERRIDE");
+    }
+    return normalized;
+  }
+
   async function saveAzureConnection(cfg: {
     enabled: boolean;
-    endpoint: string;
-    authMode: "key" | "entra";
+    resourceName: string;
+    projectName: string;
+    endpointOverride: string;
+    authMode: AzureAuthMode;
     apiKey: string;
     tenantId: string;
     clientId: string;
     clientSecret: string;
     apiVersion: string;
+    transcriptionResources?: {
+      whisperResourceName: string;
+      whisperEndpointOverride: string;
+      speechResourceName: string;
+      speechEndpointOverride: string;
+      apiKey: string;
+    };
   }) {
     try {
+      // 守門：設定尚未載入完成時，輸入欄位還是預設空值，把它們存回去等於把
+      // 使用者的既有設定整批清空。成因是 main-window.ts 先 app.mount() 才
+      // await loadSettings()，View 的 onMounted 可能早於載入完成。
+      // 防線放在資料層而非個別 View，才能一次涵蓋所有呼叫端。
+      if (!isLoaded) {
+        throw new Error("SETTINGS_NOT_LOADED");
+      }
       const store = await load(STORE_NAME);
-      const normalizedEndpoint = normalizeAzureEndpoint(cfg.endpoint);
+      const previousEndpoint = azureEndpoint.value;
+      const previousChatDeployment = azureChatDeployment.value;
+      const resourceName = normalizeRequiredAzureResourceName(cfg.resourceName);
+      const endpointOverride = normalizeAzureOverrideInput(
+        cfg.endpointOverride,
+      );
+      const transcriptionResources = cfg.transcriptionResources
+        ? {
+            whisperResourceName: normalizeRequiredAzureResourceName(
+              cfg.transcriptionResources.whisperResourceName,
+            ),
+            whisperEndpointOverride: normalizeAzureOverrideInput(
+              cfg.transcriptionResources.whisperEndpointOverride,
+            ),
+            speechResourceName: normalizeRequiredAzureResourceName(
+              cfg.transcriptionResources.speechResourceName,
+            ),
+            speechEndpointOverride: normalizeAzureOverrideInput(
+              cfg.transcriptionResources.speechEndpointOverride,
+            ),
+            apiKey: cfg.transcriptionResources.apiKey.trim(),
+          }
+        : undefined;
+      const nextTenantId = cfg.tenantId.trim();
+      const nextClientId = cfg.clientId.trim();
+      // 換掉 tenant/client 等於換一個登入身分：舊的 refresh token 若不清掉會
+      // 長期留在 OS 憑證庫，日後切回舊值還會「自動已登入」。
+      const identityChanged =
+        nextTenantId !== azureTenantId.value ||
+        nextClientId !== azureClientId.value;
+      if (identityChanged && !(await signOutAzureUserSilently())) {
+        // 清除失敗卻仍覆寫 tenant/client，舊憑證就會因為算不出 key 而永久殘留
+        throw new Error("AZURE_CREDENTIAL_CLEANUP_FAILED");
+      }
+      // 換了身分 → 之前那組的「需要重新登入」不再適用
+      if (identityChanged) azureUserReauthRequired.value = false;
       await store.set("azureEnabled", cfg.enabled);
-      await store.set("azureEndpoint", normalizedEndpoint);
+      await store.set("azureResourceName", resourceName);
+      await store.set("azureProjectName", cfg.projectName.trim());
+      await store.set("azureEndpointOverride", endpointOverride);
       await store.set("azureAuthMode", cfg.authMode);
       await store.set("azureApiKey", cfg.apiKey.trim());
-      await store.set("azureTenantId", cfg.tenantId.trim());
-      await store.set("azureClientId", cfg.clientId.trim());
+      await store.set("azureTenantId", nextTenantId);
+      await store.set("azureClientId", nextClientId);
+      // 不因切換驗證模式而清掉 client secret：那是不可逆的破壞，使用者要切回
+      // Secret 模式就得回 Azure Portal 重新產生。備份端已有「排除金鑰」選項
+      // （SENSITIVE_SETTING_KEYS 含 azureClientSecret）處理外流疑慮，
+      // 真的要清除請走「清除連線」，那是使用者明確的意圖。
       await store.set("azureClientSecret", cfg.clientSecret);
       await store.set("azureApiVersion", cfg.apiVersion.trim());
+      if (transcriptionResources) {
+        await store.set(
+          "azureWhisperResourceName",
+          transcriptionResources.whisperResourceName,
+        );
+        await store.set(
+          "azureWhisperEndpointOverride",
+          transcriptionResources.whisperEndpointOverride,
+        );
+        await store.set(
+          "azureSpeechResourceName",
+          transcriptionResources.speechResourceName,
+        );
+        await store.set(
+          "azureSpeechEndpointOverride",
+          transcriptionResources.speechEndpointOverride,
+        );
+        await store.set("azureSpeechApiKey", transcriptionResources.apiKey);
+      }
+      // Once explicitly saved in the new model, old keys must not re-run a
+      // migration and overwrite a subsequent user edit.
+      await store.delete("azureEndpoint");
+      await store.delete("azureSpeechEndpoint");
 
       // 停用 Azure 時，把仍指向 azure 的 provider 切回 groq（避免無 UI 可切換而卡死）
       if (!cfg.enabled) {
@@ -1308,7 +1916,10 @@ export const useSettingsStore = defineStore("settings", () => {
           selectedLlmProviderId.value = "groq";
           selectedLlmModelId.value = groqModel;
         }
-        if (whisperProviderId.value === "azure") {
+        if (
+          whisperProviderId.value === "azure" ||
+          whisperProviderId.value === "mai"
+        ) {
           await store.set("whisperProviderId", "groq");
           whisperProviderId.value = "groq";
         }
@@ -1316,14 +1927,42 @@ export const useSettingsStore = defineStore("settings", () => {
       await store.save();
 
       azureEnabled.value = cfg.enabled;
-      azureEndpoint.value = normalizedEndpoint;
+      azureResourceName.value = resourceName;
+      azureProjectName.value = cfg.projectName.trim();
+      azureEndpointOverride.value = endpointOverride;
       azureAuthMode.value = cfg.authMode;
       azureApiKey.value = cfg.apiKey.trim();
       azureTenantId.value = cfg.tenantId.trim();
       azureClientId.value = cfg.clientId.trim();
       azureClientSecret.value = cfg.clientSecret;
       azureApiVersion.value = cfg.apiVersion.trim();
+      if (transcriptionResources) {
+        azureWhisperResourceName.value =
+          transcriptionResources.whisperResourceName;
+        azureWhisperEndpointOverride.value =
+          transcriptionResources.whisperEndpointOverride;
+        azureSpeechResourceName.value =
+          transcriptionResources.speechResourceName;
+        azureSpeechEndpointOverride.value =
+          transcriptionResources.speechEndpointOverride;
+        azureSpeechApiKey.value = transcriptionResources.apiKey;
+      }
+      if (azureEndpoint.value !== previousEndpoint) {
+        try {
+          await clearAzureTemperatureCapability(
+            previousEndpoint,
+            previousChatDeployment,
+          );
+        } catch (err) {
+          console.warn(
+            "[useSettingsStore] failed to clear Azure temperature capability:",
+            extractErrorMessage(err),
+          );
+        }
+      }
       clearAzureTokenCache();
+      // tenant/client 可能剛剛才變更 → 重新確認這組設定底下的登入狀態
+      await refreshAzureUserAccount();
 
       const payload: SettingsUpdatedPayload = {
         key: "azureConnection",
@@ -1343,10 +1982,33 @@ export const useSettingsStore = defineStore("settings", () => {
 
   async function deleteAzureConnection() {
     try {
+      // 守門同 saveAzureConnection：設定尚未載入完成時，reactive 的
+      // tenant/client 還是空值，signOutAzureUserSilently() 會直接回成功，
+      // 接著就把使用者既有的 endpoint / client secret 全部刪掉，
+      // 而憑證庫裡那筆 refresh token 反而清不掉。
+      if (!isLoaded) {
+        throw new Error("SETTINGS_NOT_LOADED");
+      }
+      // 先清 OS 憑證庫再刪設定：一旦 tenant/client 從 store 消失就再也算不出
+      // 該用哪個 key 去刪，refresh token 會永久殘留在使用者機器上。
+      // 因此清除失敗時**不繼續**刪設定，讓使用者能重試而不是留下清不掉的殘留。
+      if (!(await signOutAzureUserSilently())) {
+        throw new Error("AZURE_CREDENTIAL_CLEANUP_FAILED");
+      }
+
       const store = await load(STORE_NAME);
+      const previousEndpoint = azureEndpoint.value;
+      const previousChatDeployment = azureChatDeployment.value;
       const keys = [
         "azureEnabled",
+        "azureResourceName",
+        "azureWhisperResourceName",
+        "azureSpeechResourceName",
+        "azureEndpointOverride",
+        "azureWhisperEndpointOverride",
+        "azureSpeechEndpointOverride",
         "azureEndpoint",
+        "azureProjectName",
         "azureAuthMode",
         "azureApiKey",
         "azureTenantId",
@@ -1354,6 +2016,10 @@ export const useSettingsStore = defineStore("settings", () => {
         "azureClientSecret",
         "azureApiVersion",
         "azureOmitTemperature",
+        "azureSpeechEndpoint",
+        "azureSpeechApiKey",
+        "maiCandidateLocales",
+        "maiTranscribeStyle",
       ];
       for (const k of keys) {
         await store.delete(k);
@@ -1367,14 +2033,34 @@ export const useSettingsStore = defineStore("settings", () => {
         selectedLlmProviderId.value = "groq";
         selectedLlmModelId.value = groqModel;
       }
-      if (whisperProviderId.value === "azure") {
+      if (
+        whisperProviderId.value === "azure" ||
+        whisperProviderId.value === "mai"
+      ) {
         await store.set("whisperProviderId", "groq");
         whisperProviderId.value = "groq";
       }
       await store.save();
 
       azureEnabled.value = false;
-      azureEndpoint.value = "";
+      azureResourceName.value = "";
+      azureWhisperResourceName.value = "";
+      azureSpeechResourceName.value = "";
+      azureEndpointOverride.value = "";
+      azureWhisperEndpointOverride.value = "";
+      azureSpeechEndpointOverride.value = "";
+      try {
+        await clearAzureTemperatureCapability(
+          previousEndpoint,
+          previousChatDeployment,
+        );
+      } catch (err) {
+        console.warn(
+          "[useSettingsStore] failed to clear Azure temperature capability:",
+          extractErrorMessage(err),
+        );
+      }
+      azureProjectName.value = "";
       azureAuthMode.value = "key";
       azureApiKey.value = "";
       azureTenantId.value = "";
@@ -1382,7 +2068,13 @@ export const useSettingsStore = defineStore("settings", () => {
       azureClientSecret.value = "";
       azureApiVersion.value = "";
       azureOmitTemperature.value = false;
+      azureSpeechApiKey.value = "";
+      maiCandidateLocales.value = [];
+      maiTranscribeStyle.value = "default";
       clearAzureTokenCache();
+      azureUserAccount.value = null;
+      azureUserReauthRequired.value = false;
+      await emitAzureAuthStateChanged();
 
       const payload: SettingsUpdatedPayload = {
         key: "azureConnection",
@@ -1399,20 +2091,197 @@ export const useSettingsStore = defineStore("settings", () => {
     }
   }
 
+  // ── Entra 使用者委派登入 ──────────────────────────────────
+  //
+  // token 的真實來源在 Rust（記憶體快取 + OS 憑證庫）。這裡只維護一份給
+  // UI 與 computed 用的帳號快照，並負責跨視窗同步。
+
+  async function emitAzureAuthStateChanged() {
+    const account = azureUserAccount.value;
+    const payload: AzureAuthStateChangedPayload = {
+      signedIn: account !== null,
+      username: account?.username ?? null,
+      accountKey: account
+        ? `${account.tenantId}::${account.clientId}`
+        : null,
+    };
+    await emitEvent(AZURE_AUTH_STATE_CHANGED, payload);
+  }
+
+  /**
+   * 只清掉本視窗的帳號快照，不動憑證庫。
+   * 用於接收「已登出／登入失效」的跨視窗通知：此時憑證可能仍在
+   * （需要重新互動而已），回頭重讀只會把畫面又變回「已登入」。
+   */
+  function clearAzureUserAccountSnapshot() {
+    azureUserAccount.value = null;
+    azureUserReauthRequired.value = true;
+  }
+
+  /** 換了身分／重新登入時呼叫：讓下一次重讀能正常反映憑證庫。 */
+  function clearAzureUserReauthFlag() {
+    azureUserReauthRequired.value = false;
+  }
+
+  /**
+   * 依目前的 tenant/client 重讀登入狀態。憑證庫不可用時視為未登入，不中斷流程。
+   *
+   * 已知需要重新互動時直接跳過：憑證確實還在，重讀會把畫面翻回「已登入」，
+   * 但實際每次使用都失敗（見 azureUserReauthRequired 的說明）。
+   */
+  async function refreshAzureUserAccount() {
+    if (azureUserReauthRequired.value) return;
+    try {
+      azureUserAccount.value = await getAzureUserAccount({
+        tenantId: azureTenantId.value,
+        clientId: azureClientId.value,
+      });
+    } catch (err) {
+      console.warn(
+        "[useSettingsStore] failed to read Azure user account:",
+        extractErrorMessage(err),
+      );
+      azureUserAccount.value = null;
+    }
+  }
+
+  /** 目前進行中的登入。帶 operationId 才不會取消到下一次登入。 */
+  let pendingSignInOperationId: string | null = null;
+
+  /**
+   * 互動登入。刻意做成單一原子操作：設定頁的輸入框在按下登入前尚未寫入 store，
+   * 若先登入再儲存，Rust 會拿到舊的（或空的）tenant/client。
+   */
+  async function signInAzureUserAccount(credentials: {
+    tenantId: string;
+    clientId: string;
+  }): Promise<AzureUserAccount> {
+    const tenantId = credentials.tenantId.trim();
+    const clientId = credentials.clientId.trim();
+    if (tenantId === "" || clientId === "") {
+      throw new Error("Entra credentials incomplete");
+    }
+
+    // 這個函式自己會覆寫 tenant/client，因此也必須自己負責舊身分的清理——
+    // 不能倚賴「呼叫端一定先做過 saveAzureConnection」。目前唯一的呼叫端
+    // 確實有做（於是這裡通常是 no-op），但只要有人新增第二個入口而未先存，
+    // 舊身分的 refresh token 就會因為算不出 key 而變成永久孤兒。
+    const identityChanged =
+      tenantId !== azureTenantId.value || clientId !== azureClientId.value;
+    if (identityChanged && !(await signOutAzureUserSilently())) {
+      throw new Error("AZURE_CREDENTIAL_CLEANUP_FAILED");
+    }
+
+    // 先落地設定，Rust 與後續 computed 才會用到同一組值
+    azureTenantId.value = tenantId;
+    azureClientId.value = clientId;
+    const store = await load(STORE_NAME);
+    await store.set("azureTenantId", tenantId);
+    await store.set("azureClientId", clientId);
+    await store.save();
+
+    const operationId = newSignInOperationId();
+    pendingSignInOperationId = operationId;
+    try {
+      const account = await signInAzureUser({ tenantId, clientId }, operationId);
+      azureUserAccount.value = account;
+      azureUserReauthRequired.value = false;
+      clearAzureTokenCache();
+      await emitAzureAuthStateChanged();
+      return account;
+    } finally {
+      if (pendingSignInOperationId === operationId) {
+        pendingSignInOperationId = null;
+      }
+    }
+  }
+
+  async function cancelAzureUserSignInFlow() {
+    if (!pendingSignInOperationId) return;
+    await cancelAzureUserSignIn(pendingSignInOperationId);
+  }
+
+  /**
+   * 內部用：清掉憑證庫但不動設定。
+   * 回傳是否成功——呼叫端若接著要刪掉 tenant/client，必須先確認這裡成功，
+   * 否則殘留的 refresh token 會因為算不出 key 而永遠清不掉。
+   *
+   * **會先取消進行中的登入**：否則使用者在瀏覽器登入的期間按了清除/儲存/匯入，
+   * 稍後回來的 callback 仍會把 refresh token 寫回憑證庫，而此時 locator 已被
+   * 覆寫或刪除，那筆憑證就再也對應不到、也清不掉。
+   */
+  async function signOutAzureUserSilently(): Promise<boolean> {
+    await cancelAzureUserSignInFlow();
+    if (azureTenantId.value === "" || azureClientId.value === "") return true;
+    try {
+      await signOutAzureUser({
+        tenantId: azureTenantId.value,
+        clientId: azureClientId.value,
+      });
+      return true;
+    } catch (err) {
+      console.warn(
+        "[useSettingsStore] Azure sign-out failed:",
+        extractErrorMessage(err),
+      );
+      return false;
+    }
+  }
+
+  async function signOutAzureUserAccount() {
+    // 先取消進行中的登入，否則稍後回來的 callback 會把使用者無聲地重新登入
+    await cancelAzureUserSignInFlow();
+    await signOutAzureUser({
+      tenantId: azureTenantId.value,
+      clientId: azureClientId.value,
+    });
+    azureUserAccount.value = null;
+    azureUserReauthRequired.value = false;
+    clearAzureTokenCache();
+    await emitAzureAuthStateChanged();
+  }
+
   async function saveAzureChatDeployment(name: string) {
     try {
+      const normalizedName = name.trim();
       const store = await load(STORE_NAME);
-      await store.set("azureChatDeployment", name.trim());
+      await store.set("azureChatDeployment", normalizedName);
+      // 手動輸入沒有 Foundry metadata 可供驗證，不能繼續宣稱目前 profile
+      // 來自上一個部署的自動判定。
+      await store.set("azureChatModelFamilySource", "manual");
       await store.save();
-      azureChatDeployment.value = name.trim();
+      azureChatDeployment.value = normalizedName;
+      azureChatModelFamilySource.value = "manual";
       const payload: SettingsUpdatedPayload = {
         key: "azureChatDeployment",
-        value: name.trim(),
+        value: normalizedName,
       };
       await emitEvent(SETTINGS_UPDATED, payload);
     } catch (err) {
       console.error(
         "[useSettingsStore] saveAzureChatDeployment failed:",
+        extractErrorMessage(err),
+      );
+      throw err;
+    }
+  }
+
+  async function saveAzureChatModelFamily(id: AzureChatModelFamilyId) {
+    try {
+      const effectiveId = getEffectiveAzureChatModelFamilyId(id);
+      const store = await load(STORE_NAME);
+      await store.set("azureChatModelFamily", effectiveId);
+      await store.set("azureChatModelFamilySource", "manual");
+      await store.save();
+      azureChatModelFamily.value = effectiveId;
+      azureChatModelFamilySource.value = "manual";
+      await emitEvent(SETTINGS_UPDATED, {
+        key: "azureChatModelFamily",
+        value: effectiveId,
+      });
+    } catch (err) {
+      console.error(
+        "[useSettingsStore] saveAzureChatModelFamily failed:",
         extractErrorMessage(err),
       );
       throw err;
@@ -1433,6 +2302,99 @@ export const useSettingsStore = defineStore("settings", () => {
     } catch (err) {
       console.error(
         "[useSettingsStore] saveAzureWhisperDeployment failed:",
+        extractErrorMessage(err),
+      );
+      throw err;
+    }
+  }
+
+  async function saveAzureTranscriptionResources(cfg: {
+    whisperResourceName: string;
+    whisperEndpointOverride: string;
+    speechResourceName: string;
+    speechEndpointOverride: string;
+    apiKey: string;
+  }) {
+    try {
+      if (!isLoaded) {
+        throw new Error("SETTINGS_NOT_LOADED");
+      }
+      const store = await load(STORE_NAME);
+      const whisperResourceName = normalizeRequiredAzureResourceName(
+        cfg.whisperResourceName,
+      );
+      const speechResourceName = normalizeRequiredAzureResourceName(
+        cfg.speechResourceName,
+      );
+      const whisperEndpointOverride = normalizeAzureOverrideInput(
+        cfg.whisperEndpointOverride,
+      );
+      const speechEndpointOverride = normalizeAzureOverrideInput(
+        cfg.speechEndpointOverride,
+      );
+      await store.set("azureWhisperResourceName", whisperResourceName);
+      await store.set("azureWhisperEndpointOverride", whisperEndpointOverride);
+      await store.set("azureSpeechResourceName", speechResourceName);
+      await store.set("azureSpeechEndpointOverride", speechEndpointOverride);
+      await store.set("azureSpeechApiKey", cfg.apiKey.trim());
+      await store.delete("azureSpeechEndpoint");
+      await store.save();
+      azureWhisperResourceName.value = whisperResourceName;
+      azureWhisperEndpointOverride.value = whisperEndpointOverride;
+      azureSpeechResourceName.value = speechResourceName;
+      azureSpeechEndpointOverride.value = speechEndpointOverride;
+      azureSpeechApiKey.value = cfg.apiKey.trim();
+      const payload: SettingsUpdatedPayload = {
+        key: "azureTranscriptionResources",
+        value: {
+          whisperResourceName,
+          speechResourceName,
+        },
+      };
+      await emitEvent(SETTINGS_UPDATED, payload);
+    } catch (err) {
+      console.error(
+        "[useSettingsStore] saveAzureTranscriptionResources failed:",
+        extractErrorMessage(err),
+      );
+      throw err;
+    }
+  }
+
+  async function saveMaiCandidateLocales(locales: MaiCandidateLocale[]) {
+    try {
+      const normalized = normalizeMaiCandidateLocales(locales);
+      const store = await load(STORE_NAME);
+      await store.set("maiCandidateLocales", normalized);
+      await store.save();
+      maiCandidateLocales.value = normalized;
+      await emitEvent(SETTINGS_UPDATED, {
+        key: "maiCandidateLocales",
+        value: normalized,
+      });
+    } catch (err) {
+      console.error(
+        "[useSettingsStore] saveMaiCandidateLocales failed:",
+        extractErrorMessage(err),
+      );
+      throw err;
+    }
+  }
+
+  async function saveMaiTranscribeStyle(style: MaiTranscribeStyle) {
+    try {
+      const normalized = getEffectiveMaiTranscribeStyle(style);
+      const store = await load(STORE_NAME);
+      await store.set("maiTranscribeStyle", normalized);
+      await store.save();
+      maiTranscribeStyle.value = normalized;
+      await emitEvent(SETTINGS_UPDATED, {
+        key: "maiTranscribeStyle",
+        value: normalized,
+      });
+    } catch (err) {
+      console.error(
+        "[useSettingsStore] saveMaiTranscribeStyle failed:",
         extractErrorMessage(err),
       );
       throw err;
@@ -1464,13 +2426,15 @@ export const useSettingsStore = defineStore("settings", () => {
 
   async function saveWhisperProvider(id: TranscriptionProviderId) {
     try {
+      const effectiveId =
+        !azureEnabled.value && (id === "azure" || id === "mai") ? "groq" : id;
       const store = await load(STORE_NAME);
-      await store.set("whisperProviderId", id);
+      await store.set("whisperProviderId", effectiveId);
       await store.save();
-      whisperProviderId.value = id;
+      whisperProviderId.value = effectiveId;
       const payload: SettingsUpdatedPayload = {
         key: "whisperProvider",
-        value: id,
+        value: effectiveId,
       };
       await emitEvent(SETTINGS_UPDATED, payload);
     } catch (err) {
@@ -1507,10 +2471,25 @@ export const useSettingsStore = defineStore("settings", () => {
           break;
         }
         case "azure": {
-          azureEndpoint.value =
-            (await store.get<string>("azureEndpoint"))?.trim() ?? "";
+          azureResourceName.value =
+            (await store.get<string>("azureResourceName"))?.trim() ?? "";
+          azureWhisperResourceName.value =
+            (await store.get<string>("azureWhisperResourceName"))?.trim() ??
+            "";
+          azureSpeechResourceName.value =
+            (await store.get<string>("azureSpeechResourceName"))?.trim() ?? "";
+          azureEndpointOverride.value =
+            (await store.get<string>("azureEndpointOverride"))?.trim() ?? "";
+          azureWhisperEndpointOverride.value =
+            (await store.get<string>("azureWhisperEndpointOverride"))?.trim() ??
+            "";
+          azureSpeechEndpointOverride.value =
+            (await store.get<string>("azureSpeechEndpointOverride"))?.trim() ??
+            "";
+          azureProjectName.value =
+            (await store.get<string>("azureProjectName"))?.trim() ?? "";
           azureAuthMode.value =
-            (await store.get<"key" | "entra">("azureAuthMode")) ?? "key";
+            toAzureAuthMode(await store.get("azureAuthMode"));
           azureApiKey.value =
             (await store.get<string>("azureApiKey"))?.trim() ?? "";
           azureTenantId.value =
@@ -1525,6 +2504,16 @@ export const useSettingsStore = defineStore("settings", () => {
             (await store.get<boolean>("azureOmitTemperature")) ?? false;
           azureChatDeployment.value =
             (await store.get<string>("azureChatDeployment"))?.trim() ?? "";
+          azureChatModelFamily.value = getEffectiveAzureChatModelFamilyId(
+            (await store.get<string>("azureChatModelFamily")) ??
+              (azureOmitTemperature.value
+                ? "azure-openai-reasoning"
+                : "azure-openai"),
+          );
+          azureChatModelFamilySource.value =
+            getEffectiveAzureChatModelFamilySource(
+              await store.get<string>("azureChatModelFamilySource"),
+            );
           break;
         }
       }
@@ -2080,29 +3069,97 @@ export const useSettingsStore = defineStore("settings", () => {
         DEFAULT_COPY_TRANSCRIPTION_TO_CLIPBOARD;
 
       // Azure / Microsoft Foundry（跨視窗同步）
-      azureEnabled.value = (await store.get<boolean>("azureEnabled")) ?? false;
-      azureEndpoint.value =
-        (await store.get<string>("azureEndpoint"))?.trim() ?? "";
-      azureAuthMode.value =
-        (await store.get<"key" | "entra">("azureAuthMode")) ?? "key";
-      azureApiKey.value = (await store.get<string>("azureApiKey"))?.trim() ?? "";
-      azureTenantId.value =
-        (await store.get<string>("azureTenantId"))?.trim() ?? "";
-      azureClientId.value =
-        (await store.get<string>("azureClientId"))?.trim() ?? "";
-      azureClientSecret.value =
-        (await store.get<string>("azureClientSecret")) ?? "";
-      azureApiVersion.value =
-        (await store.get<string>("azureApiVersion"))?.trim() ?? "";
-      azureOmitTemperature.value =
+      //
+      // 這一段刻意「先讀完，再一次套用」：語音流程可能在任何一個 await 之間
+      // 呼叫 snapshotAzureConfig()，若邊讀邊寫 ref，就會取到新 endpoint 配
+      // 舊 authMode／舊 tenant 的混合設定，把內容送到非預期的 Azure 資源。
+      // 下面的賦值區塊沒有 await，對其他協程而言是不可分割的。
+      const nextAzureOmitTemperature =
         (await store.get<boolean>("azureOmitTemperature")) ?? false;
-      azureChatDeployment.value =
-        (await store.get<string>("azureChatDeployment"))?.trim() ?? "";
-      azureWhisperDeployment.value =
-        (await store.get<string>("azureWhisperDeployment"))?.trim() ?? "";
-      whisperProviderId.value = getEffectiveTranscriptionProviderId(
-        await store.get<string>("whisperProviderId"),
+      const savedCrossWindowAzureChatModelFamily = await store.get<string>(
+        "azureChatModelFamily",
       );
+      const savedCrossWindowAzureChatModelFamilySource = await store.get<string>(
+        "azureChatModelFamilySource",
+      );
+      const nextAzure = {
+        enabled: (await store.get<boolean>("azureEnabled")) ?? false,
+        resourceName:
+          (await store.get<string>("azureResourceName"))?.trim() ?? "",
+        whisperResourceName:
+          (await store.get<string>("azureWhisperResourceName"))?.trim() ?? "",
+        speechResourceName:
+          (await store.get<string>("azureSpeechResourceName"))?.trim() ?? "",
+        endpointOverride:
+          (await store.get<string>("azureEndpointOverride"))?.trim() ?? "",
+        whisperEndpointOverride:
+          (await store.get<string>("azureWhisperEndpointOverride"))?.trim() ??
+          "",
+        speechEndpointOverride:
+          (await store.get<string>("azureSpeechEndpointOverride"))?.trim() ??
+          "",
+        projectName:
+          (await store.get<string>("azureProjectName"))?.trim() ?? "",
+        authMode: toAzureAuthMode(await store.get("azureAuthMode")),
+        apiKey: (await store.get<string>("azureApiKey"))?.trim() ?? "",
+        tenantId: (await store.get<string>("azureTenantId"))?.trim() ?? "",
+        clientId: (await store.get<string>("azureClientId"))?.trim() ?? "",
+        clientSecret: (await store.get<string>("azureClientSecret")) ?? "",
+        apiVersion: (await store.get<string>("azureApiVersion"))?.trim() ?? "",
+        omitTemperature: nextAzureOmitTemperature,
+        chatDeployment:
+          (await store.get<string>("azureChatDeployment"))?.trim() ?? "",
+        chatModelFamily: getEffectiveAzureChatModelFamilyId(
+          savedCrossWindowAzureChatModelFamily ??
+            (nextAzureOmitTemperature
+              ? "azure-openai-reasoning"
+              : "azure-openai"),
+        ),
+        chatModelFamilySource: getEffectiveAzureChatModelFamilySource(
+          savedCrossWindowAzureChatModelFamilySource,
+        ),
+        whisperDeployment:
+          (await store.get<string>("azureWhisperDeployment"))?.trim() ?? "",
+        speechApiKey:
+          (await store.get<string>("azureSpeechApiKey"))?.trim() ?? "",
+        maiCandidateLocales: normalizeMaiCandidateLocales(
+          await store.get("maiCandidateLocales"),
+        ),
+        maiTranscribeStyle: getEffectiveMaiTranscribeStyle(
+          await store.get<string>("maiTranscribeStyle"),
+        ),
+        whisperProvider: getEffectiveTranscriptionProviderId(
+          await store.get<string>("whisperProviderId"),
+        ),
+      };
+      azureEnabled.value = nextAzure.enabled;
+      azureResourceName.value = nextAzure.resourceName;
+      azureWhisperResourceName.value = nextAzure.whisperResourceName;
+      azureSpeechResourceName.value = nextAzure.speechResourceName;
+      azureEndpointOverride.value = nextAzure.endpointOverride;
+      azureWhisperEndpointOverride.value = nextAzure.whisperEndpointOverride;
+      azureSpeechEndpointOverride.value = nextAzure.speechEndpointOverride;
+      azureProjectName.value = nextAzure.projectName;
+      azureAuthMode.value = nextAzure.authMode;
+      azureApiKey.value = nextAzure.apiKey;
+      azureTenantId.value = nextAzure.tenantId;
+      azureClientId.value = nextAzure.clientId;
+      azureClientSecret.value = nextAzure.clientSecret;
+      azureApiVersion.value = nextAzure.apiVersion;
+      azureOmitTemperature.value = nextAzure.omitTemperature;
+      azureChatDeployment.value = nextAzure.chatDeployment;
+      azureChatModelFamily.value = nextAzure.chatModelFamily;
+      azureChatModelFamilySource.value = nextAzure.chatModelFamilySource;
+      azureWhisperDeployment.value = nextAzure.whisperDeployment;
+      azureSpeechApiKey.value = nextAzure.speechApiKey;
+      maiCandidateLocales.value = nextAzure.maiCandidateLocales;
+      maiTranscribeStyle.value = nextAzure.maiTranscribeStyle;
+      whisperProviderId.value =
+        !nextAzure.enabled &&
+        (nextAzure.whisperProvider === "azure" ||
+          nextAzure.whisperProvider === "mai")
+          ? "groq"
+          : nextAzure.whisperProvider;
       geminiFreeQuotaRequests.value =
         (await store.get<number>("geminiFreeQuotaRequests")) ?? 0;
       geminiFreeQuotaPeriod.value =
@@ -2111,6 +3168,8 @@ export const useSettingsStore = defineStore("settings", () => {
       geminiTranscriptionModelId.value = getEffectiveGeminiTranscriptionModelId(
         await store.get<string>("geminiTranscriptionModelId"),
       );
+      // 兜底：即使漏收 AZURE_AUTH_STATE_CHANGED，跨視窗設定刷新時也會同步登入狀態
+      await refreshAzureUserAccount();
     } catch (err) {
       console.error(
         "[useSettingsStore] refreshCrossWindowSettings failed:",
@@ -2193,7 +3252,8 @@ export const useSettingsStore = defineStore("settings", () => {
     }
     if (
       stripped.whisperProviderId === "azure" ||
-      stripped.whisperProviderId === "gemini"
+      stripped.whisperProviderId === "gemini" ||
+      stripped.whisperProviderId === "mai"
     ) {
       stripped.whisperProviderId = "groq";
     }
@@ -2216,17 +3276,107 @@ export const useSettingsStore = defineStore("settings", () => {
    * 4) emit 單一 SETTINGS_UPDATED 通知其他視窗。
    */
   async function importSettings(settings: SettingsPayload): Promise<void> {
+    // 守門同 saveAzureConnection：載入未完成時 reactive 的 tenant/client 是
+    // 空值，identityChanged 會誤判、登出也會直接回成功，舊憑證因此變孤兒。
+    if (!isLoaded) {
+      throw new Error("SETTINGS_NOT_LOADED");
+    }
     const store = await load(STORE_NAME);
+    const migratedSettings = migrateLegacyAzureEndpoints(settings).settings;
     let autoStartDesired: boolean | null = null;
 
-    for (const [key, value] of Object.entries(settings)) {
+    // 匯入會直接覆寫 tenant/client。若不先登出舊身分，舊帳號的 refresh token
+    // 會留在 OS 憑證庫，而覆寫後再也算不出它的 key —— 永久孤兒。
+    // （`saveAzureConnection` 的 identityChanged 分支有做，匯入路徑先前漏了。）
+    const incomingTenant = migratedSettings["azureTenantId"];
+    const incomingClient = migratedSettings["azureClientId"];
+    const identityChanged =
+      (typeof incomingTenant === "string" &&
+        incomingTenant.trim() !== azureTenantId.value) ||
+      (typeof incomingClient === "string" &&
+        incomingClient.trim() !== azureClientId.value);
+    if (identityChanged && !(await signOutAzureUserSilently())) {
+      // 同 saveAzureConnection：清不掉就不可覆寫 locator，否則永久孤兒
+      throw new Error("AZURE_CREDENTIAL_CLEANUP_FAILED");
+    }
+    // 匯入等於換一組設定 → 舊的「需要重新登入」標記不再適用
+    azureUserReauthRequired.value = false;
+
+    const importedAzureChatDeployment =
+      migratedSettings["azureChatDeployment"];
+    const importedAzureChatModelFamily =
+      migratedSettings["azureChatModelFamily"];
+    let importedAzureChatModelFamilyDefaulted = false;
+    if (
+      typeof importedAzureChatDeployment === "string" &&
+      importedAzureChatDeployment.trim() !== "" &&
+      !isAzureChatModelFamilyId(importedAzureChatModelFamily)
+    ) {
+      // 舊備份沒有 family 時不可沿用本機既有值，否則新的 deployment 會套錯
+      // profile。仍以備份內既有 omitTemperature 維持舊版的參數行為。
+      const importedOmitTemperature =
+        migratedSettings["azureOmitTemperature"] === true;
+      await store.set(
+        "azureChatModelFamily",
+        importedOmitTemperature
+          ? "azure-openai-reasoning"
+          : DEFAULT_AZURE_CHAT_MODEL_FAMILY_ID,
+      );
+      importedAzureChatModelFamilyDefaulted = true;
+    }
+
+    for (const [key, value] of Object.entries(migratedSettings)) {
       if (key === AUTO_START_KEY) {
         if (typeof value === "boolean") autoStartDesired = value;
         continue;
       }
       // 防禦：忽略白名單外的未知 key（含內部 migration 旗標）
       if (!EXPORTABLE_KEY_SET.has(key)) continue;
+      if (
+        key === "azureResourceName" ||
+        key === "azureWhisperResourceName" ||
+        key === "azureSpeechResourceName"
+      ) {
+        if (typeof value !== "string") {
+          continue;
+        }
+        if (value.trim() === "") {
+          await store.set(key as ExportableSettingKey, "");
+          continue;
+        }
+        if (!isValidAzureResourceName(value)) {
+          continue;
+        }
+        await store.set(
+          key as ExportableSettingKey,
+          normalizeAzureResourceName(value),
+        );
+        continue;
+      }
+      if (
+        key === "azureEndpointOverride" ||
+        key === "azureWhisperEndpointOverride" ||
+        key === "azureSpeechEndpointOverride"
+      ) {
+        if (typeof value !== "string") continue;
+        const endpoint = normalizeAzureEndpointOverride(value);
+        if (value.trim() !== "" && endpoint === "") continue;
+        await store.set(key as ExportableSettingKey, endpoint);
+        continue;
+      }
       await store.set(key as ExportableSettingKey, value);
+    }
+    if (importedAzureChatModelFamilyDefaulted) {
+      // 舊備份的 deployment 沒有可信 family，不能保留目標機器原本的 auto
+      // 標記，也不能採信備份中與無效 family 搭配的來源欄位。
+      await store.set("azureChatModelFamilySource", "manual");
+    }
+    if (
+      migratedSettings["azureEnabled"] === false &&
+      (migratedSettings["whisperProviderId"] === "azure" ||
+        migratedSettings["whisperProviderId"] === "mai")
+    ) {
+      await store.set("whisperProviderId", "groq");
     }
     await store.save();
 
@@ -2241,6 +3391,9 @@ export const useSettingsStore = defineStore("settings", () => {
       );
     }
     clearAzureTokenCache();
+    // 匯入的備份不含 refresh token（在 OS 憑證庫），需重新確認登入狀態；
+    // 換機匯入時這裡會是未登入，UI 應顯示「需要重新登入」而非已連線。
+    await refreshAzureUserAccount();
     if (autoStartDesired !== null) {
       await applyAutoStartImported(autoStartDesired);
     }
@@ -2310,6 +3463,14 @@ export const useSettingsStore = defineStore("settings", () => {
     deleteGeminiApiKey,
     azureEnabled,
     azureEndpoint,
+    azureWhisperEndpoint,
+    azureResourceName,
+    azureWhisperResourceName,
+    azureSpeechResourceName,
+    azureEndpointOverride,
+    azureWhisperEndpointOverride,
+    azureSpeechEndpointOverride,
+    azureProjectName,
     azureAuthMode,
     azureApiKey: computed(() => azureApiKey.value),
     azureTenantId,
@@ -2318,17 +3479,43 @@ export const useSettingsStore = defineStore("settings", () => {
     azureApiVersion,
     azureOmitTemperature,
     azureChatDeployment,
+    azureChatModelFamily,
+    azureChatModelFamilySource,
     azureWhisperDeployment,
+    azureSpeechEndpoint,
+    azureSpeechApiKey: computed(() => azureSpeechApiKey.value),
+    effectiveTranscriptionApiKey,
+    azureUserAccount: computed(() => azureUserAccount.value),
+    isSettingsLoaded,
+    settingsLoadFailed,
+    isAzureUserSignedIn,
+    matchesSignedInAccount,
+    hasAzureCredentials,
+    signInAzureUserAccount,
+    signOutAzureUserAccount,
+    cancelAzureUserSignInFlow,
+    refreshAzureUserAccount,
+    clearAzureUserAccountSnapshot,
+    clearAzureUserReauthFlag,
+    azureUserReauthRequired,
     whisperProviderId,
     geminiTranscriptionModelId,
     saveGeminiTranscriptionModel,
     geminiFreeQuotaRequests,
     geminiFreeQuotaPeriod,
     saveGeminiFreeQuota,
+    maiCandidateLocales,
+    maiTranscribeStyle,
     saveAzureConnection,
     deleteAzureConnection,
+    listAzureChatDeployments,
     saveAzureChatDeployment,
+    saveAzureChatModelFamily,
+    saveAzureChatDeploymentSelection,
     saveAzureWhisperDeployment,
+    saveAzureTranscriptionResources,
+    saveMaiCandidateLocales,
+    saveMaiTranscribeStyle,
     saveAzureOmitTemperature,
     saveWhisperProvider,
     refreshLlmApiKey,

@@ -18,7 +18,7 @@ date: 2026-03-02
 - Teal 品牌主題未套用 — 需執行 `pnpm dlx shadcn-vue@latest init --theme teal` 覆寫 CSS 變數
 - Dark mode 未啟用 — `main-window.html` 和 `index.html` 的 `<html>` 標籤需加上 `class="dark"`
 - `src/components/ui/` 目錄不存在 — 尚未安裝任何 shadcn-vue 元件
-- `--destructive-foreground` 和狀態色（success/warning/info）CSS 變數未定義
+- `--destructive-foreground` 與狀態色（warning/info）CSS 變數未定義；`--success` 已於操作回饋元件落地
 
 **現有程式碼的違規項目：**
 
@@ -145,8 +145,8 @@ const props = defineProps<{ fullWidth?: boolean }>()
 在 `src/style.css` 中新增以下自訂語意色彩變數，用於業務狀態指示：
 
 ```css
-/* 在 :root 中加入 */
---success: oklch(0.59 0.145 163.225);
+/* 在 :root 中加入（白底小字對比 5.5:1，符合 WCAG AA） */
+--success: oklch(0.508 0.118 165.612);
 --success-foreground: oklch(0.985 0 0);
 --warning: oklch(0.75 0.183 55.934);
 --warning-foreground: oklch(0.205 0 0);
@@ -302,26 +302,47 @@ npx shadcn-vue@latest add input
 </Card>
 ```
 
-### 操作回饋：Toast
+### 操作回饋：Inline 就近回饋
 
-所有使用者操作的成功/失敗回饋統一使用 `Sonner`（shadcn-vue 推薦的 Toast 方案）：
-
-```bash
-npx shadcn-vue@latest add sonner
-```
+設定頁有多個彼此獨立的儲存動作，使用者必須能立即辨識「哪一項」已完成；因此成功／失敗回饋一律使用 `useFeedbackMessage` 搭配 `InlineFeedback`，**不使用 Toast**。這也避免在 960×680 的 Dashboard 視窗以浮層遮住正在操作的設定。
 
 ```vue
 <script setup lang="ts">
-import { toast } from 'vue-sonner'
+import { Button } from "@/components/ui/button"
+import { useFeedbackMessage } from "@/composables/useFeedbackMessage"
+import SettingsActionRow from "@/components/SettingsActionRow.vue"
 
-function handleSave() {
-  // ...
-  toast.success('API Key 已儲存')
+const feedback = useFeedbackMessage()
+
+async function handleSave() {
+  try {
+    // ...
+    feedback.show("success", "API Key 已儲存")
+  } catch (error) {
+    feedback.show("error", String(error))
+  }
 }
 </script>
+
+<template>
+  <SettingsActionRow :feedback="feedback.state.value">
+    <Button @click="handleSave">儲存</Button>
+  </SettingsActionRow>
+</template>
 ```
 
-使用場景：儲存設定、複製文字、刪除詞彙、API Key 操作。不再使用內嵌 `feedbackMessage` 模式。
+**穩定錨點（最高優先規則）**：回饋必須渲染在不會被觸發操作自身移除、卸載或替換的位置。不得把它放在該操作會改變的 `v-if`、`v-for` 或 Dialog 內；例如停用 Azure 的結果要放在 Card Header，而不是會卸載的 Card Content；刪除表格列的結果要放在表格區段標題，而不是該列。
+
+| 情境 | 必用元件／位置 | 原因 |
+|------|----------------|------|
+| 獨立儲存／刪除按鈕列 | `SettingsActionRow` | Grid 的按鈕欄固定在 `auto` 欄，訊息長短不會移動按鈕左上角。 |
+| Label + Input + 儲存鈕 | `SettingsActionRow align="start"` 或 Label 行的 `InlineFeedback` | 訊息在控制項附近，不推移按鈕。 |
+| Switch / Select 自動儲存 | `SettingsControlRow` | 回饋附在 Label 行，右側控制項保持位置。 |
+| 表格列刪除／條件式內容 | 最近的穩定區段標題 | 列或條件區塊消失後，結果仍可見。 |
+
+- 成功訊息顯示 2500ms；錯誤訊息顯示 6000ms。AADSTS 等可供使用者交給 IT 的診斷訊息可設為 persistent。
+- `InlineFeedback` 必須保留常駐的 `role="status"`、`aria-live="polite"` 與 `aria-atomic="true"` live region；只有真正緊急的訊息才可 opt-in `assertive`。
+- 長訊息必須使用 `overflow-wrap:anywhere`。允許訊息列增加高度，但按鈕以 Grid `items-start` 保持位置。
 
 ### 載入狀態：Skeleton
 
@@ -549,6 +570,9 @@ src/components/
 | 裸 `<input>`/`<button>` HTML 元素 | shadcn `<Input />`、`<Button />` |
 | `<style scoped>` 定義色彩或背景 | Tailwind utility class + 語意變數 |
 | 直接在元件中 hardcode Tailwind 色彩變數值 | 引用 CSS 變數名稱 |
+| `flex justify-between` 內放條件式回饋訊息 | `SettingsActionRow`，訊息放在固定 action 欄的另一側 |
+| 把操作回饋集中渲染在 `CardContent` 尾端 | 在觸發控制項旁使用 `InlineFeedback` |
+| 把回饋錨點放在該操作會卸載的 `v-if` / `v-for` / Dialog | 上移到最近的穩定祖層或區段標題 |
 
 ## 頁面佈局規範
 
@@ -646,16 +670,6 @@ npx shadcn-vue@latest add dashboard-01
 | |   Area Chart（每日口述次數 / 字數趨勢）            |  |
 | |   X 軸：日期   Y 軸：次數或字數                    |  |
 | |   使用 chart-1 (teal-300) 作為主要面積色           |  |
-| +---------------------------------------------------+  |
-|                                                        |
-| +--[最近轉錄 Card]----------------------------------+  |
-| | CardHeader: "最近轉錄"                             |  |
-| | CardContent:                                       |  |
-| |   Table:                                           |  |
-| |   | 時間 | 原始文字(截斷) | 字數 | AI整理 | 耗時 ||  |
-| |   |------|----------------|------|--------|------||  |
-| |   | ...  | ...            | ...  | Badge  | ...  ||  |
-| |   分頁元件（若記錄 > 10 筆）                       |  |
 | +---------------------------------------------------+  |
 +--------------------------------------------------------+
 ```

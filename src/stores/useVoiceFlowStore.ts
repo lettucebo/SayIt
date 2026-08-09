@@ -17,6 +17,9 @@ import {
   enhanceText,
   enhanceWithAnomalyGuard,
   buildSystemPrompt,
+  combineChatUsage,
+  EnhancerEmptyOutputError,
+  getEnhancementErrorUsage,
   type EnhanceOptions,
 } from "../lib/enhancer";
 import { observeSemanticDrift } from "../lib/semanticDriftObserver";
@@ -41,7 +44,12 @@ import {
   calculateWhisperCostCeiling,
   calculateChatCostCeiling,
 } from "../lib/apiPricing";
-import { GEMINI_TRANSCRIPTION_MODEL } from "../lib/modelRegistry";
+import {
+  findAzureChatModelFamilyConfig,
+  GEMINI_TRANSCRIPTION_MODEL,
+  getEffectiveAzureChatModelFamilyId,
+} from "../lib/modelRegistry";
+import { getAzureOperationMaxTokens } from "../lib/llmProvider";
 import type { StopRecordingResult, TranscriptionResult } from "../types/audio";
 import {
   HOTKEY_ERROR,
@@ -1422,6 +1430,8 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
         deployment: whisperCfg.deployment ?? null,
         apiVersion: whisperCfg.apiVersion ?? null,
         authMode: whisperCfg.authMode ?? null,
+        candidateLocales: whisperCfg.provider === "mai" ? whisperCfg.candidateLocales : null,
+        transcribeStyle: whisperCfg.provider === "mai" ? whisperCfg.transcribeStyle : null,
       });
       if (isAborted.value) return;
 
@@ -1569,6 +1579,7 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
       ) {
         transitionTo("enhancing", t("voiceFlow.enhancing"));
         const enhancementStartTime = performance.now();
+        let cumulativeChatUsage: ChatUsageData | null = null;
 
         try {
           await settingsStore.refreshLlmApiKey();
@@ -1591,18 +1602,34 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
             signal: abortController?.signal,
             ...contextOptions,
           };
+          const azureFamily = llmCfg.azure
+            ? findAzureChatModelFamilyConfig(
+                getEffectiveAzureChatModelFamilyId(
+                  llmCfg.azure.modelFamily,
+                ),
+              )
+            : undefined;
+          const enhancementDeadlineMs =
+            azureFamily?.totalDeadlineMs ?? Number.POSITIVE_INFINITY;
+          const enhancementDeadlineAtMs = Number.isFinite(
+            enhancementDeadlineMs,
+          )
+            ? enhancementStartTime + enhancementDeadlineMs
+            : undefined;
 
           let enhanceResult = await enhanceText(
             result.rawText,
             llmCfg.apiKey,
-            enhanceOptions,
+            { ...enhanceOptions, deadlineAtMs: enhancementDeadlineAtMs },
           );
+          cumulativeChatUsage = enhanceResult.usage;
           if (isAborted.value) return;
 
           // 增強後長度爆炸偵測（含重試機制）
           let retryCount = 0;
           while (
             retryCount < MAX_ENHANCEMENT_RETRY_COUNT &&
+            performance.now() - enhancementStartTime < enhancementDeadlineMs &&
             detectEnhancementAnomaly({
               rawText: result.rawText,
               enhancedText: enhanceResult.text,
@@ -1612,11 +1639,22 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
             writeInfoLog(
               `useVoiceFlowStore: enhancement anomaly detected (attempt ${retryCount}/${MAX_ENHANCEMENT_RETRY_COUNT}), retrying`,
             );
-            enhanceResult = await enhanceText(
+            const retryResult = await enhanceText(
               result.rawText,
               llmCfg.apiKey,
-              enhanceOptions,
+              { ...enhanceOptions, deadlineAtMs: enhancementDeadlineAtMs },
             );
+            cumulativeChatUsage = combineChatUsage(
+              cumulativeChatUsage,
+              retryResult.usage,
+            );
+            enhanceResult = {
+              ...retryResult,
+              usage: cumulativeChatUsage,
+              temperatureAdjusted:
+                enhanceResult.temperatureAdjusted ||
+                retryResult.temperatureAdjusted,
+            };
             if (isAborted.value) return;
           }
 
@@ -1658,7 +1696,11 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
 
           await completePasteFlow({
             text: enhanceResult.text,
-            successMessage: t("voiceFlow.pasteSuccess"),
+            successMessage: t(
+              enhanceResult.temperatureAdjusted
+                ? "voiceFlow.pasteSuccessTemperatureAdjusted"
+                : "voiceFlow.pasteSuccess",
+            ),
             record,
             chatUsage: enhanceResult.usage,
             transcriptionUsage,
@@ -1698,9 +1740,16 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
 
           await completePasteFlow({
             text: result.rawText,
-            successMessage: t("voiceFlow.pasteSuccessUnenhanced"),
+            successMessage: t(
+              enhanceError instanceof EnhancerEmptyOutputError
+                ? "voiceFlow.pasteSuccessNoOutput"
+                : "voiceFlow.pasteSuccessUnenhanced",
+            ),
             record: fallbackRecord,
-            chatUsage: null,
+            chatUsage: combineChatUsage(
+              cumulativeChatUsage,
+              getEnhancementErrorUsage(enhanceError),
+            ),
             transcriptionUsage,
           });
         }
@@ -1800,7 +1849,10 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
         provider: llmCfg.provider,
         azure: llmCfg.azure,
         signal: abortController?.signal,
-        maxTokens: EDIT_MODE_MAX_TOKENS,
+        maxTokens: getAzureOperationMaxTokens(
+          llmCfg.azure,
+          EDIT_MODE_MAX_TOKENS,
+        ),
       });
       if (isAborted.value) return;
 
@@ -1899,6 +1951,10 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
           deployment: whisperCfg.deployment ?? null,
           apiVersion: whisperCfg.apiVersion ?? null,
           authMode: whisperCfg.authMode ?? null,
+          candidateLocales:
+            whisperCfg.provider === "mai" ? whisperCfg.candidateLocales : null,
+          transcribeStyle:
+            whisperCfg.provider === "mai" ? whisperCfg.transcribeStyle : null,
         },
       );
       if (isAborted.value) return;
@@ -1974,6 +2030,16 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
           const contextOptions = await readEnhancementContext(
             settingsStore.contextInjectionEnabled,
           );
+          const azureFamily = llmCfg.azure
+            ? findAzureChatModelFamilyConfig(
+                getEffectiveAzureChatModelFamilyId(
+                  llmCfg.azure.modelFamily,
+                ),
+              )
+            : undefined;
+          const enhancementDeadlineAtMs = azureFamily
+            ? enhancementStartTime + azureFamily.totalDeadlineMs
+            : undefined;
           const enhanceResult = await enhanceWithAnomalyGuard(
             result.rawText,
             llmCfg.apiKey,
@@ -1985,6 +2051,7 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
               provider: llmCfg.provider,
               azure: llmCfg.azure,
               signal: abortController?.signal,
+              deadlineAtMs: enhancementDeadlineAtMs,
               ...contextOptions,
             },
           );
@@ -2072,12 +2139,13 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
             audioFilePath: filePath,
             status: "success",
           });
+          const failedChatUsage = getEnhancementErrorUsage(enhanceError);
 
           const pasteText = await completePasteFlow({
             text: result.rawText,
             successMessage: t("voiceFlow.pasteSuccessUnenhanced"),
             record: fallbackRecord,
-            chatUsage: null,
+            chatUsage: failedChatUsage,
             skipRecordSaving: true,
           });
           if (!pasteText) return;
@@ -2098,7 +2166,7 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
             .then(() => {
               saveApiUsageRecordList(
                 fallbackRecord,
-                null,
+                failedChatUsage,
                 retryTranscriptionUsage,
               );
             })

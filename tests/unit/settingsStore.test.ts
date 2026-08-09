@@ -52,6 +52,7 @@ vi.mock("../../src/i18n/languageConfig", () => ({
   detectSystemLocale: () => "zh-TW",
   getHtmlLangForLocale: () => "zh-TW",
   getWhisperCodeForTranscriptionLocale: () => null,
+  normalizeMaiCandidateLocales: () => [],
 }));
 
 vi.mock("../../src/lib/enhancer", () => ({
@@ -87,13 +88,25 @@ vi.mock("../../src/lib/modelRegistry", () => ({
   DEFAULT_LLM_MODEL_ID: "test-llm",
   DEFAULT_LLM_PROVIDER_ID: "groq",
   DEFAULT_WHISPER_MODEL_ID: "test-whisper",
+  DEFAULT_AZURE_CHAT_MODEL_FAMILY_ID: "azure-openai",
   getEffectiveLlmModelId: (id: string | null) => id ?? "test-llm",
   getEffectiveWhisperModelId: (id: string | null) => id ?? "test-whisper",
+  findLlmModelConfig: () => ({ providerId: "groq" }),
   getEffectiveTranscriptionProviderId: (id: string | null | undefined) =>
-    id === "azure" || id === "gemini" || id === "groq" ? id : "groq",
+    id === "azure" || id === "gemini" || id === "groq" || id === "mai"
+      ? id
+      : "groq",
   getEffectiveGeminiTranscriptionModelId: (id: string | null | undefined) =>
     id === "gemini-3.6-flash" ? id : "gemini-3.5-flash-lite",
+  getEffectiveAzureChatModelFamilyId: (id: string | null | undefined) =>
+    id === "deepseek" ? id : "azure-openai",
+  isAzureChatModelFamilyId: (id: unknown) => id === "deepseek",
+  getEffectiveAzureChatModelFamilySource: (source: unknown) =>
+    source === "auto" ? "auto" : "manual",
   GEMINI_TRANSCRIPTION_MODEL: "gemini-3.5-flash-lite",
+  MAI_TRANSCRIPTION_MODEL_ID: "mai-transcribe-1.5",
+  getEffectiveMaiTranscribeStyle: (style: string | null | undefined) =>
+    style === "verbatim" ? "verbatim" : "default",
   DEFAULT_QUOTA_PERIOD: "daily",
   getModelListByProvider: () => [],
   getDefaultModelIdForProvider: () => "test-llm",
@@ -101,6 +114,11 @@ vi.mock("../../src/lib/modelRegistry", () => ({
 
 vi.mock("../../src/lib/llmProvider", () => ({
   findProviderConfig: () => undefined,
+  normalizeAzureEndpoint: (endpoint: string) => endpoint.replace(/\/+$/, ""),
+  parseAzureProjectEndpoint: (endpoint: string) => ({
+    endpoint: endpoint.replace(/\/+$/, ""),
+    projectName: "",
+  }),
 }));
 
 describe("useSettingsStore — prompt mode 遷移", () => {

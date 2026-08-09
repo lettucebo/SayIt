@@ -651,6 +651,11 @@ pub fn run() {
             plugins::transcription::retranscribe_from_file,
             plugins::transcription::test_whisper_connection,
             plugins::azure_auth::get_azure_entra_token,
+            plugins::azure_user_session::azure_user_sign_in,
+            plugins::azure_user_session::azure_user_cancel_sign_in,
+            plugins::azure_user_session::azure_user_sign_out,
+            plugins::azure_user_session::azure_user_get_account,
+            plugins::azure_user_session::azure_user_get_token,
             plugins::file_transfer::save_text_file,
             plugins::file_transfer::read_text_file,
             plugins::sound_feedback::play_start_sound,
@@ -697,6 +702,9 @@ pub fn run() {
             app.manage(plugins::audio_recorder::AudioPreviewState::new());
             // 初始化 transcription 狀態（共用 HTTP client）
             app.manage(plugins::transcription::TranscriptionState::new());
+            // Entra 使用者委派登入：token 快取與 refresh 的單一來源
+            // （HUD / Dashboard 兩個 WebView 共用，避免各自輪替 refresh token）
+            app.manage(plugins::azure_user_session::AzureUserAuthState::default());
 
             // Windows：輪詢 OS 外觀並廣播變更。透明+隱藏的 HUD 視窗收不到
             // WM_THEMECHANGED（漏接/延遲），改由 Rust 讀登錄檔，變更時以

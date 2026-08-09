@@ -1,8 +1,20 @@
 import i18n from "../i18n";
 import { EnhancerApiError } from "./enhancer";
+import {
+  isInteractionRequiredError,
+  isNotSignedInError,
+} from "./azureUserAuth";
 
 function t(key: string, params?: Record<string, unknown>): string {
   return i18n.global.t(key, params ?? {});
+}
+
+/**
+ * Entra 使用者登入失效（refresh token 被撤銷／過期／尚未登入）。
+ * 這類錯誤重試無用，必須引導重新登入——不可歸類成「API Key 無效」。
+ */
+export function isAzureUserAuthFailure(message: string): boolean {
+  return isInteractionRequiredError(message) || isNotSignedInError(message);
 }
 
 export function extractErrorMessage(err: unknown): string {
@@ -75,6 +87,12 @@ export function getTranscriptionErrorMessage(error: unknown): string {
     return t("errors.apiKeyMissing");
   }
 
+  // Entra 使用者登入模式：refresh token 失效或尚未登入，重試沒有意義，
+  // 必須明確引導使用者重新登入，而不是誤報成「API Key 無效」。
+  if (isAzureUserAuthFailure(message)) {
+    return t("settings.azure.reauthRequired");
+  }
+
   if (message.includes("Failed to parse API response")) {
     return t("errors.transcription.parseError");
   }
@@ -118,6 +136,11 @@ export function getEnhancementErrorMessage(error: unknown): string {
     return t("errors.network");
   }
 
+  // 使用者登入失效在整理階段一樣要引導重新登入（呼叫端仍會保留原始轉錄文字）
+  if (isAzureUserAuthFailure(extractErrorMessage(error))) {
+    return t("settings.azure.reauthRequired");
+  }
+
   if (error instanceof EnhancerApiError) {
     if (error.body.includes("model_decommissioned")) {
       return t("errors.enhancement.modelDecommissioned");
@@ -125,6 +148,9 @@ export function getEnhancementErrorMessage(error: unknown): string {
     const status = error.statusCode;
     if (status === 401) return t("errors.enhancement.invalidApiKey");
     if (status === 429) return t("errors.enhancement.rateLimited");
+    if (error.body.includes("context_length_exceeded")) {
+      return t("errors.enhancement.contextLengthExceeded");
+    }
     if (status === 400) return t("errors.enhancement.badRequest");
     if (status >= 500) return t("errors.enhancement.serviceUnavailable");
   }
@@ -136,6 +162,12 @@ export function getEnhancementErrorMessage(error: unknown): string {
 
     if ((error as Error & { code?: string }).code === "ENHANCEMENT_TIMEOUT") {
       return t("errors.enhancement.timeout");
+    }
+    if (
+      (error as Error & { code?: string }).code ===
+      "ENHANCEMENT_EMPTY_OUTPUT"
+    ) {
+      return t("errors.enhancement.emptyOutput");
     }
   }
 

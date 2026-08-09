@@ -5,6 +5,19 @@ vi.mock("@tauri-apps/plugin-http", () => ({
   fetch: mockFetch,
 }));
 
+const temperatureCapabilityMap = new Map<string, unknown>();
+const mockCapabilitySet = vi.fn(async (key: string, value: unknown) => {
+  temperatureCapabilityMap.set(key, value);
+});
+vi.mock("@tauri-apps/plugin-store", () => ({
+  load: vi.fn(async () => ({
+    get: vi.fn(async (key: string) => temperatureCapabilityMap.get(key)),
+    set: mockCapabilitySet,
+    delete: vi.fn(),
+    save: vi.fn(),
+  })),
+}));
+
 vi.mock("../../src/i18n", () => ({
   default: {
     global: {
@@ -53,6 +66,8 @@ describe("enhancer.ts", () => {
   beforeEach(() => {
     vi.resetModules();
     mockFetch.mockReset();
+    temperatureCapabilityMap.clear();
+    mockCapabilitySet.mockClear();
   });
 
   afterEach(() => {
@@ -178,17 +193,20 @@ describe("enhancer.ts", () => {
       expect(result.text).toBe("整理後文字有空白");
     });
 
-    it("[P1] 傳入 signal 時應轉交給 fetch", async () => {
-      mockFetch.mockResolvedValue(createSuccessResponse("整理後文字"));
-
+    it("[P1] 傳入 signal 時應中止內部 fetch signal", async () => {
+      mockFetch.mockImplementation(() => new Promise(() => {}));
       const { enhanceText } = await import("../../src/lib/enhancer");
       const abortController = new AbortController();
-      await enhanceText("測試輸入文字", TEST_API_KEY, {
+      const promise = enhanceText("測試輸入文字", TEST_API_KEY, {
         signal: abortController.signal,
       });
+      await Promise.resolve();
 
       const callArgs = mockFetch.mock.calls[0];
-      expect(callArgs[1].signal).toBe(abortController.signal);
+      expect(callArgs[1].signal).not.toBe(abortController.signal);
+      abortController.abort(new Error("cancelled by user"));
+      expect(callArgs[1].signal.aborted).toBe(true);
+      await expect(promise).rejects.toThrow("cancelled by user");
     });
   });
 
@@ -233,6 +251,207 @@ describe("enhancer.ts", () => {
       const result = await enhanceText("原始口語文字測試", TEST_API_KEY);
 
       expect(result.text).toBe("原始口語文字測試");
+    });
+
+    it("[P0] Azure 推理模型在 length 空輸出時加大 token 後重試一次", async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: vi.fn().mockResolvedValue({
+            choices: [
+              {
+                message: { content: "<think>thinking</think>" },
+                finish_reason: "length",
+              },
+            ],
+            usage: {
+              prompt_tokens: 10,
+              completion_tokens: 32_768,
+              total_tokens: 32_778,
+            },
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: vi.fn().mockResolvedValue({
+            choices: [
+              {
+                message: { content: "整理後結果" },
+                finish_reason: "stop",
+              },
+            ],
+            usage: {
+              prompt_tokens: 12,
+              completion_tokens: 8,
+              total_tokens: 20,
+            },
+          }),
+        });
+
+      const { enhanceText } = await import("../../src/lib/enhancer");
+      const result = await enhanceText("原始口語文字測試", TEST_API_KEY, {
+        provider: "azure",
+        modelId: "deepseek-deployment",
+        azure: {
+          endpoint: "https://r.services.ai.azure.com",
+          authMode: "key",
+          authValue: "k",
+          modelFamily: "deepseek",
+        },
+      });
+
+      expect(result.text).toBe("整理後結果");
+      expect(result.usage).toMatchObject({
+        promptTokens: 22,
+        completionTokens: 32_776,
+        totalTokens: 32_798,
+      });
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(
+        JSON.parse(mockFetch.mock.calls[0][1].body).max_completion_tokens,
+      ).toBe(8_192);
+      expect(
+        JSON.parse(mockFetch.mock.calls[1][1].body).max_completion_tokens,
+      ).toBe(16_384);
+    });
+
+    it("[P0] Azure 推理模型第二次仍無最終輸出時拋出明確錯誤", async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({
+          choices: [
+            {
+              message: { content: "" },
+              finish_reason: "length",
+            },
+          ],
+          usage: {
+            prompt_tokens: 3,
+            completion_tokens: 2,
+            total_tokens: 5,
+          },
+        }),
+      });
+
+      const {
+        enhanceText,
+        EnhancerEmptyOutputError,
+        getEnhancementErrorUsage,
+      } = await import(
+        "../../src/lib/enhancer"
+      );
+      const error = await enhanceText("原始口語文字測試", TEST_API_KEY, {
+        provider: "azure",
+        modelId: "kimi-deployment",
+        azure: {
+          endpoint: "https://r.services.ai.azure.com",
+          authMode: "key",
+          authValue: "k",
+          modelFamily: "kimi",
+        },
+      }).catch((err: unknown) => err);
+
+      expect(error).toBeInstanceOf(EnhancerEmptyOutputError);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(getEnhancementErrorUsage(error)).toEqual({
+        promptTokens: 6,
+        completionTokens: 4,
+        totalTokens: 10,
+        promptTimeMs: undefined,
+        completionTimeMs: undefined,
+        totalTimeMs: undefined,
+      });
+    });
+
+    it("[P1] Azure 推理模型的 content_filter 空輸出不重試", async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({
+          choices: [
+            {
+              message: { content: "" },
+              finish_reason: "content_filter",
+            },
+          ],
+        }),
+      });
+
+      const { enhanceText } = await import("../../src/lib/enhancer");
+      await expect(
+        enhanceText("原始口語文字測試", TEST_API_KEY, {
+          provider: "azure",
+          modelId: "deepseek-deployment",
+          azure: {
+            endpoint: "https://r.services.ai.azure.com",
+            authMode: "key",
+            authValue: "k",
+            modelFamily: "deepseek",
+          },
+        }),
+      ).rejects.toMatchObject({ code: "ENHANCEMENT_EMPTY_OUTPUT" });
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it("[P0] Azure 推理 profile 已達 token cap 時不重送相同請求", async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({
+          choices: [
+            {
+              message: { content: "" },
+              finish_reason: "length",
+            },
+          ],
+        }),
+      });
+
+      const { enhanceText } = await import("../../src/lib/enhancer");
+      await expect(
+        enhanceText("原始口語文字測試", TEST_API_KEY, {
+          provider: "azure",
+          modelId: "grok-reasoning-deployment",
+          azure: {
+            endpoint: "https://r.services.ai.azure.com",
+            authMode: "key",
+            authValue: "k",
+            modelFamily: "grok-reasoning",
+          },
+        }),
+      ).rejects.toMatchObject({ code: "ENHANCEMENT_EMPTY_OUTPUT" });
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it("[P0] Azure 推理模型的重試必須遵守共用 deadline", async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: vi.fn().mockResolvedValue({
+            choices: [
+              {
+                message: { content: "" },
+                finish_reason: "length",
+              },
+            ],
+          }),
+        })
+        .mockImplementationOnce(() => new Promise(() => {}));
+
+      const { enhanceText } = await import("../../src/lib/enhancer");
+      const deadlineAtMs = performance.now() + 100;
+      await expect(
+        enhanceText("原始口語文字測試", TEST_API_KEY, {
+          provider: "azure",
+          modelId: "deepseek-deployment",
+          deadlineAtMs,
+          azure: {
+            endpoint: "https://r.services.ai.azure.com",
+            authMode: "key",
+            authValue: "k",
+            modelFamily: "deepseek",
+          },
+        }),
+      ).rejects.toMatchObject({ code: "ENHANCEMENT_TIMEOUT" });
+      expect(mockFetch).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -286,6 +505,185 @@ describe("enhancer.ts", () => {
       await expect(
         enhanceText("測試文字測試文字測試", TEST_API_KEY),
       ).rejects.toThrow("Failed to fetch");
+    });
+
+    it("[P0] Azure 明確拒絕 temperature 時應移除參數並重試一次", async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 400,
+          statusText: "Bad Request",
+          text: vi.fn().mockResolvedValue(
+            JSON.stringify({
+              error: {
+                message:
+                  "Unsupported value: 'temperature' does not support 0.1 with this model.",
+                param: "temperature",
+                code: "unsupported_value",
+              },
+            }),
+          ),
+        })
+        .mockResolvedValueOnce(createSuccessResponse("整理成功"));
+
+      const { enhanceText } = await import("../../src/lib/enhancer");
+      const result = await enhanceText("測試輸入", TEST_API_KEY, {
+        provider: "azure",
+        modelId: "custom-deployment",
+        azure: {
+          endpoint: "https://r.services.ai.azure.com",
+          authMode: "key",
+          authValue: "k",
+          modelFamily: "azure-openai",
+        },
+      });
+
+      expect(result).toMatchObject({
+        text: "整理成功",
+        temperatureAdjusted: true,
+      });
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(JSON.parse(mockFetch.mock.calls[0][1].body).temperature).toBe(0.1);
+      expect(
+        JSON.parse(mockFetch.mock.calls[1][1].body).temperature,
+      ).toBeUndefined();
+      expect(mockCapabilitySet).toHaveBeenCalled();
+    });
+
+    it("[P0] DeepSeek param=null 的 temperature 錯誤也應觸發一次重試", async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 400,
+          statusText: "Bad Request",
+          text: vi.fn().mockResolvedValue(
+            JSON.stringify({
+              error: {
+                message:
+                  "deepseek-reasoner does not support the parameter `temperature`",
+                param: null,
+                code: "invalid_request_error",
+              },
+            }),
+          ),
+        })
+        .mockResolvedValueOnce(createSuccessResponse("整理成功"));
+
+      const { enhanceText } = await import("../../src/lib/enhancer");
+      await enhanceText("測試輸入", TEST_API_KEY, {
+        provider: "azure",
+        modelId: "custom-deployment",
+        azure: {
+          endpoint: "https://r.services.ai.azure.com",
+          authMode: "key",
+          authValue: "k",
+          modelFamily: "azure-openai",
+        },
+      });
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it("[P1] unsupported_parameter 與 temperature param 應觸發一次重試", async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 400,
+          statusText: "Bad Request",
+          text: vi.fn().mockResolvedValue(
+            JSON.stringify({
+              error: {
+                message:
+                  "Unsupported parameter: 'temperature' is not supported with this model.",
+                param: "temperature",
+                code: "unsupported_parameter",
+              },
+            }),
+          ),
+        })
+        .mockResolvedValueOnce(createSuccessResponse("整理成功"));
+
+      const { enhanceText } = await import("../../src/lib/enhancer");
+      await enhanceText("測試輸入", TEST_API_KEY, {
+        provider: "azure",
+        modelId: "custom-deployment",
+        azure: {
+          endpoint: "https://r.services.ai.azure.com",
+          authMode: "key",
+          authValue: "k",
+          modelFamily: "azure-openai",
+        },
+      });
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it("[P1] Azure 401 與 429 不可誤觸 temperature 自我修復", async () => {
+      for (const status of [401, 429]) {
+        mockFetch.mockReset().mockResolvedValueOnce({
+          ok: false,
+          status,
+          statusText: "Error",
+          text: vi.fn().mockResolvedValue(
+            JSON.stringify({
+              error: {
+                message: "temperature may be unsupported",
+                param: "temperature",
+                code: "unsupported_value",
+              },
+            }),
+          ),
+        });
+
+        const { enhanceText } = await import("../../src/lib/enhancer");
+        await expect(
+          enhanceText("測試輸入", TEST_API_KEY, {
+            provider: "azure",
+            modelId: "custom-deployment",
+            azure: {
+              endpoint: "https://r.services.ai.azure.com",
+              authMode: "key",
+              authValue: "k",
+              modelFamily: "azure-openai",
+            },
+          }),
+        ).rejects.toMatchObject({ statusCode: status });
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+      }
+    });
+
+    it("[P1] context_length_exceeded 不可誤判為 temperature 並自動重試", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        statusText: "Bad Request",
+        text: vi.fn().mockResolvedValue(
+          JSON.stringify({
+            error: {
+              message: "This model's maximum context length is 8192 tokens.",
+              param: "max_completion_tokens",
+              code: "context_length_exceeded",
+            },
+          }),
+        ),
+      });
+
+      const { enhanceText, EnhancerApiError } = await import(
+        "../../src/lib/enhancer"
+      );
+      const error = await enhanceText("測試輸入", TEST_API_KEY, {
+        provider: "azure",
+        modelId: "custom-deployment",
+        azure: {
+          endpoint: "https://r.services.ai.azure.com",
+          authMode: "key",
+          authValue: "k",
+          modelFamily: "azure-openai",
+        },
+      }).catch((reason: unknown) => reason);
+
+      expect(error).toBeInstanceOf(EnhancerApiError);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -626,6 +1024,11 @@ describe("enhancer.ts", () => {
       expect(stripReasoningTags(input)).toBe("結果1結果2");
     });
 
+    it("[P0] length 截斷造成未閉合 think 區塊時不可洩漏推理內容", async () => {
+      const { stripReasoningTags } = await import("../../src/lib/enhancer");
+      expect(stripReasoningTags("<think>尚未完成的思考過程")).toBe("");
+    });
+
     it("[P0] reasoning model 回應應只保留最終輸出", async () => {
       mockFetch.mockResolvedValueOnce(
         createSuccessResponse(
@@ -656,6 +1059,22 @@ describe("enhancer.ts", () => {
 
       await expect(promise).rejects.toThrow("Enhancement timeout");
 
+      vi.useRealTimers();
+    });
+
+    it("[P0] 收到 response header 後 body 卡住仍應在 deadline 逾時", async () => {
+      vi.useFakeTimers();
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: vi.fn(() => new Promise(() => {})),
+      });
+
+      const { enhanceText } = await import("../../src/lib/enhancer");
+      const promise = enhanceText("測試文字測試文字測試", TEST_API_KEY);
+      await Promise.resolve();
+      vi.advanceTimersByTime(5000);
+
+      await expect(promise).rejects.toThrow("Enhancement timeout");
       vi.useRealTimers();
     });
   });
@@ -772,5 +1191,43 @@ describe("enhanceWithAnomalyGuard", () => {
     expect(result.wasAnomalous).toBe(false);
     expect(result.text).toBe("正常整理後的文字");
     expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("[P0] anomaly 重試應累加每次成功請求的 token usage", async () => {
+    mockFetch
+      .mockResolvedValueOnce(
+        createSuccessResponse("爆".repeat(50), {
+          prompt_tokens: 3,
+          completion_tokens: 2,
+          total_tokens: 5,
+          prompt_time: 0.1,
+          completion_time: 0.1,
+          total_time: 0.2,
+        }),
+      )
+      .mockResolvedValueOnce(
+        createSuccessResponse("正常整理後的文字", {
+          prompt_tokens: 7,
+          completion_tokens: 4,
+          total_tokens: 11,
+          prompt_time: 0.2,
+          completion_time: 0.2,
+          total_time: 0.4,
+        }),
+      );
+    const { enhanceWithAnomalyGuard } = await import("../../src/lib/enhancer");
+    const result = await enhanceWithAnomalyGuard(
+      "一段原始口語文字",
+      TEST_API_KEY,
+      undefined,
+      3,
+    );
+
+    expect(result.usage).toMatchObject({
+      promptTokens: 10,
+      completionTokens: 6,
+      totalTokens: 16,
+      totalTimeMs: 600,
+    });
   });
 });

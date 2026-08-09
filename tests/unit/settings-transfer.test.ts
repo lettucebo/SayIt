@@ -21,6 +21,7 @@ import {
 import { buildExportFile } from "../../src/lib/vocabularyTransfer";
 import type { VocabularyExportFile } from "../../src/types/vocabulary";
 import type { ReplacementRule } from "../../src/types/replacement";
+import { createReplacementRule } from "../support/factories";
 import {
   EXPORTABLE_SETTING_KEYS,
   sanitizeSettingsPayload as _sanitizeCheck,
@@ -33,6 +34,18 @@ describe("EXPORTABLE_SETTING_KEYS 完整性", () => {
       "geminiTranscriptionModelId",
       "geminiFreeQuotaRequests",
       "geminiFreeQuotaPeriod",
+      "azureResourceName",
+      "azureWhisperResourceName",
+      "azureSpeechResourceName",
+      "azureEndpointOverride",
+      "azureWhisperEndpointOverride",
+      "azureSpeechEndpointOverride",
+      "azureSpeechApiKey",
+      "azureProjectName",
+      "maiCandidateLocales",
+      "maiTranscribeStyle",
+      "azureChatModelFamily",
+      "azureChatModelFamilySource",
     ];
     for (const key of required) {
       expect(
@@ -47,11 +60,47 @@ describe("EXPORTABLE_SETTING_KEYS 完整性", () => {
       geminiTranscriptionModelId: "gemini-3.5-flash-lite",
       geminiFreeQuotaRequests: 500,
       geminiFreeQuotaPeriod: "daily",
+      azureResourceName: "main-resource",
+      azureWhisperResourceName: "whisper-resource",
+      azureSpeechResourceName: "speech-resource",
+      azureEndpointOverride: "https://main.services.ai.azure.com",
+      azureWhisperEndpointOverride: "https://whisper.openai.azure.com",
+      azureSpeechEndpointOverride: "https://speech.cognitiveservices.azure.com",
+      azureSpeechApiKey: "speech-key",
+      azureChatModelFamily: "deepseek",
+      azureChatModelFamilySource: "auto",
+      azureProjectName: "voice-project",
+      maiCandidateLocales: ["zh-TW"],
+      maiTranscribeStyle: "verbatim",
     };
     const cleaned = _sanitizeCheck(sample);
     expect(cleaned.geminiTranscriptionModelId).toBe("gemini-3.5-flash-lite");
     expect(cleaned.geminiFreeQuotaRequests).toBe(500);
     expect(cleaned.geminiFreeQuotaPeriod).toBe("daily");
+    expect(cleaned.azureResourceName).toBe("main-resource");
+    expect(cleaned.azureWhisperResourceName).toBe("whisper-resource");
+    expect(cleaned.azureSpeechResourceName).toBe("speech-resource");
+    expect(cleaned.azureEndpointOverride).toBe(
+      "https://main.services.ai.azure.com",
+    );
+    expect(cleaned.maiCandidateLocales).toEqual(["zh-TW"]);
+    expect(cleaned.azureChatModelFamily).toBe("deepseek");
+    expect(cleaned.azureChatModelFamilySource).toBe("auto");
+    expect(cleaned.azureProjectName).toBe("voice-project");
+  });
+
+  it("[P0] Azure 模型類型未知時必須在匯入前拒絕", () => {
+    const cleaned = _sanitizeCheck({
+      azureChatModelFamily: "untrusted-model-family",
+    });
+    expect(cleaned.azureChatModelFamily).toBeUndefined();
+  });
+
+  it("[P0] Azure 模型類型來源未知時必須在匯入前拒絕", () => {
+    const cleaned = _sanitizeCheck({
+      azureChatModelFamilySource: "untrusted-source",
+    });
+    expect(cleaned.azureChatModelFamilySource).toBeUndefined();
   });
 });
 
@@ -109,14 +158,14 @@ describe("buildBackupFile / serializeBackup", () => {
 
   it("[P0] 取代規則納入備份並可完整還原", () => {
     const rules: ReplacementRule[] = [
-      {
+      createReplacementRule({
         id: "r1",
         patterns: ["雷特西", "來特西"],
         replacement: "latency",
         isRegex: false,
         timing: "afterAI",
         enabled: true,
-      },
+      }),
     ];
     const file = buildPlainBackup(sampleSettings, null, rules);
     expect(file.contents.replacements).toBe(true);
@@ -352,6 +401,21 @@ describe("sanitizeSettingsPayload", () => {
     expect(
       sanitizeSettingsPayload({ hotkeyTriggerKey: 123 as unknown as string }),
     ).not.toHaveProperty("hotkeyTriggerKey");
+  });
+
+  it("[P0] MAI 候選語言逐項清洗、API Key 會被視為敏感資料", () => {
+    const clean = sanitizeSettingsPayload({
+      maiCandidateLocales: ["zh-TW", "invalid", "zh-TW", "en-US"],
+      maiTranscribeStyle: "verbatim",
+    });
+    expect(clean.maiCandidateLocales).toEqual(["zh-TW"]);
+    expect(clean.maiTranscribeStyle).toBe("verbatim");
+    expect(
+      sanitizeSettingsPayload({ maiTranscribeStyle: "invalid" }),
+    ).not.toHaveProperty("maiTranscribeStyle");
+    expect(stripSensitiveKeys({ azureSpeechApiKey: "secret" })).not.toHaveProperty(
+      "azureSpeechApiKey",
+    );
   });
 });
 

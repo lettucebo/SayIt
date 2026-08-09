@@ -1,6 +1,6 @@
 [package]
 name = "sayit"
-version = "0.14.0"
+version = "0.16.0"
 edition = "2021"
 
 [lib]
@@ -29,7 +29,10 @@ cpal = "0.15"
 hound = "3.5"
 rustfft = "6"
 reqwest = { version = "0.12", features = ["multipart", "json", "rustls-tls", "rustls-tls-native-roots"] }
-tokio = { version = "1", features = ["time"] }
+tokio = { version = "1", features = ["time", "net", "io-util", "sync", "rt"] }
+sha2 = "0.10"
+getrandom = "0.3"
+keyring-core = "1"
 tauri-plugin-dialog = "2.7.1"
 tauri-plugin-log = "2.8.0"
 log = "0.4.33"
@@ -39,6 +42,11 @@ base64 = "0.23.0"
 core-graphics = "0.24"
 core-foundation = "0.10"
 objc = "0.2"
+# keychain feature 為必要：crate 在 macOS 上若未啟用 `keychain` 或 `protected`
+# 會直接 compile_error!。選 `keychain`（legacy keychain）而非 `protected`——
+# 後者要求 app 是 sandboxed，部分功能還需要 provisioning profile，
+# 而本 fork 的 macOS build 未簽名，拿不到那些條件。
+apple-native-keyring-store = { version = "1", features = ["keychain"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.61", features = [
@@ -53,6 +61,7 @@ windows = { version = "0.61", features = [
     "Win32_System_Registry",
     "Win32_Graphics_Dwm",
 ] }
+windows-native-keyring-store = "1"
 
 [profile.dev]
 incremental = true

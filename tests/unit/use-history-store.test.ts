@@ -5,6 +5,7 @@ import type { TranscriptionRecord } from "../../src/types/transcription";
 const mockDbExecute = vi.fn().mockResolvedValue(undefined);
 const mockDbSelect = vi.fn().mockResolvedValue([]);
 const mockEmitTo = vi.fn().mockResolvedValue(undefined);
+const mockCaptureError = vi.fn();
 
 vi.mock("../../src/lib/database", () => ({
   getDatabase: () => ({
@@ -13,9 +14,21 @@ vi.mock("../../src/lib/database", () => ({
   }),
 }));
 
+vi.mock("../../src/lib/sentry", () => ({
+  captureError: mockCaptureError,
+}));
+
 vi.mock("@tauri-apps/api/event", () => ({
   emitTo: mockEmitTo,
 }));
+
+/** 本地時區的 YYYY-MM-DD，與 buildDailyUsageSeries 的補零窗口對齊 */
+function toLocalDateKey(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
 
 function createTestRecord(
   overrides: Partial<TranscriptionRecord> = {},
@@ -69,6 +82,7 @@ describe("useHistoryStore", () => {
     mockDbExecute.mockClear().mockResolvedValue(undefined);
     mockDbSelect.mockClear().mockResolvedValue([]);
     mockEmitTo.mockClear().mockResolvedValue(undefined);
+    mockCaptureError.mockClear();
   });
 
   // ==========================================================================
@@ -553,64 +567,11 @@ describe("useHistoryStore", () => {
   });
 
   // ==========================================================================
-  // fetchRecentTranscriptionList
-  // ==========================================================================
-
-  describe("fetchRecentTranscriptionList", () => {
-    it("[P0] 應使用 LIMIT 查詢最近記錄", async () => {
-      mockDbSelect.mockResolvedValueOnce([]);
-
-      const { useHistoryStore } = await import(
-        "../../src/stores/useHistoryStore"
-      );
-      const store = useHistoryStore();
-
-      await store.fetchRecentTranscriptionList(10);
-
-      const [sql, params] = mockDbSelect.mock.calls[0];
-      expect(sql).toContain("ORDER BY timestamp DESC");
-      expect(sql).toContain("LIMIT");
-      expect(params).toEqual([10]);
-    });
-
-    it("[P0] 應回傳 camelCase 映射後的記錄", async () => {
-      mockDbSelect.mockResolvedValueOnce([
-        createRawRow({ id: "recent-1", raw_text: "最近的文字" }),
-      ]);
-
-      const { useHistoryStore } = await import(
-        "../../src/stores/useHistoryStore"
-      );
-      const store = useHistoryStore();
-
-      const results = await store.fetchRecentTranscriptionList(10);
-
-      expect(results).toHaveLength(1);
-      expect(results[0].id).toBe("recent-1");
-      expect(results[0].rawText).toBe("最近的文字");
-    });
-
-    it("[P0] 預設 limit 應為 10", async () => {
-      mockDbSelect.mockResolvedValueOnce([]);
-
-      const { useHistoryStore } = await import(
-        "../../src/stores/useHistoryStore"
-      );
-      const store = useHistoryStore();
-
-      await store.fetchRecentTranscriptionList();
-
-      const params = mockDbSelect.mock.calls[0][1];
-      expect(params).toEqual([10]);
-    });
-  });
-
-  // ==========================================================================
   // refreshDashboard
   // ==========================================================================
 
   describe("refreshDashboard", () => {
-    it("[P0] 應同時載入統計、最近列表和趨勢並更新 refs", async () => {
+    it("[P0] 應同時載入統計和趨勢並更新 refs，且不查詢已移除的最近列表", async () => {
       // fetchDashboardStats → DASHBOARD_STATS_SQL
       mockDbSelect.mockResolvedValueOnce([
         {
@@ -631,11 +592,6 @@ describe("useHistoryStore", () => {
       ]);
       // fetchDashboardStats → 月視窗查詢
       mockDbSelect.mockResolvedValueOnce([]);
-      // fetchRecentTranscriptionList
-      mockDbSelect.mockResolvedValueOnce([
-        createRawRow({ id: "recent-1" }),
-        createRawRow({ id: "recent-2" }),
-      ]);
       // fetchDailyUsageTrend（補零後固定 14 天，命中日對應今天）
       const todayKey = (() => {
         const now = new Date();
@@ -661,8 +617,11 @@ describe("useHistoryStore", () => {
       expect(store.dashboardStats.dailyQuotaUsage.whisperBilledAudioMs).toBe(
         20000,
       );
-      expect(store.recentTranscriptionList).toHaveLength(2);
-      expect(store.recentTranscriptionList[0].id).toBe("recent-1");
+      // 「最近轉錄」已移除：不得再送出 recent 查詢
+      const recentCallList = mockDbSelect.mock.calls.filter(([sql]) =>
+        String(sql).includes("ORDER BY timestamp DESC"),
+      );
+      expect(recentCallList).toHaveLength(0);
       expect(store.dailyUsageTrendList).toHaveLength(14);
       const lastDay =
         store.dailyUsageTrendList[store.dailyUsageTrendList.length - 1];
@@ -691,8 +650,69 @@ describe("useHistoryStore", () => {
         vocabularyAnalysisRequestCount: 0,
         vocabularyAnalysisTotalTokens: 0,
       });
-      expect(store.recentTranscriptionList).toHaveLength(0);
       expect(store.dailyUsageTrendList).toHaveLength(0);
+    });
+
+    it("[P0] 統計查詢失敗時趨勢仍應更新（失敗隔離）", async () => {
+      // fetchDashboardStats → DASHBOARD_STATS_SQL 失敗
+      mockDbSelect.mockRejectedValueOnce(new Error("stats boom"));
+      // fetchDashboardStats → 日視窗 / 月視窗（allSettled 仍會送出）
+      mockDbSelect.mockResolvedValueOnce([]);
+      mockDbSelect.mockResolvedValueOnce([]);
+      // fetchDailyUsageTrend
+      const todayKey = toLocalDateKey(new Date());
+      mockDbSelect.mockResolvedValueOnce([
+        { date: todayKey, count: 7, total_chars: 300 },
+      ]);
+
+      const { useHistoryStore } = await import(
+        "../../src/stores/useHistoryStore"
+      );
+      const store = useHistoryStore();
+
+      await store.refreshDashboard();
+
+      // 統計維持初始值、趨勢照常寫入 → 兩個分支彼此隔離
+      expect(store.dashboardStats.totalTranscriptions).toBe(0);
+      expect(store.dailyUsageTrendList).toHaveLength(14);
+      expect(
+        store.dailyUsageTrendList[store.dailyUsageTrendList.length - 1].count,
+      ).toBe(7);
+      expect(mockCaptureError).toHaveBeenCalledWith(
+        expect.any(Error),
+        expect.objectContaining({ step: "fetch-stats" }),
+      );
+    });
+
+    it("[P0] 趨勢查詢失敗時統計仍應更新（失敗隔離）", async () => {
+      // fetchDashboardStats → DASHBOARD_STATS_SQL
+      mockDbSelect.mockResolvedValueOnce([
+        {
+          total_count: 9,
+          total_characters: 450,
+          total_recording_duration_ms: 90000,
+        },
+      ]);
+      // fetchDashboardStats → 日視窗 / 月視窗
+      mockDbSelect.mockResolvedValueOnce([]);
+      mockDbSelect.mockResolvedValueOnce([]);
+      // fetchDailyUsageTrend 失敗
+      mockDbSelect.mockRejectedValueOnce(new Error("trend boom"));
+
+      const { useHistoryStore } = await import(
+        "../../src/stores/useHistoryStore"
+      );
+      const store = useHistoryStore();
+
+      await store.refreshDashboard();
+
+      expect(store.dashboardStats.totalTranscriptions).toBe(9);
+      expect(store.dashboardStats.totalCharacters).toBe(450);
+      expect(store.dailyUsageTrendList).toHaveLength(0);
+      expect(mockCaptureError).toHaveBeenCalledWith(
+        expect.any(Error),
+        expect.objectContaining({ step: "fetch-trend" }),
+      );
     });
   });
 
@@ -1045,8 +1065,6 @@ describe("useHistoryStore", () => {
       mockDbSelect.mockResolvedValueOnce([]);
       // fetchDashboardStats → 月視窗查詢
       mockDbSelect.mockResolvedValueOnce([]);
-      // fetchRecentTranscriptionList
-      mockDbSelect.mockResolvedValueOnce([]);
       // fetchDailyUsageTrend（SQL 只回有使用記錄的日期）
       mockDbSelect.mockResolvedValueOnce([
         { date: todayKey, count: 5, total_chars: 250 },
@@ -1085,8 +1103,6 @@ describe("useHistoryStore", () => {
       mockDbSelect.mockResolvedValueOnce([]);
       // fetchDashboardStats → 月視窗查詢
       mockDbSelect.mockResolvedValueOnce([]);
-      // fetchRecentTranscriptionList
-      mockDbSelect.mockResolvedValueOnce([]);
       // fetchDailyUsageTrend
       mockDbSelect.mockResolvedValueOnce([]);
 
@@ -1097,13 +1113,16 @@ describe("useHistoryStore", () => {
 
       await store.refreshDashboard();
 
-      // fetchDailyUsageTrend 是第 5 次 select 呼叫（日視窗 + 月視窗各一次）
-      const trendCall = mockDbSelect.mock.calls[4];
-      const sql = trendCall[0] as string;
+      // 以 SQL 特徵定位趨勢查詢，避免日後查詢順序調整就得改索引
+      const trendCall = mockDbSelect.mock.calls.find(([sql]) =>
+        String(sql).includes("GROUP BY date"),
+      );
+      expect(trendCall).toBeDefined();
+      const sql = trendCall![0] as string;
       expect(sql).toContain("WHERE timestamp >=");
       expect(sql).toContain("GROUP BY date");
       expect(sql).toContain("LIMIT");
-      const params = trendCall[1] as number[];
+      const params = trendCall![1] as number[];
       // cutoff 必須是「本地午夜」（與補零的日曆窗口對齊），而非滾動 24h
       const cutoff = new Date(params[0]);
       expect(cutoff.getHours()).toBe(0);
