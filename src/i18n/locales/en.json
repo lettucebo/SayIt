@@ -688,9 +688,8 @@
     },
     "upgradeNotice": {
       "title": "SayIt Update Summary",
-      "item1": "Microsoft Foundry deployments: Paste a full project endpoint to choose a chat model from its deployment list. SayIt applies a compatible model profile and request settings automatically while retaining manual overrides.",
-      "item2": "More reliable Foundry cleanup: When a reasoning model truncates its output or returns nothing, SayIt retries when appropriate and reports the outcome clearly — it also avoids incompatible token limits and `temperature` settings.",
-      "item3": "Clearer settings feedback: Results for save, test, and clear actions now appear beside the button that triggered them, so they remain easy to identify while the page scrolls.",
+      "item1": "Clearer Azure and Microsoft Foundry setup: Set resource names separately for chat, Whisper, and Speech, and SayIt derives the correct service endpoints and deployment list — endpoint overrides remain available for private DNS or custom domains, while existing settings and backups continue to work.",
+      "item2": "More reliable mixed-script replacements: Chinese rules could fail immediately after English letters or digits because of word-boundary matching. SayIt now preserves ASCII word boundaries while correctly applying Chinese, C++, and .NET rules.",
       "dismiss": "Got it"
     }
   },

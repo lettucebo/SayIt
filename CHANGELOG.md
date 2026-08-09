@@ -2,11 +2,15 @@
 
 SayIt 版本更新紀錄。
 
-## Unreleased
+## [0.16.1] - 2026-08-10
 
-### Changed
+### Added
 
 - Azure / Microsoft Foundry 設定改為以 resource name 與選填的 Foundry project name 為主，不再要求辨識 Azure OpenAI、Foundry project 或 Speech endpoint URL 的差異。SayIt 會依 chat、部署清單、Azure OpenAI Whisper 與 MAI-Transcribe 的 API 路徑自動推導正確的 Azure host。轉錄可另外指定 Whisper 或 Speech resource，並保留進階完整 endpoint 覆寫給 private DNS 與既有部署；舊設定會自動遷移且保留原本實際使用的 host。
+
+### Fixed
+
+- 中英夾雜文字的自訂取代規則有時不會套用：舊有 ASCII 詞界檢查無論規則首尾字元都要求前後不是英文或數字，導致中文規則在如 `Enjoy客戶短` 的文字中被前方 `y` 擋下。現在只在規則端點本身為 ASCII 英數或底線時加上對應詞界，仍避免 `cat` 誤命中 `category`，也讓中文、C++、.NET 等規則在混合文字中正確套用。
 
 ## [0.16.0] - 2026-08-07
 
