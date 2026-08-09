@@ -1,0 +1,876 @@
+{
+  "source": "l2-ml2021",
+  "description": "L2：取自公開資料集 ky552/ML2021_ASR_ST（台大李宏毅機器學習 2021 課程）的參考逐字稿。原始標註以空白分隔每個中文字元、且無標點；此處已還原成連續文字並把連續 5 句合併為一段，以貼近 SayIt「一次口述一段話」的使用情境。英文術語一律維持原始小寫，用來檢驗模型不會擅自改動大小寫。",
+  "license": "MIT（資料集授權）。引用：Yang et al., \"Investigating zero-shot generalizability on Mandarin-English code-switched ASR and speech-to-text translation of recent foundation models with self-supervision and weak supervision\", ICASSPW 2024. 取用時的 dataset revision（HuggingFace commit sha）：1e121cc419e87eed7d4825400baa06f102931944。",
+  "cases": [
+    {
+      "id": "l2-001",
+      "source": "l2-ml2021",
+      "input": "居然在testing的時候會是比較好的那以下這個實驗結果啊是引用自on large-batch training for deep learning generalization gap and sharp minima這篇paper的實驗結果",
+      "expected": "居然在 testing 的時候會是比較好的。那以下這個實驗結果是引用自 on large-batch training for deep learning generalization gap and sharp minima 這篇 paper 的實驗結果",
+      "phenomena": [
+        "code-switching",
+        "punctuation",
+        "latin-spacing",
+        "filler"
+      ],
+      "assertions": [
+        {
+          "kind": "preserveTerms",
+          "terms": [
+            "testing",
+            "on large-batch training for deep learning generalization gap and sharp minima",
+            "paper"
+          ]
+        },
+        {
+          "kind": "forbidSubstrings",
+          "values": [
+            "結果啊"
+          ]
+        },
+        {
+          "kind": "traditionalOnly"
+        },
+        {
+          "kind": "latinSpacing"
+        },
+        {
+          "kind": "fullWidthPunctuation"
+        },
+        {
+          "kind": "noTrailingPeriod"
+        },
+        {
+          "kind": "noMarkdown"
+        }
+      ],
+      "notes": "長篇英文論文標題必須整段原樣保留、內部不得插入中文標點。純語氣詞「啊」可刪，但承接用的「那」有語意要留。",
+      "provenance": "ky552/ML2021_ASR_ST train[6070-6074]（week2_3）",
+      "isFragment": true
+    },
+    {
+      "id": "l2-002",
+      "source": "l2-ml2021",
+      "input": "遇到你在optimization無法解決的問題用rl硬train一發就對了這樣遇到你無法optimize的loss function把它當做是rl的reward把你的decoder當做是agent",
+      "expected": "遇到你在 optimization 無法解決的問題，用 rl 硬 train 一發就對了。這樣遇到你無法 optimize 的 loss function，把它當做是 rl 的 reward，把你的 decoder 當做是 agent",
+      "phenomena": [
+        "code-switching",
+        "punctuation",
+        "latin-spacing"
+      ],
+      "assertions": [
+        {
+          "kind": "preserveTerms",
+          "terms": [
+            "optimization",
+            "rl",
+            "optimize",
+            "loss function",
+            "reward",
+            "decoder",
+            "agent"
+          ]
+        },
+        {
+          "kind": "traditionalOnly"
+        },
+        {
+          "kind": "latinSpacing"
+        },
+        {
+          "kind": "fullWidthPunctuation"
+        },
+        {
+          "kind": "noTrailingPeriod"
+        },
+        {
+          "kind": "noMarkdown"
+        }
+      ],
+      "notes": "英文動詞 train 夾在中文副詞「硬」與「一發」之間，兩側都要補空白；縮寫 rl 不得被展開成 reinforcement learning。",
+      "provenance": "ky552/ML2021_ASR_ST test[1595-1599]（week7_1）"
+    },
+    {
+      "id": "l2-003",
+      "source": "l2-ml2021",
+      "input": "直到有一篇paper叫做scrachgan它的title就開宗明義跟你炫耀說它可以train language gans form scrach form scrach就是不用pretrain的意思好所以它可以用",
+      "expected": "直到有一篇 paper 叫做 scrachgan，它的 title 就開宗明義跟你炫耀說它可以 train language gans form scrach。form scrach 就是不用 pretrain 的意思，所以它可以用",
+      "phenomena": [
+        "code-switching",
+        "punctuation",
+        "latin-spacing",
+        "repetition"
+      ],
+      "assertions": [
+        {
+          "kind": "preserveTerms",
+          "terms": [
+            "scrachgan",
+            "title",
+            "train language gans form scrach",
+            "pretrain"
+          ]
+        },
+        {
+          "kind": "traditionalOnly"
+        },
+        {
+          "kind": "latinSpacing"
+        },
+        {
+          "kind": "fullWidthPunctuation"
+        },
+        {
+          "kind": "noTrailingPeriod"
+        },
+        {
+          "kind": "noMarkdown"
+        }
+      ],
+      "notes": "原始標註本身就含拼寫變異（scrachgan、form scrach），這是真實語料的樣貌。說話者刻意重述 form scrach 來解釋詞義，屬有意義的重複，不可當贅語合併掉——這是與 l1-006 相對照的反例。",
+      "provenance": "ky552/ML2021_ASR_ST test[3040-3044]（week8_1）",
+      "isFragment": true
+    },
+    {
+      "id": "l2-004",
+      "source": "l2-ml2021",
+      "input": "假設你是full batch那你今天在update你的參數的時候你就是沿著一個loss function來update參數今天update參數的時候走到一個local minima走到一個saddle point",
+      "expected": "假設你是 full batch，那你今天在 update 你的參數的時候，你就是沿著一個 loss function 來 update 參數。今天 update 參數的時候走到一個 local minima，走到一個 saddle point",
+      "phenomena": [
+        "code-switching",
+        "punctuation",
+        "latin-spacing"
+      ],
+      "assertions": [
+        {
+          "kind": "preserveTerms",
+          "terms": [
+            "full batch",
+            "update",
+            "loss function",
+            "local minima",
+            "saddle point"
+          ]
+        },
+        {
+          "kind": "traditionalOnly"
+        },
+        {
+          "kind": "latinSpacing"
+        },
+        {
+          "kind": "fullWidthPunctuation"
+        },
+        {
+          "kind": "noTrailingPeriod"
+        },
+        {
+          "kind": "noMarkdown"
+        }
+      ],
+      "notes": "同一個英文動詞 update 在一段裡出現三次且都緊貼中文，任何一處漏補空白都會被斷言抓到。",
+      "provenance": "ky552/ML2021_ASR_ST train[6020-6024]（week2_3）"
+    },
+    {
+      "id": "l2-005",
+      "source": "l2-ml2021",
+      "input": "你自己在家沒辦法這麼做的discriminator加regularization embedding要pretrain改一下reinforcement learning的algorithm最後就有scratchgan",
+      "expected": "你自己在家沒辦法這麼做的。discriminator 加 regularization，embedding 要 pretrain，改一下 reinforcement learning 的 algorithm，最後就有 scratchgan",
+      "phenomena": [
+        "code-switching",
+        "punctuation",
+        "latin-spacing",
+        "list"
+      ],
+      "assertions": [
+        {
+          "kind": "preserveTerms",
+          "terms": [
+            "discriminator",
+            "regularization",
+            "embedding",
+            "pretrain",
+            "reinforcement learning",
+            "algorithm",
+            "scratchgan"
+          ]
+        },
+        {
+          "kind": "traditionalOnly"
+        },
+        {
+          "kind": "latinSpacing"
+        },
+        {
+          "kind": "fullWidthPunctuation"
+        },
+        {
+          "kind": "noTrailingPeriod"
+        },
+        {
+          "kind": "noMarkdown"
+        }
+      ],
+      "notes": "後半是連續四個並列的做法，屬口語列舉，用逗號連接即可，不該硬拆成列點。句首英文字 discriminator 開頭不需前置空白。",
+      "provenance": "ky552/ML2021_ASR_ST test[3070-3074]（week8_1）"
+    },
+    {
+      "id": "l2-006",
+      "source": "l2-ml2021",
+      "input": "l2再算gradient你還是有辦法training你的model還是有辦法讓你的loss變小所以今天這種noisy的update的方式結果反而對training",
+      "expected": "l2 再算 gradient，你還是有辦法 training 你的 model，還是有辦法讓你的 loss 變小，所以今天這種 noisy 的 update 的方式，結果反而對 training",
+      "phenomena": [
+        "code-switching",
+        "punctuation",
+        "latin-spacing"
+      ],
+      "assertions": [
+        {
+          "kind": "preserveTerms",
+          "terms": [
+            "l2",
+            "gradient",
+            "training",
+            "model",
+            "loss",
+            "noisy",
+            "update"
+          ]
+        },
+        {
+          "kind": "traditionalOnly"
+        },
+        {
+          "kind": "latinSpacing"
+        },
+        {
+          "kind": "fullWidthPunctuation"
+        },
+        {
+          "kind": "noTrailingPeriod"
+        },
+        {
+          "kind": "noMarkdown"
+        }
+      ],
+      "notes": "l2 是英數混合的識別字（L2 正規化），不得被改寫成中文或加上標點；句子在「對 training」處被截斷，輸出不得替它補完。",
+      "provenance": "ky552/ML2021_ASR_ST train[6050-6054]（week2_3）",
+      "isFragment": true
+    },
+    {
+      "id": "l2-007",
+      "source": "l2-ml2021",
+      "input": "那這篇paper裡面呢作者train了六個network裡面有cnn的有fully connected network的做在不同的corpus上來代表說這個實驗是很泛用的",
+      "expected": "那這篇 paper 裡面，作者 train 了六個 network，裡面有 cnn 的，有 fully connected network 的，做在不同的 corpus 上，來代表說這個實驗是很泛用的",
+      "phenomena": [
+        "code-switching",
+        "punctuation",
+        "latin-spacing",
+        "filler"
+      ],
+      "assertions": [
+        {
+          "kind": "preserveTerms",
+          "terms": [
+            "paper",
+            "train",
+            "network",
+            "cnn",
+            "fully connected network",
+            "corpus"
+          ]
+        },
+        {
+          "kind": "forbidSubstrings",
+          "values": [
+            "裡面呢"
+          ]
+        },
+        {
+          "kind": "traditionalOnly"
+        },
+        {
+          "kind": "latinSpacing"
+        },
+        {
+          "kind": "fullWidthPunctuation"
+        },
+        {
+          "kind": "noTrailingPeriod"
+        },
+        {
+          "kind": "noMarkdown"
+        }
+      ],
+      "notes": "句中的「呢」是純停頓語氣詞可刪；但 l2-015 句尾的「呢」構成疑問語氣必須保留，兩者對照可測出刪贅詞是否過度。",
+      "provenance": "ky552/ML2021_ASR_ST train[6075-6079]（week2_3）"
+    },
+    {
+      "id": "l2-008",
+      "source": "l2-ml2021",
+      "input": "這個batch normalization的positive impact因為他說如果我們要讓network這個error surface變得比較不崎嶇其實不見得要做batch normalization",
+      "expected": "這個 batch normalization 的 positive impact，因為他說如果我們要讓 network 這個 error surface 變得比較不崎嶇，其實不見得要做 batch normalization",
+      "phenomena": [
+        "code-switching",
+        "punctuation",
+        "latin-spacing"
+      ],
+      "assertions": [
+        {
+          "kind": "preserveTerms",
+          "terms": [
+            "batch normalization",
+            "positive impact",
+            "network",
+            "error surface"
+          ]
+        },
+        {
+          "kind": "requireSubstrings",
+          "values": [
+            "不見得"
+          ]
+        },
+        {
+          "kind": "traditionalOnly"
+        },
+        {
+          "kind": "latinSpacing"
+        },
+        {
+          "kind": "fullWidthPunctuation"
+        },
+        {
+          "kind": "noTrailingPeriod"
+        },
+        {
+          "kind": "noMarkdown"
+        }
+      ],
+      "notes": "「不見得」是情態限定詞，刪掉會讓語意從「不一定要做」變成「不要做」，屬忠實層必須保留。",
+      "provenance": "ky552/ML2021_ASR_ST train[12030-12034]（week5_2）"
+    },
+    {
+      "id": "l2-009",
+      "source": "l2-ml2021",
+      "input": "訓練的時候我們minimize的是cross entropy minimize cross entropy真的可以maximize bleu score嗎不一定",
+      "expected": "訓練的時候我們 minimize 的是 cross entropy。minimize cross entropy 真的可以 maximize bleu score 嗎？不一定",
+      "phenomena": [
+        "code-switching",
+        "punctuation",
+        "latin-spacing",
+        "question-form"
+      ],
+      "assertions": [
+        {
+          "kind": "preserveTerms",
+          "terms": [
+            "minimize",
+            "cross entropy",
+            "maximize",
+            "bleu score"
+          ]
+        },
+        {
+          "kind": "requireSubstrings",
+          "values": [
+            "嗎？",
+            "不一定"
+          ]
+        },
+        {
+          "kind": "traditionalOnly"
+        },
+        {
+          "kind": "latinSpacing"
+        },
+        {
+          "kind": "fullWidthPunctuation"
+        },
+        {
+          "kind": "noTrailingPeriod"
+        },
+        {
+          "kind": "noMarkdown"
+        }
+      ],
+      "notes": "自問自答結構：問句要補問號，但緊接著的答案「不一定」是段落最後一句，不加句號。bleu 維持原始小寫，不得被「修正」成 BLEU。",
+      "provenance": "ky552/ML2021_ASR_ST test[1545-1549]（week7_1）"
+    },
+    {
+      "id": "l2-010",
+      "source": "l2-ml2021",
+      "input": "不見得可以讓bleu score比較大所以你發現說在助教的程式裡面比如說在助教在做validation的時候並不是拿cross entropy來挑最好的model他並不是挑cross entropy最低的那個model",
+      "expected": "不見得可以讓 bleu score 比較大，所以你發現說在助教的程式裡面，比如說在助教在做 validation 的時候，並不是拿 cross entropy 來挑最好的 model，他並不是挑 cross entropy 最低的那個 model",
+      "phenomena": [
+        "code-switching",
+        "punctuation",
+        "latin-spacing"
+      ],
+      "assertions": [
+        {
+          "kind": "preserveTerms",
+          "terms": [
+            "bleu score",
+            "validation",
+            "cross entropy",
+            "model"
+          ]
+        },
+        {
+          "kind": "requireSubstrings",
+          "values": [
+            "並不是拿",
+            "並不是挑"
+          ]
+        },
+        {
+          "kind": "traditionalOnly"
+        },
+        {
+          "kind": "latinSpacing"
+        },
+        {
+          "kind": "fullWidthPunctuation"
+        },
+        {
+          "kind": "noTrailingPeriod"
+        },
+        {
+          "kind": "noMarkdown"
+        }
+      ],
+      "notes": "一句裡有兩個否定「並不是」，都屬忠實層；後半兩句是說話者換句話說同一件事，但用詞不同（拿／挑），不算重複，不得合併。",
+      "provenance": "ky552/ML2021_ASR_ST test[1555-1559]（week7_1）"
+    },
+    {
+      "id": "l2-011",
+      "source": "l2-ml2021",
+      "input": "先把每一層都訓練好再全部接起來做微調這件事情那這邊的微調並不是bert的微調它是微調那個pre-train的model好那這個restricted boltzmann machine",
+      "expected": "先把每一層都訓練好，再全部接起來做微調這件事情。那這邊的微調並不是 bert 的微調，它是微調那個 pre-train 的 model。那這個 restricted boltzmann machine",
+      "phenomena": [
+        "code-switching",
+        "punctuation",
+        "latin-spacing",
+        "filler"
+      ],
+      "assertions": [
+        {
+          "kind": "preserveTerms",
+          "terms": [
+            "bert",
+            "pre-train",
+            "model",
+            "restricted boltzmann machine"
+          ]
+        },
+        {
+          "kind": "traditionalOnly"
+        },
+        {
+          "kind": "latinSpacing"
+        },
+        {
+          "kind": "fullWidthPunctuation"
+        },
+        {
+          "kind": "noTrailingPeriod"
+        },
+        {
+          "kind": "noMarkdown"
+        }
+      ],
+      "notes": "pre-train 的連字號屬識別字內部不得插入空白，也不得與同段的 pretrain 寫法互相「統一」。轉場語氣詞「好」可刪。",
+      "provenance": "ky552/ML2021_ASR_ST test[7075-7079]（week10_2）",
+      "isFragment": true
+    },
+    {
+      "id": "l2-012",
+      "source": "l2-ml2021",
+      "input": "computing的intensity那至於怎麼做到adversarial training for free怎麼不在使用額外的計算的情況下就達到adversarial training的效果那這個把文獻放在這邊",
+      "expected": "computing 的 intensity。那至於怎麼做到 adversarial training for free，怎麼不在使用額外的計算的情況下就達到 adversarial training 的效果，那這個把文獻放在這邊",
+      "phenomena": [
+        "code-switching",
+        "punctuation",
+        "latin-spacing"
+      ],
+      "assertions": [
+        {
+          "kind": "preserveTerms",
+          "terms": [
+            "computing",
+            "intensity",
+            "adversarial training for free",
+            "adversarial training"
+          ]
+        },
+        {
+          "kind": "traditionalOnly"
+        },
+        {
+          "kind": "latinSpacing"
+        },
+        {
+          "kind": "fullWidthPunctuation"
+        },
+        {
+          "kind": "noTrailingPeriod"
+        },
+        {
+          "kind": "noMarkdown"
+        }
+      ],
+      "notes": "adversarial training for free 是論文名，for 與 free 屬名稱一部分不可拆；同段稍後單獨的 adversarial training 則是一般術語，兩者都要原樣保留。",
+      "provenance": "ky552/ML2021_ASR_ST test[9060-9064]（week11_1）",
+      "isFragment": true
+    },
+    {
+      "id": "l2-013",
+      "source": "l2-ml2021",
+      "input": "所以等於是等於你每一次update你的參數的時候你用的loss function都是越有差異的你選到第一個batch的時候你是用l1來算你的gradient",
+      "expected": "所以等於你每一次 update 你的參數的時候，你用的 loss function 都是越有差異的。你選到第一個 batch 的時候，你是用 l1 來算你的 gradient",
+      "phenomena": [
+        "code-switching",
+        "repetition",
+        "punctuation",
+        "latin-spacing"
+      ],
+      "assertions": [
+        {
+          "kind": "preserveTerms",
+          "terms": [
+            "update",
+            "loss function",
+            "batch",
+            "l1",
+            "gradient"
+          ]
+        },
+        {
+          "kind": "forbidSubstrings",
+          "values": [
+            "等於是等於"
+          ]
+        },
+        {
+          "kind": "traditionalOnly"
+        },
+        {
+          "kind": "latinSpacing"
+        },
+        {
+          "kind": "fullWidthPunctuation"
+        },
+        {
+          "kind": "noTrailingPeriod"
+        },
+        {
+          "kind": "noMarkdown"
+        }
+      ],
+      "notes": "「等於是等於」是說話者卡詞造成的即時重複，要收斂成一次；與 l2-003 那種為了解釋而刻意重述的情況必須區分開來。",
+      "provenance": "ky552/ML2021_ASR_ST train[6035-6039]（week2_3）"
+    },
+    {
+      "id": "l2-014",
+      "source": "l2-ml2021",
+      "input": "data set有60000筆那你就是一個batch裡面有6000筆資料好然後他想辦法在大的batch跟小的batch都train到差不多的training的accuracy",
+      "expected": "data set 有 60000 筆，那你就是一個 batch 裡面有 6000 筆資料。然後他想辦法在大的 batch 跟小的 batch 都 train 到差不多的 training 的 accuracy",
+      "phenomena": [
+        "code-switching",
+        "punctuation",
+        "latin-spacing"
+      ],
+      "assertions": [
+        {
+          "kind": "preserveTerms",
+          "terms": [
+            "data set",
+            "batch",
+            "train",
+            "training",
+            "accuracy"
+          ]
+        },
+        {
+          "kind": "requireSubstrings",
+          "values": [
+            "60000",
+            "6000"
+          ]
+        },
+        {
+          "kind": "traditionalOnly"
+        },
+        {
+          "kind": "latinSpacing"
+        },
+        {
+          "kind": "fullWidthPunctuation"
+        },
+        {
+          "kind": "noTrailingPeriod"
+        },
+        {
+          "kind": "noMarkdown"
+        }
+      ],
+      "notes": "空白規則同樣適用於阿拉伯數字：「有 60000 筆」兩側都要空白。兩個數字屬忠實層，不得被改寫成「六萬」或加上千分位。",
+      "provenance": "ky552/ML2021_ASR_ST train[6085-6089]（week2_3）"
+    },
+    {
+      "id": "l2-015",
+      "source": "l2-ml2021",
+      "input": "你就自己參見這篇文章好那為什麼batch normalization會比較好呢那在這篇how does batch normalization help optimization這篇論文裡面",
+      "expected": "你就自己參見這篇文章。那為什麼 batch normalization 會比較好呢？那在這篇 how does batch normalization help optimization 這篇論文裡面",
+      "phenomena": [
+        "code-switching",
+        "punctuation",
+        "latin-spacing",
+        "question-form"
+      ],
+      "assertions": [
+        {
+          "kind": "preserveTerms",
+          "terms": [
+            "batch normalization",
+            "how does batch normalization help optimization"
+          ]
+        },
+        {
+          "kind": "requireSubstrings",
+          "values": [
+            "比較好呢？"
+          ]
+        },
+        {
+          "kind": "traditionalOnly"
+        },
+        {
+          "kind": "latinSpacing"
+        },
+        {
+          "kind": "fullWidthPunctuation"
+        },
+        {
+          "kind": "noTrailingPeriod"
+        },
+        {
+          "kind": "noMarkdown"
+        }
+      ],
+      "notes": "句尾的「呢」構成疑問語氣，必須保留並補問號——與 l2-007 句中可刪的「呢」形成對照。論文標題與同名術語相鄰，斷句要落在正確位置。",
+      "provenance": "ky552/ML2021_ASR_ST train[12015-12019]（week5_2）"
+    },
+    {
+      "id": "l2-016",
+      "source": "l2-ml2021",
+      "input": "而是挑bleu score最高的那一個model所以我們訓練的時候是看cross entropy但是我們實際上你作業真正評估的時候看的是bleu score",
+      "expected": "而是挑 bleu score 最高的那一個 model，所以我們訓練的時候是看 cross entropy，但是我們實際上你作業真正評估的時候看的是 bleu score",
+      "phenomena": [
+        "code-switching",
+        "punctuation",
+        "latin-spacing"
+      ],
+      "assertions": [
+        {
+          "kind": "preserveTerms",
+          "terms": [
+            "bleu score",
+            "model",
+            "cross entropy"
+          ]
+        },
+        {
+          "kind": "requireSubstrings",
+          "values": [
+            "而是挑"
+          ]
+        },
+        {
+          "kind": "traditionalOnly"
+        },
+        {
+          "kind": "latinSpacing"
+        },
+        {
+          "kind": "fullWidthPunctuation"
+        },
+        {
+          "kind": "noTrailingPeriod"
+        },
+        {
+          "kind": "noMarkdown"
+        }
+      ],
+      "notes": "句子以「而是」開頭承接上一段的「不是」，是被切斷的半句。輸出不得為了讀起來完整而補上前半句。",
+      "provenance": "ky552/ML2021_ASR_ST test[1560-1564]（week7_1）",
+      "isFragment": true
+    },
+    {
+      "id": "l2-017",
+      "source": "l2-ml2021",
+      "input": "所以你validation set其實應該考慮用bleu score對不對那接下來有人就會想說那我們能不能在training的時候就考慮bleu score呢",
+      "expected": "所以你 validation set 其實應該考慮用 bleu score 對不對？那接下來有人就會想說，那我們能不能在 training 的時候就考慮 bleu score 呢？",
+      "phenomena": [
+        "code-switching",
+        "punctuation",
+        "latin-spacing",
+        "question-form"
+      ],
+      "assertions": [
+        {
+          "kind": "preserveTerms",
+          "terms": [
+            "validation set",
+            "bleu score",
+            "training"
+          ]
+        },
+        {
+          "kind": "requireSubstrings",
+          "values": [
+            "對不對？"
+          ]
+        },
+        {
+          "kind": "traditionalOnly"
+        },
+        {
+          "kind": "latinSpacing"
+        },
+        {
+          "kind": "fullWidthPunctuation"
+        },
+        {
+          "kind": "noTrailingPeriod"
+        },
+        {
+          "kind": "noMarkdown"
+        },
+        {
+          "kind": "endsWithQuestionMark"
+        }
+      ],
+      "notes": "一段裡有兩個問句：反問的「對不對」與句尾的「呢」，兩處都要補問號。段落結尾是問號而非句號，符合「句尾不補句號但問號照常」。",
+      "provenance": "ky552/ML2021_ASR_ST test[1565-1569]（week7_1）"
+    },
+    {
+      "id": "l2-018",
+      "source": "l2-ml2021",
+      "input": "是因為max造成不能做gradient descent嗎那那個cnn裡面不是有那個max pooling嗎那怎麼還可以做gradient descent這個問題就留給你自己深思一下為什麼在這個地方",
+      "expected": "是因為 max 造成不能做 gradient descent 嗎？那那個 cnn 裡面不是有那個 max pooling 嗎？那怎麼還可以做 gradient descent？這個問題就留給你自己深思一下，為什麼在這個地方",
+      "phenomena": [
+        "code-switching",
+        "punctuation",
+        "latin-spacing",
+        "question-form"
+      ],
+      "assertions": [
+        {
+          "kind": "preserveTerms",
+          "terms": [
+            "max",
+            "gradient descent",
+            "cnn",
+            "max pooling"
+          ]
+        },
+        {
+          "kind": "traditionalOnly"
+        },
+        {
+          "kind": "latinSpacing"
+        },
+        {
+          "kind": "fullWidthPunctuation"
+        },
+        {
+          "kind": "noTrailingPeriod"
+        },
+        {
+          "kind": "noMarkdown"
+        }
+      ],
+      "notes": "連續三個問句，其中第三句沒有疑問詞尾，只能靠語意判斷；「那那個」是口語重複但兩字詞性不同（連接詞＋指示詞），不可合併成一個「那」。",
+      "provenance": "ky552/ML2021_ASR_ST test[3000-3004]（week8_1）"
+    },
+    {
+      "id": "l2-019",
+      "source": "l2-ml2021",
+      "input": "所以那時候的信念是每一層應該分開訓練所以hinton用的是一個叫做restricted boltzmann machine的技術縮寫是rbm",
+      "expected": "所以那時候的信念是每一層應該分開訓練，所以 hinton 用的是一個叫做 restricted boltzmann machine 的技術，縮寫是 rbm",
+      "phenomena": [
+        "code-switching",
+        "punctuation",
+        "latin-spacing"
+      ],
+      "assertions": [
+        {
+          "kind": "preserveTerms",
+          "terms": [
+            "hinton",
+            "restricted boltzmann machine",
+            "rbm"
+          ]
+        },
+        {
+          "kind": "traditionalOnly"
+        },
+        {
+          "kind": "latinSpacing"
+        },
+        {
+          "kind": "fullWidthPunctuation"
+        },
+        {
+          "kind": "noTrailingPeriod"
+        },
+        {
+          "kind": "noMarkdown"
+        }
+      ],
+      "notes": "資料集把人名 hinton 與縮寫 rbm 都標成小寫。依「保留原文英文」規則不得擅自改成 Hinton／RBM——大小寫正規化屬於改寫，不屬於校對。",
+      "provenance": "ky552/ML2021_ASR_ST test[7045-7049]（week10_2）"
+    },
+    {
+      "id": "l2-020",
+      "source": "l2-ml2021",
+      "input": "就假設我們今天在找x tilde的時候你用的是algorithm abcd然後接下來有人在實際攻擊的時候他發明了一個algorithm f去攻擊你的模型往往就能成功",
+      "expected": "就假設我們今天在找 x tilde 的時候，你用的是 algorithm abcd，然後接下來有人在實際攻擊的時候，他發明了一個 algorithm f 去攻擊你的模型，往往就能成功",
+      "phenomena": [
+        "code-switching",
+        "punctuation",
+        "latin-spacing"
+      ],
+      "assertions": [
+        {
+          "kind": "preserveTerms",
+          "terms": [
+            "x tilde",
+            "algorithm abcd",
+            "algorithm f"
+          ]
+        },
+        {
+          "kind": "traditionalOnly"
+        },
+        {
+          "kind": "latinSpacing"
+        },
+        {
+          "kind": "fullWidthPunctuation"
+        },
+        {
+          "kind": "noTrailingPeriod"
+        },
+        {
+          "kind": "noMarkdown"
+        }
+      ],
+      "notes": "單字母的數學符號（x tilde、algorithm f）最容易被誤刪或誤併入相鄰中文；abcd 是唸出來的字母序列不得加空白拆開。",
+      "provenance": "ky552/ML2021_ASR_ST test[9020-9024]（week11_1）"
+    }
+  ]
+}
