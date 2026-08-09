@@ -34,7 +34,8 @@ export class AzureDeploymentListError extends Error {
 }
 
 export interface AzureDeploymentListOptions {
-  endpoint: string;
+  foundryEndpoint: string;
+  v1Endpoint: string;
   projectName: string;
   authMode: AzureAuthHeaderMode;
   authValue: string;
@@ -162,7 +163,7 @@ async function listFoundryDeploymentsWithMetadata(
   deploymentList: AzureChatDeployment[];
   capabilityFiltered: boolean;
 }> {
-  const base = normalizeAzureEndpoint(options.endpoint);
+  const base = normalizeAzureEndpoint(options.foundryEndpoint);
   const origin = new URL(base).origin;
   const headers = buildHeaders(options.authMode, options.authValue);
   const chatDeploymentList: AzureChatDeployment[] = [];
@@ -196,7 +197,7 @@ export async function listFoundryDeployments(
 export async function listAzureV1Models(
   options: Omit<AzureDeploymentListOptions, "projectName">,
 ): Promise<AzureChatDeployment[]> {
-  const base = normalizeAzureEndpoint(options.endpoint);
+  const base = normalizeAzureEndpoint(options.v1Endpoint);
   const data = (await fetchJson(
     `${base}/openai/v1/models`,
     buildHeaders(options.authMode, options.authValue),
@@ -213,7 +214,7 @@ export async function listAzureV1Models(
 export async function listAzureChatDeployments(
   options: AzureDeploymentListOptions,
 ): Promise<AzureDeploymentListResult> {
-  if (options.projectName) {
+  if (options.projectName && options.foundryEndpoint) {
     try {
       const result = await listFoundryDeploymentsWithMetadata(options);
       return {

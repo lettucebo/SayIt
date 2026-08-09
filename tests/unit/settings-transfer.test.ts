@@ -34,7 +34,12 @@ describe("EXPORTABLE_SETTING_KEYS 完整性", () => {
       "geminiTranscriptionModelId",
       "geminiFreeQuotaRequests",
       "geminiFreeQuotaPeriod",
-      "azureSpeechEndpoint",
+      "azureResourceName",
+      "azureWhisperResourceName",
+      "azureSpeechResourceName",
+      "azureEndpointOverride",
+      "azureWhisperEndpointOverride",
+      "azureSpeechEndpointOverride",
       "azureSpeechApiKey",
       "azureProjectName",
       "maiCandidateLocales",
@@ -55,7 +60,12 @@ describe("EXPORTABLE_SETTING_KEYS 完整性", () => {
       geminiTranscriptionModelId: "gemini-3.5-flash-lite",
       geminiFreeQuotaRequests: 500,
       geminiFreeQuotaPeriod: "daily",
-      azureSpeechEndpoint: "https://speech.cognitiveservices.azure.com",
+      azureResourceName: "main-resource",
+      azureWhisperResourceName: "whisper-resource",
+      azureSpeechResourceName: "speech-resource",
+      azureEndpointOverride: "https://main.services.ai.azure.com",
+      azureWhisperEndpointOverride: "https://whisper.openai.azure.com",
+      azureSpeechEndpointOverride: "https://speech.cognitiveservices.azure.com",
       azureSpeechApiKey: "speech-key",
       azureChatModelFamily: "deepseek",
       azureChatModelFamilySource: "auto",
@@ -67,8 +77,11 @@ describe("EXPORTABLE_SETTING_KEYS 完整性", () => {
     expect(cleaned.geminiTranscriptionModelId).toBe("gemini-3.5-flash-lite");
     expect(cleaned.geminiFreeQuotaRequests).toBe(500);
     expect(cleaned.geminiFreeQuotaPeriod).toBe("daily");
-    expect(cleaned.azureSpeechEndpoint).toBe(
-      "https://speech.cognitiveservices.azure.com",
+    expect(cleaned.azureResourceName).toBe("main-resource");
+    expect(cleaned.azureWhisperResourceName).toBe("whisper-resource");
+    expect(cleaned.azureSpeechResourceName).toBe("speech-resource");
+    expect(cleaned.azureEndpointOverride).toBe(
+      "https://main.services.ai.azure.com",
     );
     expect(cleaned.maiCandidateLocales).toEqual(["zh-TW"]);
     expect(cleaned.azureChatModelFamily).toBe("deepseek");

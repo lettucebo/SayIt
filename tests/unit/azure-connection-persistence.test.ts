@@ -43,7 +43,9 @@ const CLIENT = "1671ffd4-5c2a-44dd-83a2-e1c8267aa51b";
 function baseConfig(overrides: Record<string, unknown> = {}) {
   return {
     enabled: true,
-    endpoint: "https://demo.openai.azure.com",
+    resourceName: "demo",
+    projectName: "",
+    endpointOverride: "",
     authMode: "entra" as const,
     apiKey: "",
     tenantId: TENANT,
@@ -142,10 +144,13 @@ describe("saveAzureConnection 的資料保存性", () => {
     await store.saveAzureConnection(
       baseConfig({ authMode: "key", apiKey: "openai-resource-key" }),
     );
-    await store.saveAzureSpeechConnection(
-      "https://speech.cognitiveservices.azure.com/",
-      "speech-resource-key",
-    );
+    await store.saveAzureTranscriptionResources({
+      whisperResourceName: "",
+      whisperEndpointOverride: "",
+      speechResourceName: "speech",
+      speechEndpointOverride: "",
+      apiKey: "speech-resource-key",
+    });
     await store.saveMaiCandidateLocales(["zh-TW"]);
     await store.saveMaiTranscribeStyle("verbatim");
     await store.saveWhisperProvider("mai");
@@ -160,6 +165,40 @@ describe("saveAzureConnection 的資料保存性", () => {
     expect(store.hasWhisperConfig).toBe(true);
     expect(mockStoreData.get("azureApiKey")).toBe("openai-resource-key");
     expect(mockStoreData.get("azureSpeechApiKey")).toBe("speech-resource-key");
+  });
+
+  it("[P0] Whisper 可使用獨立資源，不依賴 chat resource", async () => {
+    const { useSettingsStore } = await import(
+      "../../src/stores/useSettingsStore"
+    );
+    const store = useSettingsStore();
+    await store.loadSettings();
+
+    await store.saveAzureConnection(
+      baseConfig({
+        resourceName: "",
+        authMode: "key",
+        apiKey: "",
+        transcriptionResources: {
+          whisperResourceName: "whisper-resource",
+          whisperEndpointOverride: "",
+          speechResourceName: "",
+          speechEndpointOverride: "",
+          apiKey: "whisper-resource-key",
+        },
+      }),
+    );
+    await store.saveAzureWhisperDeployment("whisper");
+    await store.saveWhisperProvider("azure");
+
+    const config = await store.getWhisperRequestConfig();
+    expect(config.provider).toBe("azure");
+    if (config.provider !== "azure") throw new Error("Expected Azure config");
+    expect(config.endpoint).toBe(
+      "https://whisper-resource.openai.azure.com",
+    );
+    expect(config.apiKey).toBe("whisper-resource-key");
+    expect(store.hasWhisperConfig).toBe(true);
   });
 
   it("[P0] 設定尚未載入完成時拒絕儲存，避免空白輸入覆寫既有設定", async () => {
@@ -179,7 +218,7 @@ describe("saveAzureConnection 的資料保存性", () => {
     await expect(
       store.saveAzureConnection(
         baseConfig({
-          endpoint: "",
+          resourceName: "",
           tenantId: "",
           clientId: "",
           clientSecret: "",
@@ -408,7 +447,7 @@ describe("saveAzureConnection 的資料保存性", () => {
     // 模擬另一個視窗換了一整組設定
     const NEW_TENANT = "77777777-7777-7777-7777-777777777777";
     const NEW_CLIENT = "66666666-6666-6666-6666-666666666666";
-    mockStoreData.set("azureEndpoint", "https://other.openai.azure.com");
+    mockStoreData.set("azureResourceName", "other");
     mockStoreData.set("azureTenantId", NEW_TENANT);
     mockStoreData.set("azureClientId", NEW_CLIENT);
     mockStoreData.set("azureAuthMode", "key");

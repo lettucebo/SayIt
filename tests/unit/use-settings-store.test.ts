@@ -657,7 +657,52 @@ describe("useSettingsStore", () => {
   });
 
   describe("azureProjectName", () => {
-    it("[P0] 儲存完整 Foundry 專案端點時應拆出 origin 與 project 名稱", async () => {
+    it("[P0] 載入舊 Foundry project endpoint 時保留既有有效 host 並遷移", async () => {
+      mockStoreData.set(
+        "azureEndpoint",
+        "https://legacy.services.ai.azure.com/api/projects/voice-project",
+      );
+      const { useSettingsStore } = await import(
+        "../../src/stores/useSettingsStore"
+      );
+      const store = useSettingsStore();
+
+      await store.loadSettings();
+
+      expect(store.azureResourceName).toBe("legacy");
+      expect(store.azureProjectName).toBe("voice-project");
+      expect(store.azureEndpointOverride).toBe(
+        "https://legacy.services.ai.azure.com",
+      );
+      expect(store.azureEndpoint).toBe("https://legacy.services.ai.azure.com");
+      expect(mockStoreData.has("azureEndpoint")).toBe(false);
+    });
+
+    it("[P0] 匯入舊 endpoint 備份時會先轉成新的資源欄位", async () => {
+      const { useSettingsStore } = await import(
+        "../../src/stores/useSettingsStore"
+      );
+      const store = useSettingsStore();
+      await store.loadSettings();
+
+      await store.importSettings({
+        azureEndpoint:
+          "https://backup.services.ai.azure.com/api/projects/backup-project",
+        azureSpeechEndpoint:
+          "https://speech.cognitiveservices.azure.com",
+      });
+
+      expect(mockStoreData.get("azureResourceName")).toBe("backup");
+      expect(mockStoreData.get("azureProjectName")).toBe("backup-project");
+      expect(mockStoreData.get("azureEndpointOverride")).toBe(
+        "https://backup.services.ai.azure.com",
+      );
+      expect(mockStoreData.get("azureSpeechResourceName")).toBe("speech");
+      expect(mockStoreData.has("azureEndpoint")).toBe(false);
+      expect(mockStoreData.has("azureSpeechEndpoint")).toBe(false);
+    });
+
+    it("[P0] 儲存 resource 與專案名稱時應持久化語意欄位", async () => {
       const { useSettingsStore } = await import(
         "../../src/stores/useSettingsStore"
       );
@@ -666,8 +711,9 @@ describe("useSettingsStore", () => {
 
       await store.saveAzureConnection({
         enabled: true,
-        endpoint:
-          "https://r.services.ai.azure.com/api/projects/voice-project",
+        resourceName: "resource",
+        projectName: "voice-project",
+        endpointOverride: "https://resource.services.ai.azure.com",
         authMode: "key",
         apiKey: "key",
         tenantId: "",
@@ -677,14 +723,16 @@ describe("useSettingsStore", () => {
       });
 
       expect(mockStoreSet).toHaveBeenCalledWith(
-        "azureEndpoint",
-        "https://r.services.ai.azure.com",
+        "azureResourceName",
+        "resource",
       );
       expect(mockStoreSet).toHaveBeenCalledWith(
         "azureProjectName",
         "voice-project",
       );
-      expect(store.azureEndpoint).toBe("https://r.services.ai.azure.com");
+      expect(store.azureEndpoint).toBe(
+        "https://resource.services.ai.azure.com",
+      );
       expect(store.azureProjectName).toBe("voice-project");
     });
 

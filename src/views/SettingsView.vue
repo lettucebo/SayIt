@@ -783,7 +783,6 @@ const whisperModelFeedback = useFeedbackMessage();
 const geminiTranscriptionModelFeedback = useFeedbackMessage();
 const geminiQuotaFeedback = useFeedbackMessage();
 const azureWhisperDeploymentFeedback = useFeedbackMessage();
-const azureSpeechFeedback = useFeedbackMessage();
 const maiOptionsFeedback = useFeedbackMessage();
 const llmModelFeedback = useFeedbackMessage();
 
@@ -854,7 +853,13 @@ const azureLifecycleFeedback = useFeedbackMessage();
 const azureConnectionFeedback = useFeedbackMessage();
 const azureSignInFeedback = useFeedbackMessage();
 const azureEnabledInput = ref(false);
-const azureEndpointInput = ref("");
+const azureResourceNameInput = ref("");
+const azureProjectNameInput = ref("");
+const azureEndpointOverrideInput = ref("");
+const azureWhisperResourceNameInput = ref("");
+const azureWhisperEndpointOverrideInput = ref("");
+const azureSpeechResourceNameInput = ref("");
+const azureSpeechEndpointOverrideInput = ref("");
 const azureAuthModeInput = ref<AzureAuthMode>("key");
 const azureApiKeyInput = ref("");
 const azureTenantIdInput = ref("");
@@ -866,9 +871,10 @@ const isAzureClientSecretVisible = ref(false);
 const isSubmittingAzure = ref(false);
 const azureChatDeploymentInput = ref("");
 const azureWhisperDeploymentInput = ref("");
-const azureSpeechEndpointInput = ref("");
 const azureSpeechApiKeyInput = ref("");
 const isAzureSpeechApiKeyVisible = ref(false);
+const isAzureTranscriptionResourcesVisible = ref(false);
+const isAzureEndpointOverridesVisible = ref(false);
 const isLoadingAzureDeployments = ref(false);
 const azureDeploymentList = ref<AzureChatDeployment[]>([]);
 const azureDeploymentListResult = ref<AzureDeploymentListResult | null>(null);
@@ -939,9 +945,23 @@ const canAutoLoadAzureDeployments = computed(
 
 function loadAzureInputsFromStore() {
   azureEnabledInput.value = settingsStore.azureEnabled;
-  azureEndpointInput.value = settingsStore.azureProjectName
-    ? `${settingsStore.azureEndpoint}/api/projects/${encodeURIComponent(settingsStore.azureProjectName)}`
-    : settingsStore.azureEndpoint;
+  azureResourceNameInput.value = settingsStore.azureResourceName;
+  azureProjectNameInput.value = settingsStore.azureProjectName;
+  azureEndpointOverrideInput.value = settingsStore.azureEndpointOverride;
+  azureWhisperResourceNameInput.value =
+    settingsStore.azureWhisperResourceName;
+  azureWhisperEndpointOverrideInput.value =
+    settingsStore.azureWhisperEndpointOverride;
+  azureSpeechResourceNameInput.value = settingsStore.azureSpeechResourceName;
+  azureSpeechEndpointOverrideInput.value =
+    settingsStore.azureSpeechEndpointOverride;
+  isAzureTranscriptionResourcesVisible.value =
+    azureWhisperResourceNameInput.value !== "" ||
+    azureSpeechResourceNameInput.value !== "";
+  isAzureEndpointOverridesVisible.value =
+    azureEndpointOverrideInput.value !== "" ||
+    azureWhisperEndpointOverrideInput.value !== "" ||
+    azureSpeechEndpointOverrideInput.value !== "";
   azureAuthModeInput.value = settingsStore.azureAuthMode;
   azureApiKeyInput.value = settingsStore.azureApiKey;
   azureTenantIdInput.value = settingsStore.azureTenantId;
@@ -950,7 +970,6 @@ function loadAzureInputsFromStore() {
   azureApiVersionInput.value = settingsStore.azureApiVersion;
   azureChatDeploymentInput.value = settingsStore.azureChatDeployment;
   azureWhisperDeploymentInput.value = settingsStore.azureWhisperDeployment;
-  azureSpeechEndpointInput.value = settingsStore.azureSpeechEndpoint;
   azureSpeechApiKeyInput.value = settingsStore.azureSpeechApiKey;
   // Gemini 免費額度：0 視為「未設定」，輸入框留空而非顯示 0
   geminiFreeQuotaInput.value =
@@ -978,13 +997,22 @@ async function handleSaveAzureConnection() {
 async function handleSaveAzureConnectionOrThrow() {
   await settingsStore.saveAzureConnection({
     enabled: azureEnabledInput.value,
-    endpoint: azureEndpointInput.value,
+    resourceName: azureResourceNameInput.value,
+    projectName: azureProjectNameInput.value,
+    endpointOverride: azureEndpointOverrideInput.value,
     authMode: azureAuthModeInput.value,
     apiKey: azureApiKeyInput.value,
     tenantId: azureTenantIdInput.value,
     clientId: azureClientIdInput.value,
     clientSecret: azureClientSecretInput.value,
     apiVersion: azureApiVersionInput.value,
+    transcriptionResources: {
+      whisperResourceName: azureWhisperResourceNameInput.value,
+      whisperEndpointOverride: azureWhisperEndpointOverrideInput.value,
+      speechResourceName: azureSpeechResourceNameInput.value,
+      speechEndpointOverride: azureSpeechEndpointOverrideInput.value,
+      apiKey: azureSpeechApiKeyInput.value,
+    },
   });
 }
 
@@ -1249,18 +1277,6 @@ async function handleSaveAzureWhisperDeployment() {
   }
 }
 
-async function handleSaveAzureSpeechConnection() {
-  try {
-    await settingsStore.saveAzureSpeechConnection(
-      azureSpeechEndpointInput.value,
-      azureSpeechApiKeyInput.value,
-    );
-    azureSpeechFeedback.show("success", t("settings.azure.speechSaved"));
-  } catch (err) {
-    azureSpeechFeedback.show("error", extractErrorMessage(err));
-  }
-}
-
 async function handleMaiInputLocaleChange(value: string) {
   try {
     await settingsStore.saveMaiCandidateLocales(
@@ -1281,9 +1297,9 @@ async function handleMaiTranscribeStyleChange(style: MaiTranscribeStyle) {
 }
 
 // 當 Azure 測試連線按鈕被禁用時，回報缺少的設定項（不會是空字串才顯示）。
-function azureConnectionIssue(deployment: string): string {
+function azureConnectionIssue(deployment: string, endpoint = settingsStore.azureEndpoint): string {
   if (!settingsStore.azureEnabled) return t("settings.azure.issueNotEnabled");
-  if (settingsStore.azureEndpoint === "")
+  if (endpoint === "")
     return t("settings.azure.issueEndpoint");
   if (settingsStore.azureAuthMode === "entraUser") {
     if (!settingsStore.isAzureUserSignedIn)
@@ -2513,18 +2529,29 @@ onBeforeUnmount(() => {
           {{ $t("settings.azure.description") }}
         </p>
 
-        <div class="space-y-2">
-          <Label for="azure-endpoint">{{ $t("settings.azure.endpointLabel") }}</Label>
-          <Input
-            id="azure-endpoint"
-            v-model="azureEndpointInput"
-            :placeholder="$t('settings.azure.endpointPlaceholder')"
-            class="font-mono text-xs"
-          />
-          <p class="text-xs text-muted-foreground">
-            {{ $t("settings.azure.endpointHint") }}
-          </p>
+        <div class="grid gap-4 sm:grid-cols-2">
+          <div class="space-y-2">
+            <Label for="azure-resource-name">{{ $t("settings.azure.resourceNameLabel") }}</Label>
+            <Input
+              id="azure-resource-name"
+              v-model="azureResourceNameInput"
+              :placeholder="$t('settings.azure.resourceNamePlaceholder')"
+              class="font-mono text-xs"
+            />
+          </div>
+          <div class="space-y-2">
+            <Label for="azure-project-name">{{ $t("settings.azure.projectNameLabel") }}</Label>
+            <Input
+              id="azure-project-name"
+              v-model="azureProjectNameInput"
+              :placeholder="$t('settings.azure.projectNamePlaceholder')"
+              class="font-mono text-xs"
+            />
+          </div>
         </div>
+        <p class="text-xs text-muted-foreground">
+          {{ $t("settings.azure.resourceNameHint") }}
+        </p>
 
         <div class="space-y-2">
           <Label>{{ $t("settings.azure.authModeLabel") }}</Label>
@@ -2654,6 +2681,103 @@ onBeforeUnmount(() => {
             :placeholder="$t('settings.azure.apiVersionPlaceholder')"
             class="font-mono text-xs"
           />
+        </div>
+
+        <div v-if="azureAuthModeInput === 'key'" class="space-y-2">
+          <Label for="azure-transcription-api-key">{{ $t("settings.azure.transcriptionApiKeyLabel") }}</Label>
+          <div class="flex gap-2">
+            <Input
+              id="azure-transcription-api-key"
+              v-model="azureSpeechApiKeyInput"
+              :type="isAzureSpeechApiKeyVisible ? 'text' : 'password'"
+              class="flex-1 font-mono text-xs"
+            />
+            <Button variant="outline" size="sm" @click="isAzureSpeechApiKeyVisible = !isAzureSpeechApiKeyVisible">
+              {{ isAzureSpeechApiKeyVisible ? $t('settings.apiKey.hide') : $t('settings.apiKey.show') }}
+            </Button>
+          </div>
+          <p class="text-xs text-muted-foreground">{{ $t("settings.azure.transcriptionApiKeyHint") }}</p>
+        </div>
+
+        <div class="space-y-3 rounded-md border border-border p-3">
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <p class="text-sm font-medium">{{ $t("settings.azure.transcriptionResourcesTitle") }}</p>
+              <p class="text-xs text-muted-foreground">{{ $t("settings.azure.transcriptionResourcesHint") }}</p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              @click="isAzureTranscriptionResourcesVisible = !isAzureTranscriptionResourcesVisible"
+            >
+              {{ isAzureTranscriptionResourcesVisible ? $t("settings.azure.hideAdvanced") : $t("settings.azure.showAdvanced") }}
+            </Button>
+          </div>
+          <div v-if="isAzureTranscriptionResourcesVisible" class="grid gap-4 sm:grid-cols-2">
+            <div class="space-y-2">
+              <Label for="azure-whisper-resource-name">{{ $t("settings.azure.whisperResourceNameLabel") }}</Label>
+              <Input
+                id="azure-whisper-resource-name"
+                v-model="azureWhisperResourceNameInput"
+                :placeholder="$t('settings.azure.resourceNamePlaceholder')"
+                class="font-mono text-xs"
+              />
+            </div>
+            <div class="space-y-2">
+              <Label for="azure-speech-resource-name">{{ $t("settings.azure.speechResourceNameLabel") }}</Label>
+              <Input
+                id="azure-speech-resource-name"
+                v-model="azureSpeechResourceNameInput"
+                :placeholder="$t('settings.azure.resourceNamePlaceholder')"
+                class="font-mono text-xs"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div class="space-y-3 rounded-md border border-border p-3">
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <p class="text-sm font-medium">{{ $t("settings.azure.endpointOverridesTitle") }}</p>
+              <p class="text-xs text-muted-foreground">{{ $t("settings.azure.endpointOverridesHint") }}</p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              @click="isAzureEndpointOverridesVisible = !isAzureEndpointOverridesVisible"
+            >
+              {{ isAzureEndpointOverridesVisible ? $t("settings.azure.hideAdvanced") : $t("settings.azure.showAdvanced") }}
+            </Button>
+          </div>
+          <div v-if="isAzureEndpointOverridesVisible" class="space-y-3">
+            <div class="space-y-2">
+              <Label for="azure-endpoint-override">{{ $t("settings.azure.mainEndpointOverrideLabel") }}</Label>
+              <Input
+                id="azure-endpoint-override"
+                v-model="azureEndpointOverrideInput"
+                :placeholder="$t('settings.azure.endpointOverridePlaceholder')"
+                class="font-mono text-xs"
+              />
+            </div>
+            <div class="space-y-2">
+              <Label for="azure-whisper-endpoint-override">{{ $t("settings.azure.whisperEndpointOverrideLabel") }}</Label>
+              <Input
+                id="azure-whisper-endpoint-override"
+                v-model="azureWhisperEndpointOverrideInput"
+                :placeholder="$t('settings.azure.endpointOverridePlaceholder')"
+                class="font-mono text-xs"
+              />
+            </div>
+            <div class="space-y-2">
+              <Label for="azure-speech-endpoint-override">{{ $t("settings.azure.speechEndpointOverrideLabel") }}</Label>
+              <Input
+                id="azure-speech-endpoint-override"
+                v-model="azureSpeechEndpointOverrideInput"
+                :placeholder="$t('settings.azure.endpointOverridePlaceholder')"
+                class="font-mono text-xs"
+              />
+            </div>
+          </div>
         </div>
 
         <SettingsActionRow :feedback="azureConnectionFeedback.state.value">
@@ -2892,7 +3016,7 @@ onBeforeUnmount(() => {
               v-if="!settingsStore.hasWhisperConfig"
               class="text-xs text-amber-400"
             >
-              {{ azureConnectionIssue(settingsStore.azureWhisperDeployment) }}
+              {{ azureConnectionIssue(settingsStore.azureWhisperDeployment, settingsStore.azureWhisperEndpoint) }}
             </p>
           </template>
 
@@ -2910,39 +3034,6 @@ onBeforeUnmount(() => {
             />
             <p class="text-xs text-muted-foreground">{{ $t("settings.azure.maiHint") }}</p>
             <InlineFeedback :feedback="maiOptionsFeedback.state.value" class="block" />
-
-            <div class="space-y-2">
-              <Label for="azure-speech-endpoint">{{ $t("settings.azure.speechEndpointLabel") }}</Label>
-              <Input
-                id="azure-speech-endpoint"
-                v-model="azureSpeechEndpointInput"
-                :placeholder="$t('settings.azure.speechEndpointPlaceholder')"
-                class="font-mono text-xs"
-              />
-            </div>
-            <div v-if="azureAuthModeInput === 'key'" class="space-y-2">
-              <Label for="azure-speech-api-key">{{ $t("settings.azure.speechApiKeyLabel") }}</Label>
-              <div class="flex gap-2">
-                <Input
-                  id="azure-speech-api-key"
-                  v-model="azureSpeechApiKeyInput"
-                  :type="isAzureSpeechApiKeyVisible ? 'text' : 'password'"
-                  class="flex-1 font-mono text-xs"
-                />
-                <Button variant="ghost" size="sm" @click="isAzureSpeechApiKeyVisible = !isAzureSpeechApiKeyVisible">
-                  {{ isAzureSpeechApiKeyVisible ? $t('settings.apiKey.hide') : $t('settings.apiKey.show') }}
-                </Button>
-              </div>
-            </div>
-            <SettingsActionRow :feedback="azureSpeechFeedback.state.value">
-              <Button
-                size="sm"
-                :disabled="!azureSpeechEndpointInput.trim() || (azureAuthModeInput === 'key' && !azureSpeechApiKeyInput.trim())"
-                @click="handleSaveAzureSpeechConnection"
-              >
-                {{ $t("common.save") }}
-              </Button>
-            </SettingsActionRow>
 
             <div class="space-y-2">
               <Label for="mai-input-locale">{{ $t("settings.azure.maiCandidateLocalesLabel") }}</Label>
@@ -3143,7 +3234,7 @@ onBeforeUnmount(() => {
             <Button
               variant="outline"
               size="sm"
-              :disabled="isLoadingAzureDeployments || !azureEndpointInput.trim()"
+              :disabled="isLoadingAzureDeployments || (!azureResourceNameInput.trim() && !azureEndpointOverrideInput.trim())"
               @click="handleLoadAzureDeployments"
             >
               <LoaderCircle v-if="isLoadingAzureDeployments" class="mr-1 size-4 animate-spin" />

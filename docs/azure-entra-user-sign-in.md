@@ -84,7 +84,8 @@ Entra 驗證要求資源使用 custom subdomain（例如
 
 - **Tenant ID**（Entra ID 概觀頁的 Directory (tenant) ID）
 - **Client ID**（App Registration 概觀頁的 Application (client) ID）
-- **Endpoint URL**（資源的端點，例如 `https://my-resource.openai.azure.com`）
+- **Azure 資源名稱**（資源 custom subdomain，例如 `my-resource`）
+- **Foundry 專案名稱**（選填；只有要載入 chat 部署清單時需要）
 - **部署名稱**（chat 與 Whisper 各一個）
 
 **不需要**交付任何密鑰。
