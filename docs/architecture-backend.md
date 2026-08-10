@@ -182,15 +182,15 @@ SayIt backend 是一個 **Tauri v2 Rust runtime**，扮演四個角色：
 **職責**：讀取游標所在輸入框內容與選取狀態（用於 Edit Mode、智慧字典學習、情境注入）
 
 - `read_focused_text_field` — 讀游標附近文字。macOS 用 AXUIElement；Windows 用 `IUIAutomation` + TextPattern/ValuePattern，跑在專用 MTA worker 執行緒（single-flight + timeout 守衛，目標 App 卡死不會拖住 command thread）
-- `read_selection_state` — Edit Mode 判定主路徑，回三態 `selection` / `noSelection` / `unavailable`。**僅 macOS 有實作**（被動 AX 查詢，零按鍵模擬）；Windows 一律回 `unavailable`
-- `read_selected_text` — 剪貼簿後備，模擬 Cmd+C／Ctrl+C。僅在三態回 `unavailable` 時由前端於錄音停止且按鍵放開後呼叫
+- `read_selection_state` — Edit Mode 判定主路徑，回三態 `selection` / `noSelection` / `unavailable`。macOS 以 AX 被動查詢；Windows 以獨立 MTA UIA worker 的 `TextPattern.GetSelection()` + range endpoint 比較判定，兩者皆不模擬按鍵。Windows 無法讀取時，前景為終端機的情境明確回 `noSelection`，避免後備 Ctrl+C 中斷終端機。
+- `read_selected_text` — 剪貼簿後備，模擬 Cmd+C／Ctrl+C。僅在三態回 `unavailable` 時由前端於錄音停止且按鍵放開後呼叫；Windows 會比對錄音開始時捕獲的目標視窗與目前前景，不一致即 fail-closed 跳過，且再次排除終端機，絕不對終端機注入 Ctrl+C。
 - `get_foreground_app_name` — macOS 走 `NSWorkspace.frontmostApplication`；Windows 走 `GetForegroundWindow` + `QueryFullProcessImageNameW`
 
 **隱私守衛（不對稱，勿誤植為對稱）**：Windows 以 `IUIAutomationElement::CurrentIsPassword` fail-closed 排除密碼欄位（讀不到屬性時保守視為「是」）；macOS **無**等價守衛，僅以 `AXRole` 過濾（`AXTextField | AXTextArea | AXComboBox | AXWebArea`），不檢查 `AXSubrole == AXSecureTextField`，實際上倚賴系統/App 不對 secure field 暴露 `AXValue`。此缺口追蹤於 issue 67。
 
 **已知問題（已緩解，未消滅）**：Cmd+C 模擬在 Fn 按住期間執行會因 hardware flag 穿透而輸入 "c" 字元。主路徑（`read_selection_state` 被動 AX 查詢）已無此問題；但剪貼簿後備仍會模擬 Cmd+C，目前靠前端在錄音停止後延遲 `CLIPBOARD_FALLBACK_KEY_RELEASE_DELAY_MS`（250ms）等按鍵放開來緩解。Windows 端用 `SendInput` 注入 Ctrl+C，無此 hardware flag 問題，但有其他副作用（見下）。
 
-**Windows 後備的副作用**：因 `read_selection_state` 在 Windows 無條件回 `unavailable`，剪貼簿後備會在**每次錄音停止時**執行 → 對前景 App 注入一次 Ctrl+C。已知影響：非文字剪貼簿內容（圖片／檔案）會遺失（`restore_clipboard_text` 只還原文字）、終端機的 Ctrl+C 可能被當中斷訊號、CodeMirror 系編輯器「無選取複製整行」會誤觸發 Edit Mode。追蹤於 issue 69。
+**Windows 後備的殘留限制**：UIA 不支援或逾時的**非終端機** App 仍會走 Ctrl+C 剪貼簿後備，故非文字剪貼簿內容（圖片／檔案）仍可能因 `restore_clipboard_text` 只還原文字而遺失。Windows UIA 可辨識選取時不會走後備；終端機則由主路徑與後備入口雙重排除，避免 Ctrl+C 被當成中斷訊號。CodeMirror／Monaco 在 UIA 無法讀取時仍可能以空選取複製整行，故其 UIA 支援需以實機驗證。
 
 ### 4.8 `sound_feedback.rs`（206 LOC）
 

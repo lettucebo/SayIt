@@ -162,6 +162,7 @@
 | `addApiUsage` FK 失敗（787）偶發                                     | 調查 `transcriptions` 與 `api_usage` 寫入 race    |
 | autoUpdater 用 `window.confirm` 在 Tauri WKWebView 靜默忽略           | 改 in-app UI                                      |
 | `text_field_reader::read_selected_text` Fn-c 字元穿透（issue #25）   | 待修                                              |
+| Windows 編輯模式剪貼簿後備注入 Ctrl+C                                | 已修：UIA 選取判定 + 終端機雙重防護               |
 
 ---
 

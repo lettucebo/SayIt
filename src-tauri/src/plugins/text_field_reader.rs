@@ -23,7 +23,7 @@ pub fn read_focused_text_field() -> Result<Option<String>, String> {
 
 #[cfg(all(test, target_os = "windows"))]
 mod app_name_tests {
-    use super::app_name_from_path;
+    use super::{app_name_from_path, is_terminal_like_app_name, target_window_changed};
 
     #[test]
     fn test_app_name_from_windows_exe_path() {
@@ -39,6 +39,24 @@ mod app_name_tests {
             app_name_from_path(r"C:\Windows\System32\notepad"),
             Some("notepad".to_string())
         );
+    }
+
+    #[test]
+    fn test_terminal_like_app_name_uses_exact_case_insensitive_match() {
+        assert!(is_terminal_like_app_name("WindowsTerminal"));
+        assert!(is_terminal_like_app_name("windowsterminal"));
+        assert!(is_terminal_like_app_name("pwsh"));
+        assert!(!is_terminal_like_app_name("Code"));
+        assert!(!is_terminal_like_app_name("Notepad"));
+        assert!(!is_terminal_like_app_name("Photoshop"));
+    }
+
+    #[test]
+    fn test_target_window_changed_fails_closed_when_foreground_changes() {
+        assert!(!target_window_changed(Some(42), Some(42)));
+        assert!(!target_window_changed(None, Some(42)));
+        assert!(target_window_changed(Some(42), Some(99)));
+        assert!(target_window_changed(Some(42), None));
     }
 }
 
@@ -75,12 +93,85 @@ fn app_name_from_path(path: &str) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
+#[cfg(target_os = "windows")]
+fn is_terminal_like_app_name(app_name: &str) -> bool {
+    const TERMINAL_APP_NAMES: &[&str] = &[
+        "WindowsTerminal",
+        "OpenConsole",
+        "conhost",
+        "cmd",
+        "powershell",
+        "pwsh",
+        "wt",
+        "alacritty",
+        "wezterm-gui",
+        "wezterm",
+        "mintty",
+        "putty",
+        "Hyper",
+        "Tabby",
+        "ConEmu",
+        "ConEmu64",
+        "Cmder",
+        "FluentTerminal",
+        "Terminus",
+        "kitty",
+    ];
+
+    TERMINAL_APP_NAMES
+        .iter()
+        .any(|candidate| app_name.eq_ignore_ascii_case(candidate))
+}
+
+#[cfg(target_os = "windows")]
+fn target_window_changed(target_hwnd: Option<isize>, current_hwnd: Option<isize>) -> bool {
+    matches!(target_hwnd, Some(target_hwnd) if current_hwnd != Some(target_hwnd))
+}
+
 /// 編輯模式的「剪貼簿後備」路徑：僅在 `read_selection_state` 回報
 /// unavailable（AX 不可見的 App）時、於錄音停止且按鍵放開後由前端呼叫。
 /// 透過模擬 Cmd+C / Ctrl+C 擷取剪貼簿內容。
 #[tauri::command]
-pub fn read_selected_text() -> Result<Option<String>, String> {
-    super::clipboard_paste::capture_selected_text_via_clipboard()
+pub fn read_selected_text(
+    focus_state: tauri::State<'_, super::clipboard_paste::FocusState>,
+) -> Result<Option<String>, String> {
+    #[cfg(target_os = "windows")]
+    {
+        let target_hwnd = focus_state.target_hwnd();
+        let current_hwnd = windows_impl::foreground_window_handle();
+
+        // SendInput 一律作用於「現在」的前景視窗，不能在使用者切換 App 後把 Ctrl+C
+        // 注入新視窗。沒有可靠目標時寧可不啟用編輯模式，也不做破壞性按鍵模擬。
+        if target_window_changed(target_hwnd, current_hwnd) {
+            log::info!(
+                "[text-field-reader] Skipped clipboard selection fallback because the target window changed"
+            );
+            return Ok(None);
+        }
+
+        let target_app_name = current_hwnd
+            .or(target_hwnd)
+            .and_then(windows_impl::app_name_from_window_handle);
+
+        if target_app_name
+            .as_deref()
+            .is_some_and(is_terminal_like_app_name)
+        {
+            log::info!(
+                "[text-field-reader] Skipped clipboard selection fallback for terminal app: {}",
+                target_app_name.as_deref().unwrap_or_default()
+            );
+            return Ok(None);
+        }
+
+        super::clipboard_paste::capture_selected_text_via_clipboard(target_hwnd)
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = focus_state;
+        super::clipboard_paste::capture_selected_text_via_clipboard(None)
+    }
 }
 
 /// 選取狀態偵測結果（#24/#25 編輯模式判定）。
@@ -93,16 +184,14 @@ pub struct SelectionState {
 }
 
 impl SelectionState {
-    // selection / no_selection 僅 macOS 的 AX 分類器使用；
-    // Windows 端一律 unavailable，cfg 閘避免 dead_code 撞上 clippy -D warnings
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     fn selection(text: String) -> Self {
         Self {
             kind: "selection".to_string(),
             text: Some(text),
         }
     }
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     fn no_selection() -> Self {
         Self {
             kind: "noSelection".to_string(),
@@ -124,7 +213,8 @@ impl SelectionState {
 ///                  CodeMirror 類編輯器的「無選取複製整行」誤判（#24）在此被排除
 ///   unavailable  — AX 不可見或讀值失真（Heptabase/LINE 類）→ 前端在錄音停止、
 ///                  按鍵放開後改走剪貼簿後備（read_selected_text）
-/// Windows / 其他平台：一律 unavailable（沿用剪貼簿後備；選取讀取待 UIA 版補上）。
+/// Windows：UI Automation 被動查詢；終端機無法查詢時回 noSelection，避免 Ctrl+C 後備中斷輸入。
+/// 其他平台：回 unavailable。
 #[tauri::command]
 pub async fn read_selection_state() -> SelectionState {
     #[cfg(target_os = "macos")]
@@ -138,7 +228,20 @@ pub async fn read_selection_state() -> SelectionState {
             .unwrap_or_else(|_| SelectionState::unavailable())
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        let state = tauri::async_runtime::spawn_blocking(windows_impl::read_selection_state_impl)
+            .await
+            .unwrap_or_else(|_| SelectionState::unavailable());
+
+        if state.kind == "unavailable" && windows_impl::is_foreground_terminal_like() {
+            SelectionState::no_selection()
+        } else {
+            state
+        }
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         SelectionState::unavailable()
     }
@@ -658,6 +761,7 @@ mod macos {
 
 #[cfg(target_os = "windows")]
 mod windows_impl {
+    use super::SelectionState;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
     use std::sync::{Mutex, OnceLock};
@@ -684,11 +788,19 @@ mod windows_impl {
     const MAX_VALUE_CHARS: usize = 600;
     /// 單次 UIA 讀取 timeout，需小於前端輪詢間隔（500ms），避免阻塞 command thread。
     const READ_TIMEOUT_MS: u64 = 250;
+    /// 選取狀態讀取與一般 excerpt 讀取使用不同 worker，避免互相造成 unavailable。
+    const SELECTION_READ_TIMEOUT_MS: u64 = 250;
+    /// -1 是 UIA GetText 的「不設上限」值。使用者主動選取的編輯來源不得截斷，
+    /// 否則貼回時會覆蓋完整選取，卻只留下被截斷的結果。
+    const SELECTION_GET_TEXT_MAX_LENGTH: i32 = -1;
 
     type RespTx = SyncSender<Option<String>>;
+    type SelectionRespTx = SyncSender<SelectionState>;
 
     static IN_FLIGHT: AtomicBool = AtomicBool::new(false);
     static WORKER: OnceLock<Option<Mutex<SyncSender<RespTx>>>> = OnceLock::new();
+    static SELECTION_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
+    static SELECTION_WORKER: OnceLock<Option<Mutex<SyncSender<SelectionRespTx>>>> = OnceLock::new();
 
     /// 入口：把讀取請求送到專用 UIA 執行緒，最多等 `READ_TIMEOUT_MS`。
     /// 任何失敗 / 逾時 / 忙碌一律回 `Ok(None)`（與 macOS 一致，靜默降級）。
@@ -716,22 +828,36 @@ mod windows_impl {
     }
 
     pub fn get_foreground_app_name_impl() -> Option<String> {
-        use windows::core::PWSTR;
-        use windows::Win32::Foundation::CloseHandle;
-        use windows::Win32::System::Threading::{
-            OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT,
-            PROCESS_QUERY_LIMITED_INFORMATION,
-        };
-        use windows::Win32::UI::WindowsAndMessaging::{
-            GetForegroundWindow, GetWindowThreadProcessId,
-        };
+        foreground_window_handle().and_then(app_name_from_window_handle)
+    }
+
+    pub fn foreground_window_handle() -> Option<isize> {
+        use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
 
         unsafe {
             let hwnd = GetForegroundWindow();
             if hwnd.0.is_null() {
+                None
+            } else {
+                Some(hwnd.0 as isize)
+            }
+        }
+    }
+
+    pub fn app_name_from_window_handle(hwnd_value: isize) -> Option<String> {
+        use windows::core::PWSTR;
+        use windows::Win32::Foundation::{CloseHandle, HWND};
+        use windows::Win32::System::Threading::{
+            OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT,
+            PROCESS_QUERY_LIMITED_INFORMATION,
+        };
+        use windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
+
+        unsafe {
+            let hwnd = HWND(hwnd_value as *mut _);
+            if hwnd.0.is_null() {
                 return None;
             }
-
             let mut process_id = 0_u32;
             GetWindowThreadProcessId(hwnd, Some(&mut process_id));
             if process_id == 0 {
@@ -755,6 +881,29 @@ mod windows_impl {
         }
     }
 
+    pub fn is_foreground_terminal_like() -> bool {
+        get_foreground_app_name_impl()
+            .as_deref()
+            .is_some_and(super::is_terminal_like_app_name)
+    }
+
+    /// 在專用 MTA worker 讀取選取三態。逾時、忙碌或 UIA 無法可靠判定時一律回 unavailable，
+    /// 由上層再決定是否使用剪貼簿後備。
+    pub fn read_selection_state_impl() -> SelectionState {
+        let sender = match selection_worker_sender() {
+            Some(sender) => sender,
+            None => return SelectionState::unavailable(),
+        };
+
+        if SELECTION_IN_FLIGHT.swap(true, Ordering::AcqRel) {
+            return SelectionState::unavailable();
+        }
+
+        let outcome = selection_read_once(&sender);
+        SELECTION_IN_FLIGHT.store(false, Ordering::Release);
+        outcome
+    }
+
     /// 送一次讀取請求並等 `READ_TIMEOUT_MS`；逾時 / 送出失敗一律回 `None`。
     fn read_once(sender: &SyncSender<RespTx>) -> Option<String> {
         let (resp_tx, resp_rx) = sync_channel::<Option<String>>(1);
@@ -764,6 +913,16 @@ mod windows_impl {
         resp_rx
             .recv_timeout(Duration::from_millis(READ_TIMEOUT_MS))
             .unwrap_or(None)
+    }
+
+    fn selection_read_once(sender: &SyncSender<SelectionRespTx>) -> SelectionState {
+        let (resp_tx, resp_rx) = sync_channel::<SelectionState>(1);
+        if sender.try_send(resp_tx).is_err() {
+            return SelectionState::unavailable();
+        }
+        resp_rx
+            .recv_timeout(Duration::from_millis(SELECTION_READ_TIMEOUT_MS))
+            .unwrap_or_else(|_| SelectionState::unavailable())
     }
 
     fn worker_sender() -> Option<SyncSender<RespTx>> {
@@ -782,6 +941,30 @@ mod windows_impl {
         std::thread::Builder::new()
             .name("uia-reader".into())
             .spawn(move || worker_loop(req_rx, ready_tx))
+            .ok()?;
+
+        match ready_rx.recv() {
+            Ok(true) => Some(Mutex::new(req_tx)),
+            _ => None,
+        }
+    }
+
+    fn selection_worker_sender() -> Option<SyncSender<SelectionRespTx>> {
+        let cell = SELECTION_WORKER.get_or_init(spawn_selection_worker);
+        let mutex = cell.as_ref()?;
+        let guard = mutex.lock().ok()?;
+        Some(guard.clone())
+    }
+
+    fn spawn_selection_worker() -> Option<Mutex<SyncSender<SelectionRespTx>>> {
+        // 容量 1 讓第一次 lazy worker 請求可在 worker 尚未停在 recv() 時入列，
+        // 避免冷啟時誤回 unavailable 而重新走 Ctrl+C 後備。
+        let (req_tx, req_rx) = sync_channel::<SelectionRespTx>(1);
+        let (ready_tx, ready_rx) = sync_channel::<bool>(0);
+
+        std::thread::Builder::new()
+            .name("uia-selection-reader".into())
+            .spawn(move || selection_worker_loop(req_rx, ready_tx))
             .ok()?;
 
         match ready_rx.recv() {
@@ -811,6 +994,31 @@ mod windows_impl {
         while let Ok(resp_tx) = req_rx.recv() {
             let result = read_excerpt(&automation);
             // 即使呼叫端已逾時離開（receiver 被 drop）也不阻塞；IN_FLIGHT 由呼叫端清。
+            let _ = resp_tx.try_send(result);
+        }
+
+        unsafe { CoUninitialize() };
+    }
+
+    fn selection_worker_loop(req_rx: Receiver<SelectionRespTx>, ready_tx: SyncSender<bool>) {
+        unsafe {
+            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        }
+
+        let automation: IUIAutomation =
+            match unsafe { CoCreateInstance(&CUIAutomation, None, CLSCTX_ALL) } {
+                Ok(automation) => automation,
+                Err(_) => {
+                    let _ = ready_tx.send(false);
+                    unsafe { CoUninitialize() };
+                    return;
+                }
+            };
+
+        let _ = ready_tx.send(true);
+
+        while let Ok(resp_tx) = req_rx.recv() {
+            let result = read_selection_state(&automation);
             let _ = resp_tx.try_send(result);
         }
 
@@ -853,6 +1061,56 @@ mod windows_impl {
         unsafe { element.CurrentIsPassword() }
             .map(|b| b.as_bool())
             .unwrap_or(true)
+    }
+
+    fn read_selection_state(automation: &IUIAutomation) -> SelectionState {
+        let element = match unsafe { automation.GetFocusedElement() } {
+            Ok(element) => element,
+            Err(_) => return SelectionState::unavailable(),
+        };
+
+        if is_password_element(&element) {
+            return SelectionState::no_selection();
+        }
+
+        let text_pattern = match unsafe {
+            element.GetCurrentPatternAs::<IUIAutomationTextPattern>(UIA_TextPatternId)
+        } {
+            Ok(pattern) => pattern,
+            Err(_) => return SelectionState::unavailable(),
+        };
+
+        let selection = match unsafe { text_pattern.GetSelection() } {
+            Ok(selection) => selection,
+            _ => return SelectionState::unavailable(),
+        };
+        if !matches!(unsafe { selection.Length() }, Ok(len) if len > 0) {
+            return SelectionState::unavailable();
+        }
+
+        let range = match unsafe { selection.GetElement(0) } {
+            Ok(range) => range,
+            Err(_) => return SelectionState::unavailable(),
+        };
+
+        let is_degenerate = match unsafe {
+            range.CompareEndpoints(
+                TextPatternRangeEndpoint_Start,
+                &range,
+                TextPatternRangeEndpoint_End,
+            )
+        } {
+            Ok(comparison) => comparison == 0,
+            Err(_) => return SelectionState::unavailable(),
+        };
+        if is_degenerate {
+            return SelectionState::no_selection();
+        }
+
+        match unsafe { range.GetText(SELECTION_GET_TEXT_MAX_LENGTH) } {
+            Ok(text) if !text.is_empty() => SelectionState::selection(text.to_string()),
+            _ => SelectionState::unavailable(),
+        }
     }
 
     fn read_via_text_pattern(element: &IUIAutomationElement) -> Option<String> {

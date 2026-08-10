@@ -131,7 +131,7 @@ CI（`.github/workflows/ci.yml`）：`vue-tsc --noEmit` → `eslint src` → `pn
 | `read_focused_text_field` | `plugins/text_field_reader.rs` | useVoiceFlowStore | — | `Result<Option<String>, String>` |
 | `get_foreground_app_name` | `plugins/text_field_reader.rs` | useVoiceFlowStore | — | `Option<String>` |
 | `read_selected_text` | `plugins/text_field_reader.rs` | useVoiceFlowStore | — | `Result<Option<String>, String>` |
-| `read_selection_state` | `plugins/text_field_reader.rs` | useVoiceFlowStore（編輯模式偵測） | — | `SelectionState { kind: "selection" \| "noSelection" \| "unavailable", text: Option<String> }`（macOS 走 AX worker + `spawn_blocking`，避免阻塞主執行緒拖慢隨後的 `start_recording`；single-flight，重入回 `unavailable`；非 macOS 一律 `unavailable`） |
+| `read_selection_state` | `plugins/text_field_reader.rs` | useVoiceFlowStore（編輯模式偵測） | — | `SelectionState { kind: "selection" \| "noSelection" \| "unavailable", text: Option<String> }`（macOS AX / Windows UIA 均走獨立 worker + `spawn_blocking`，避免阻塞主執行緒拖慢隨後的 `start_recording`；single-flight，重入回 `unavailable`；Windows 終端機 UIA 不可用時回 `noSelection`，不觸發 Ctrl+C 後備） |
 | `get_default_input_device_name` | `plugins/audio_recorder.rs` | SettingsView | — | `Option<String>` |
 | `list_audio_input_devices` | `plugins/audio_recorder.rs` | SettingsView | — | `Vec<AudioInputDeviceInfo>` |
 | `start_audio_preview` | `plugins/audio_recorder.rs` | useAudioPreview.ts（SettingsView） | `app, preview_state: State<AudioPreviewState>, device_name: String` | `Result<(), String>` |

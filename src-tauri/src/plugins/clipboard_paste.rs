@@ -24,6 +24,15 @@ impl FocusState {
             target_hwnd: std::sync::Mutex::new(0),
         }
     }
+
+    #[cfg(target_os = "windows")]
+    pub fn target_hwnd(&self) -> Option<isize> {
+        self.target_hwnd
+            .lock()
+            .ok()
+            .map(|guard| *guard)
+            .filter(|hwnd| *hwnd != 0)
+    }
 }
 
 // ========== Errors ==========
@@ -236,6 +245,25 @@ fn restore_target_window(hwnd_value: isize) {
     }
 }
 
+#[cfg(target_os = "windows")]
+fn target_window_is_foreground(expected_target_hwnd: Option<isize>) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+
+    unsafe {
+        let current_hwnd = GetForegroundWindow();
+        let current_hwnd = (!current_hwnd.0.is_null()).then_some(current_hwnd.0 as isize);
+        target_window_matches_foreground(expected_target_hwnd, current_hwnd)
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn target_window_matches_foreground(
+    expected_target_hwnd: Option<isize>,
+    current_hwnd: Option<isize>,
+) -> bool {
+    expected_target_hwnd.is_some() && expected_target_hwnd == current_hwnd
+}
+
 /// 捕獲當前前景視窗，供後續 paste_text 恢復焦點。
 /// 應在 hotkey 觸發時（HUD 顯示前）呼叫。
 #[tauri::command]
@@ -261,7 +289,23 @@ pub fn capture_target_window(state: State<'_, FocusState>) {
 ///
 /// 流程：儲存剪貼簿 → 清空 → 模擬複製 → 等待 → 讀取 → 還原 → 回傳。
 /// 對任何支援 Cmd+C 的 app 都有效，不依賴 Accessibility API。
-pub fn capture_selected_text_via_clipboard() -> Result<Option<String>, String> {
+///
+/// Windows 必須帶入錄音開始時捕獲的目標 HWND；目標不再是前景時會安全跳過，
+/// 防止 Ctrl+C 因焦點切換而送進另一個 App。
+pub fn capture_selected_text_via_clipboard(
+    expected_target_hwnd: Option<isize>,
+) -> Result<Option<String>, String> {
+    #[cfg(target_os = "windows")]
+    if !target_window_is_foreground(expected_target_hwnd) {
+        log::debug!(
+            "[clipboard-paste] Skipped selection capture because the target window is no longer foreground"
+        );
+        return Ok(None);
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    let _ = expected_target_hwnd;
+
     let mut clipboard = Clipboard::new().map_err(|e| e.to_string())?;
 
     // 1. 儲存當前剪貼簿文字
@@ -278,6 +322,11 @@ pub fn capture_selected_text_via_clipboard() -> Result<Option<String>, String> {
         }
         #[cfg(target_os = "windows")]
         {
+            // 清空剪貼簿到實際 SendInput 間仍可能切換視窗，再驗一次以縮小 TOCTOU 窗口。
+            if !target_window_is_foreground(expected_target_hwnd) {
+                restore_clipboard_text(&mut clipboard, &original_text);
+                return Ok(None);
+            }
             simulate_copy_via_keyboard()
         }
     };
@@ -296,19 +345,15 @@ pub fn capture_selected_text_via_clipboard() -> Result<Option<String>, String> {
     restore_clipboard_text(&mut clipboard, &original_text);
 
     // 7. 回傳
-    match copied_text {
-        Some(text) => {
-            log::error!(
-                "[clipboard-paste] capture_selected_text: got {} chars",
-                text.len()
-            );
-            Ok(Some(text))
-        }
-        None => {
-            log::error!("[clipboard-paste] capture_selected_text: no selection detected");
-            Ok(None)
-        }
+    if let Some(ref text) = copied_text {
+        log::debug!(
+            "[clipboard-paste] capture_selected_text: got {} chars",
+            text.len()
+        );
+    } else {
+        log::debug!("[clipboard-paste] capture_selected_text: no selection detected");
     }
+    Ok(copied_text)
 }
 
 fn restore_clipboard_text(clipboard: &mut Clipboard, original_text: &Option<String>) {
@@ -336,16 +381,6 @@ pub fn paste_text<R: Runtime>(
     text: String,
     restore_clipboard: bool,
 ) -> Result<(), ClipboardError> {
-    // DEBUG: 追蹤 paste_text 被呼叫次數
-    use std::sync::atomic::AtomicU32;
-    static PASTE_CALL_COUNT: AtomicU32 = AtomicU32::new(0);
-    let call_id = PASTE_CALL_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-    log::info!(
-        "🔴🔴🔴 [clipboard-paste] paste_text CALLED (#{}) — {} chars (restore={})",
-        call_id,
-        text.len(),
-        restore_clipboard
-    );
     #[cfg(debug_assertions)]
     log::info!(
         "[clipboard-paste] Pasting {} chars: \"{}\"",
@@ -408,8 +443,7 @@ pub fn paste_text<R: Runtime>(
     #[cfg(target_os = "windows")]
     {
         // 恢復錄音前的前景視窗，確保 SendInput 送到正確目標
-        let saved_hwnd = focus_state.target_hwnd.lock().ok().map(|g| *g).unwrap_or(0);
-        if saved_hwnd != 0 {
+        if let Some(saved_hwnd) = focus_state.target_hwnd() {
             restore_target_window(saved_hwnd);
             thread::sleep(Duration::from_millis(50));
         }
@@ -540,5 +574,14 @@ mod tests {
             (50..=1000).contains(&RESTORE_DELAY_MS),
             "RESTORE_DELAY_MS={RESTORE_DELAY_MS} 應落在 50ms..=1000ms 之間"
         );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn test_target_window_matches_foreground_requires_the_expected_window() {
+        assert!(target_window_matches_foreground(Some(42), Some(42)));
+        assert!(!target_window_matches_foreground(Some(42), Some(99)));
+        assert!(!target_window_matches_foreground(Some(42), None));
+        assert!(!target_window_matches_foreground(None, Some(42)));
     }
 }

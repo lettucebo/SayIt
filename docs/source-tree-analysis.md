@@ -215,7 +215,7 @@ src-tauri/
 | `clipboard_paste`     | macOS：CGEvent；Windows：SendInput                | 3 個 Command                                                  |
 | `audio_control`       | macOS：CoreAudio FFI；Windows：IAudioEndpointVolume | 2 個 Command                                                  |
 | `transcription`       | 跨平台 reqwest                                    | 3 個 Command（transcribe / retranscribe_from_file / test_whisper_connection） |
-| `text_field_reader`   | macOS：AXUIElement；Windows：UI Automation（`IUIAutomation` + TextPattern/ValuePattern，MTA worker 執行緒） | 4 個 Command（含 `read_selection_state`，其選取三態僅 macOS 實作，Windows 回 `unavailable` 落回剪貼簿後備） |
+| `text_field_reader`   | macOS：AXUIElement；Windows：UI Automation（`IUIAutomation` + TextPattern/ValuePattern，MTA worker 執行緒） | 4 個 Command（含 `read_selection_state`，兩平台皆被動判定選取三態；Windows 終端機 UIA 不可用時不走 Ctrl+C 後備） |
 | `sound_feedback`      | 跨平台 cpal                                       | 4 個 Command                                                  |
 | `logging`             | 跨平台 tauri-plugin-log                           | 3 個 Command（開關 / 開資料夾 / 清理舊檔）                    |
 | `azure_auth`          | 跨平台 reqwest                                    | 1 個 Command（`get_azure_entra_token`，不帶 browser `Origin`）|
