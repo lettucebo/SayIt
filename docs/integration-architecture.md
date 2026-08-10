@@ -147,8 +147,8 @@ SayIt 採典型 **Tauri 雙向 IPC 模式**，沒有外部 message broker，所�
 | Command                  | 用途                                                                        |
 | ------------------------ | --------------------------------------------------------------------------- |
 | `read_focused_text_field`| 取游標所在輸入框內容（給 Edit Mode 與智慧字典）                             |
-| `read_selection_state`   | 選取三態判定（Edit Mode 主路徑）— 僅 macOS 有實作，Windows 回 `unavailable` |
-| `read_selected_text`     | 剪貼簿後備：模擬 Cmd+C／Ctrl+C 取選取文字，僅在三態回 `unavailable` 時使用   |
+| `read_selection_state`   | 選取三態判定（Edit Mode 主路徑）— macOS AX / Windows UIA 均為被動讀取；Windows 終端機 UIA 不可用時回 `noSelection` |
+| `read_selected_text`     | 剪貼簿後備：模擬 Cmd+C／Ctrl+C 取選取文字，僅在三態回 `unavailable` 時使用；Windows 目標與目前前景不同即跳過，並依捕獲目標排除終端機 |
 | `get_foreground_app_name`| 取前景 App 名稱（給情境注入）                                               |
 
 ### 3.7 鍵盤監測

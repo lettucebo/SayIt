@@ -682,8 +682,7 @@
     },
     "upgradeNotice": {
       "title": "SayIt 更新摘要",
-      "item1": "Azure／Microsoft Foundry 設定更清楚：可分別填寫聊天、Whisper 與 Speech 的資源名稱，SayIt 會自動推導正確的服務端點與部署清單；使用 private DNS 或自訂網域時仍可覆寫端點，既有設定與備份也會繼續有效。",
-      "item2": "中英夾雜的取代規則更可靠：中文規則緊接英文或數字時，過去可能因詞界判斷而無法套用；現在保留英文詞界保護，同時讓中文、C++、.NET 等規則正確套用。",
+      "item1": "終端機語音輸入更安全：在 GitHub Copilot CLI 等終端機使用語音輸入時，SayIt 不再為偵測選取文字而送出 Ctrl+C，避免清空目前輸入、取消執行中的工作或離開工作階段。",
       "dismiss": "了解"
     }
   },

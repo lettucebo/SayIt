@@ -682,8 +682,7 @@
     },
     "upgradeNotice": {
       "title": "SayIt Update Summary",
-      "item1": "Clearer Azure and Microsoft Foundry setup: Set resource names separately for chat, Whisper, and Speech, and SayIt derives the correct service endpoints and deployment list — endpoint overrides remain available for private DNS or custom domains, while existing settings and backups continue to work.",
-      "item2": "More reliable mixed-script replacements: Chinese rules could fail immediately after English letters or digits because of word-boundary matching. SayIt now preserves ASCII word boundaries while correctly applying Chinese, C++, and .NET rules.",
+      "item1": "Safer voice input in terminals: When using voice input in terminals such as GitHub Copilot CLI, SayIt no longer sends Ctrl+C to detect selected text — so it will not clear your prompt, cancel active work, or exit the session.",
       "dismiss": "Got it"
     }
   },

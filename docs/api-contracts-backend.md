@@ -149,8 +149,9 @@ invoke('start_correction_monitor') → void
 ### 2.7 文字場讀取（4 個 · `plugins/text_field_reader.rs`）
 
 macOS 走 AXUIElement、Windows 走 UI Automation（`IUIAutomation` + TextPattern/ValuePattern，
-跑在專用 MTA worker 執行緒）。`read_selection_state` 的選取三態判定目前僅 macOS 有實作，
-Windows 一律回 `unavailable` 而落回剪貼簿後備。
+跑在專用 MTA worker 執行緒）。`read_selection_state` 的選取三態判定在兩個平台皆為被動查詢；
+Windows 以 `TextPattern.GetSelection()` 和 range endpoint 比較區分選取與游標。UIA 無法判定時回
+`unavailable`，但前景為終端機時改回 `noSelection`，避免觸發 Ctrl+C 剪貼簿後備。
 
 ```ts
 invoke('read_focused_text_field') → Result<string | null, string>
@@ -159,8 +160,8 @@ invoke('read_selection_state')    → { kind: 'selection' | 'noSelection' | 'una
 invoke('get_foreground_app_name') → string | null
 ```
 
-- `read_selection_state` 用於編輯模式偵測。macOS 走 AX worker 執行緒並以 `spawn_blocking` 等待——AX server 卡死時最壞會等 `SELECTION_READ_TIMEOUT_MS`，若阻塞 Tauri 主執行緒會連帶延後緊接其後的 `play_start_sound` / `start_recording`（錄音起點延遲＝開頭語音被吃掉）。
-- single-flight：熱鍵連按時重入直接回 `unavailable`，避免 AX 讀取堆疊。非 macOS 一律回 `unavailable`。
+- `read_selection_state` 用於編輯模式偵測。macOS AX 與 Windows UIA 皆走專屬 worker，command 以 `spawn_blocking` 等待——目標 App 的 accessibility server 卡死時最壞只等平台 timeout，不會拖慢緊接其後的 `play_start_sound` / `start_recording`（錄音起點延遲＝開頭語音被吃掉）。
+- single-flight：熱鍵連按時重入直接回 `unavailable`，避免 accessibility 讀取堆疊。僅非 macOS／Windows 平台一律回 `unavailable`。
 
 ### 2.8 LLM / 轉錄（3 個 · `plugins/transcription.rs`）
 
