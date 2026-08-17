@@ -315,6 +315,20 @@ export type WhisperModelId = "whisper-large-v3" | "whisper-large-v3-turbo";
 export type TranscriptionProviderId = "groq" | "azure" | "gemini" | "mai";
 
 /**
+ * 轉錄服務的使用者可見名稱。皆為專有名詞，五種介面語言共用。
+ * 使用 Record 讓新增 provider 時編譯器強制補齊顯示名稱。
+ */
+export const TRANSCRIPTION_PROVIDER_DISPLAY_NAME: Record<
+  TranscriptionProviderId,
+  string
+> = {
+  groq: "Groq Whisper",
+  azure: "Azure OpenAI Whisper",
+  gemini: "Gemini",
+  mai: "MAI-Transcribe",
+};
+
+/**
  * 免費額度的計算週期。多數 provider 是每日（如 Gemini 的 RPD、Groq 的 RPD），
  * 但也有「每月 N 次免費」的方案（例：Gemini 的 Google Search grounding 每月 5,000 次），
  * 因此額度模型必須同時支援兩種週期。

@@ -91,7 +91,7 @@
     "model": {
       "title": "Model Selection",
       "description": "Choose the AI models for speech transcription and text enhancement. Faster models respond quicker, while larger models offer better quality.",
-      "whisperLabel": "Speech Transcription Model (Whisper)",
+      "whisperLabel": "Speech Transcription Model",
       "llmLabel": "Text Enhancement Model (LLM)",
       "whisperUpdated": "Speech transcription model updated",
       "geminiTranscriptionHint": "Gemini usually handles Chinese-English code-switching better than Whisper. Requires a Gemini API key.",
@@ -121,6 +121,7 @@
       "quotaPeriodMonthly": "Per month",
       "llmUpdated": "Text enhancement model updated",
       "default": "Default",
+      "bestQuality": "Best quality",
       "costPerHour": "${cost}/hour",
       "whisperDescription": {
         "largeV3": "Higher accuracy (10.3% WER); recommended for Chinese-English mixing. Also supports translation to English",
@@ -495,7 +496,7 @@
     "billedPlan": "Billed",
     "billedNoFreeQuota": "Pay-as-you-go — no free quota limit",
     "freeTierQuotaUnknown": "Free tier — limit not published; enter yours in Settings to see remaining",
-    "usageWhisper": "Whisper: {requests} req · {audio}",
+    "usageTranscription": "{provider}: {requests} req · {audio}",
     "usageGeminiTranscription": "Gemini transcription: {requests} req · {tokens} tokens",
     "quotaGeminiRequests": "Gemini transcription today {used} / {limit}",
     "quotaGeminiRequestsMonthly": "Gemini transcription this month {used} / {limit}",

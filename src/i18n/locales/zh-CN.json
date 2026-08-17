@@ -91,7 +91,7 @@
     "model": {
       "title": "模型选择",
       "description": "选择语音转录和文字整理使用的 AI 模型。速度较快的模型响应更即时，较大的模型品质更好。",
-      "whisperLabel": "语音转录模型（Whisper）",
+      "whisperLabel": "语音转录模型",
       "llmLabel": "文字整理模型（LLM）",
       "whisperUpdated": "语音转录模型已更新",
       "geminiTranscriptionHint": "Gemini 对中英夹杂的识别通常优于 Whisper，需要 Gemini API Key。",
@@ -121,6 +121,7 @@
       "quotaPeriodMonthly": "每月",
       "llmUpdated": "文字整理模型已更新",
       "default": "默认",
+      "bestQuality": "品质最佳",
       "costPerHour": "每小时 ${cost}",
       "whisperDescription": {
         "largeV3": "准确度较高（WER 10.3%），中英夹杂建议选这个；另支持翻译成英文",
@@ -495,7 +496,7 @@
     "billedPlan": "计费",
     "billedNoFreeQuota": "付费方案 — 无免费额度限制",
     "freeTierQuotaUnknown": "免费方案 — 额度未公开，可在设置填入以显示剩余量",
-    "usageWhisper": "Whisper：{requests} 次 · {audio}",
+    "usageTranscription": "{provider}：{requests} 次 · {audio}",
     "usageGeminiTranscription": "Gemini 转录：{requests} 次 · {tokens} tokens",
     "quotaGeminiRequests": "Gemini 转录今日 {used} / {limit} 次",
     "quotaGeminiRequestsMonthly": "Gemini 转录本月 {used} / {limit} 次",

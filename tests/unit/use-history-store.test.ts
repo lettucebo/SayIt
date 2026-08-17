@@ -473,6 +473,8 @@ describe("useHistoryStore", () => {
       expect(stats.dailyQuotaUsage).toEqual({
         whisperRequestCount: 0,
         whisperBilledAudioMs: 0,
+        maiRequestCount: 0,
+        maiBilledAudioMs: 0,
         geminiTranscriptionRequestCount: 0,
         geminiTranscriptionTotalTokens: 0,
         llmRequestCount: 0,
@@ -518,21 +520,28 @@ describe("useHistoryStore", () => {
       mockDbSelect.mockResolvedValueOnce([
         {
           api_type: "whisper",
-          is_gemini: 0,
+          provider_bucket: "whisper",
           request_count: 5,
           total_tokens: 0,
           billed_audio_ms: 50000,
         },
         {
           api_type: "whisper",
-          is_gemini: 1,
+          provider_bucket: "gemini",
           request_count: 2,
           total_tokens: 3840,
           billed_audio_ms: 20000,
         },
         {
+          api_type: "whisper",
+          provider_bucket: "mai",
+          request_count: 4,
+          total_tokens: 0,
+          billed_audio_ms: 40000,
+        },
+        {
           api_type: "chat",
-          is_gemini: 0,
+          provider_bucket: "whisper",
           request_count: 3,
           total_tokens: 1500,
           billed_audio_ms: 30000,
@@ -556,6 +565,8 @@ describe("useHistoryStore", () => {
       expect(stats.dailyQuotaUsage).toEqual({
         whisperRequestCount: 5,
         whisperBilledAudioMs: 50000,
+        maiRequestCount: 4,
+        maiBilledAudioMs: 40000,
         geminiTranscriptionRequestCount: 2,
         geminiTranscriptionTotalTokens: 3840,
         llmRequestCount: 3,
@@ -584,7 +595,7 @@ describe("useHistoryStore", () => {
       mockDbSelect.mockResolvedValueOnce([
         {
           api_type: "whisper",
-          is_gemini: 0,
+          provider_bucket: "whisper",
           request_count: 2,
           total_tokens: 0,
           billed_audio_ms: 20000,
@@ -643,6 +654,8 @@ describe("useHistoryStore", () => {
       expect(store.dashboardStats.dailyQuotaUsage).toEqual({
         whisperRequestCount: 0,
         whisperBilledAudioMs: 0,
+        maiRequestCount: 0,
+        maiBilledAudioMs: 0,
         geminiTranscriptionRequestCount: 0,
         geminiTranscriptionTotalTokens: 0,
         llmRequestCount: 0,
