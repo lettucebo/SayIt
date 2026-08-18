@@ -91,7 +91,7 @@
     "model": {
       "title": "모델 선택",
       "description": "음성 전사 및 텍스트 정리에 사용할 AI 모델을 선택하세요. 빠른 모델은 응답이 즉각적이고, 큰 모델은 품질이 더 좋습니다.",
-      "whisperLabel": "음성 전사 모델 (Whisper)",
+      "whisperLabel": "음성 전사 모델",
       "llmLabel": "텍스트 정리 모델 (LLM)",
       "whisperUpdated": "음성 전사 모델이 업데이트되었습니다",
       "geminiTranscriptionHint": "Gemini는 중국어-영어 혼용 음성에서 Whisper보다 정확한 경우가 많으며 Gemini API 키가 필요합니다.",
@@ -121,6 +121,7 @@
       "quotaPeriodMonthly": "한 달",
       "llmUpdated": "텍스트 정리 모델이 업데이트되었습니다",
       "default": "기본",
+      "bestQuality": "최고 품질",
       "costPerHour": "시간당 ${cost}",
       "whisperDescription": {
         "largeV3": "정확도가 높고(WER 10.3%) 중국어-영어 혼용에 권장됩니다. 영어 번역도 지원",
@@ -495,7 +496,7 @@
     "billedPlan": "유료",
     "billedNoFreeQuota": "유료 요금제 — 무료 할당량 없음",
     "freeTierQuotaUnknown": "무료 등급 — 한도가 비공개입니다. 설정에 입력하면 잔여량이 표시됩니다",
-    "usageWhisper": "Whisper: {requests}회 · {audio}",
+    "usageTranscription": "{provider}: {requests}회 · {audio}",
     "usageGeminiTranscription": "Gemini 전사: {requests}회 · {tokens} tokens",
     "quotaGeminiRequests": "Gemini 전사 오늘 {used} / {limit}회",
     "quotaGeminiRequestsMonthly": "Gemini 전사 이번 달 {used} / {limit}회",

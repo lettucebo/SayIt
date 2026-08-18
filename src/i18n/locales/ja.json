@@ -91,7 +91,7 @@
     "model": {
       "title": "モデル選択",
       "description": "音声文字起こしとテキスト整理に使用する AI モデルを選択します。高速なモデルはより即時に応答し、大型モデルはより高品質です。",
-      "whisperLabel": "音声文字起こしモデル（Whisper）",
+      "whisperLabel": "音声文字起こしモデル",
       "llmLabel": "テキスト整理モデル（LLM）",
       "whisperUpdated": "音声文字起こしモデルが更新されました",
       "geminiTranscriptionHint": "Gemini は中国語と英語の混在音声で Whisper より高精度な場合が多く、Gemini API キーが必要です。",
@@ -121,6 +121,7 @@
       "quotaPeriodMonthly": "1か月あたり",
       "llmUpdated": "テキスト整理モデルが更新されました",
       "default": "デフォルト",
+      "bestQuality": "最高品質",
       "costPerHour": "1時間あたり ${cost}",
       "whisperDescription": {
         "largeV3": "精度が高く（WER 10.3%）、中国語と英語の混在にはこちらを推奨。英訳にも対応",
@@ -495,7 +496,7 @@
     "billedPlan": "従量課金",
     "billedNoFreeQuota": "従量課金 — 無料枠なし",
     "freeTierQuotaUnknown": "無料枠 — 上限は非公開です。設定に入力すると残量が表示されます",
-    "usageWhisper": "Whisper：{requests} 回 · {audio}",
+    "usageTranscription": "{provider}：{requests} 回 · {audio}",
     "usageGeminiTranscription": "Gemini 文字起こし：{requests} 回 · {tokens} tokens",
     "quotaGeminiRequests": "Gemini 文字起こし 本日 {used} / {limit} 回",
     "quotaGeminiRequestsMonthly": "Gemini 文字起こし 今月 {used} / {limit} 回",

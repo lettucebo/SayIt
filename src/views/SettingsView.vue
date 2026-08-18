@@ -2806,7 +2806,7 @@ onBeforeUnmount(() => {
           {{ $t("settings.model.description") }}
         </p>
 
-        <!-- Whisper 模型 -->
+        <!-- 語音轉錄模型 -->
         <div class="space-y-2">
           <Label for="whisper-model">{{ $t("settings.model.whisperLabel") }}</Label>
 
@@ -2817,6 +2817,20 @@ onBeforeUnmount(() => {
             :class="settingsStore.azureEnabled ? 'grid-cols-4' : 'grid-cols-2'"
             @update:model-value="(v: unknown) => handleWhisperProviderChange(v as TranscriptionProviderId)"
           >
+            <Label
+              v-if="settingsStore.azureEnabled"
+              for="whisper-provider-mai"
+              class="flex cursor-pointer items-center gap-2.5 rounded-md border border-border p-3 transition-colors"
+              :class="settingsStore.whisperProviderId === 'mai' ? 'border-primary bg-primary/5' : 'hover:bg-muted/50'"
+            >
+              <RadioGroupItem id="whisper-provider-mai" value="mai" class="!size-0 !border-0 !shadow-none overflow-hidden" />
+              <div class="flex min-w-0 items-center gap-1.5">
+                <span class="text-sm font-medium">MAI-Transcribe</span>
+                <Badge variant="outline" class="shrink-0 px-1 py-0 text-[10px]">
+                  {{ $t("settings.model.bestQuality") }}
+                </Badge>
+              </div>
+            </Label>
             <Label
               for="whisper-provider-groq"
               class="flex cursor-pointer items-center gap-2.5 rounded-md border border-border p-3 transition-colors"
@@ -2841,15 +2855,6 @@ onBeforeUnmount(() => {
             >
               <RadioGroupItem id="whisper-provider-azure" value="azure" class="!size-0 !border-0 !shadow-none overflow-hidden" />
               <span class="text-sm font-medium">Azure OpenAI</span>
-            </Label>
-            <Label
-              v-if="settingsStore.azureEnabled"
-              for="whisper-provider-mai"
-              class="flex cursor-pointer items-center gap-2.5 rounded-md border border-border p-3 transition-colors"
-              :class="settingsStore.whisperProviderId === 'mai' ? 'border-primary bg-primary/5' : 'hover:bg-muted/50'"
-            >
-              <RadioGroupItem id="whisper-provider-mai" value="mai" class="!size-0 !border-0 !shadow-none overflow-hidden" />
-              <span class="text-sm font-medium">MAI-Transcribe</span>
             </Label>
           </RadioGroup>
           <InlineFeedback :feedback="whisperProviderFeedback.state.value" class="block" />
