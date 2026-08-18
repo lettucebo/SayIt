@@ -284,7 +284,11 @@ invoke('read_text_file', { path: string })                  → Result<string, s
 | ------------------- | ------------------ | ------------------------------ |
 | `theme:os-changed`  | `THEME_OS_CHANGED` | `"dark"` \| `"light"`（字串）  |
 
-> Windows 上透明且隱藏的 HUD 收不到 `WM_THEMECHANGED`，故由 Rust 輪詢登錄檔後主動廣播。
+> Windows 上透明且隱藏的 HUD 收不到 `WM_THEMECHANGED`，故 Rust 輪詢
+> `AppsUseLightTheme` 登錄檔值後主動廣播。系統匣圖示獨立輪詢
+> `SystemUsesLightTheme`，因 Windows「自訂」模式允許工作列與 App 外觀不同；
+> 圖示切換不會發送新的前端事件。Windows 的深／淺系統匣素材由
+> `python scripts/generate_tray_icons.py` 從原始書法字形產生。
 
 ---
 
