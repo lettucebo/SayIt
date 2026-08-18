@@ -1,21 +1,32 @@
 import type { TriggerMode } from "./index";
 
-export type PresetTriggerKey =
-  | "fn"
-  | "option"
-  | "rightOption"
-  | "command"
-  | "rightAlt"
-  | "leftAlt"
-  | "control"
-  | "rightControl"
-  | "shift";
+export const PRESET_TRIGGER_KEY_VALUES = [
+  "fn",
+  "option",
+  "rightOption",
+  "command",
+  "rightAlt",
+  "leftAlt",
+  "control",
+  "rightControl",
+  "shift",
+] as const;
+
+export type PresetTriggerKey = (typeof PRESET_TRIGGER_KEY_VALUES)[number];
 
 export interface CustomTriggerKey {
   custom: { keycode: number };
 }
 
-export type ModifierFlag = "command" | "control" | "option" | "shift" | "fn";
+export const MODIFIER_FLAG_VALUES = [
+  "command",
+  "control",
+  "option",
+  "shift",
+  "fn",
+] as const;
+
+export type ModifierFlag = (typeof MODIFIER_FLAG_VALUES)[number];
 
 export interface ComboTriggerKey {
   combo: { modifiers: ModifierFlag[]; keycode: number };
@@ -23,16 +34,53 @@ export interface ComboTriggerKey {
 
 export type TriggerKey = PresetTriggerKey | CustomTriggerKey | ComboTriggerKey;
 
-export function isPresetTriggerKey(key: TriggerKey): key is PresetTriggerKey {
-  return typeof key === "string";
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object";
 }
 
-export function isCustomTriggerKey(key: TriggerKey): key is CustomTriggerKey {
-  return typeof key === "object" && key !== null && "custom" in key;
+function isValidKeycode(value: unknown): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= 0 &&
+    value <= 0xffff
+  );
 }
 
-export function isComboTriggerKey(key: TriggerKey): key is ComboTriggerKey {
-  return typeof key === "object" && key !== null && "combo" in key;
+export function isPresetTriggerKey(value: unknown): value is PresetTriggerKey {
+  return (
+    typeof value === "string" &&
+    (PRESET_TRIGGER_KEY_VALUES as readonly string[]).includes(value)
+  );
+}
+
+export function isCustomTriggerKey(value: unknown): value is CustomTriggerKey {
+  if (!isRecord(value) || !isRecord(value.custom)) return false;
+  return isValidKeycode(value.custom.keycode);
+}
+
+export function isComboTriggerKey(value: unknown): value is ComboTriggerKey {
+  if (!isRecord(value) || !isRecord(value.combo)) return false;
+  const { modifiers, keycode } = value.combo;
+  return (
+    Array.isArray(modifiers) &&
+    modifiers.length > 0 &&
+    modifiers.every(
+      (modifier) =>
+        typeof modifier === "string" &&
+        (MODIFIER_FLAG_VALUES as readonly string[]).includes(modifier),
+    ) &&
+    new Set(modifiers).size === modifiers.length &&
+    isValidKeycode(keycode)
+  );
+}
+
+export function isValidTriggerKey(value: unknown): value is TriggerKey {
+  return (
+    isPresetTriggerKey(value) ||
+    isCustomTriggerKey(value) ||
+    isComboTriggerKey(value)
+  );
 }
 
 export interface HotkeyConfig {

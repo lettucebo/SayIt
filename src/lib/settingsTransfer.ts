@@ -4,13 +4,26 @@ import {
 } from "./vocabularyTransfer";
 import type { VocabularyExportFile } from "../types/vocabulary";
 import type { ReplacementRule } from "../types/replacement";
-import { isAzureAuthMode } from "../types/settings";
-import { normalizeMaiCandidateLocales } from "../i18n/languageConfig";
+import {
+  isAzureAuthMode,
+  isComboTriggerKey,
+  isCustomTriggerKey,
+  isValidTriggerKey,
+} from "../types/settings";
+import { TRIGGER_MODE_VALUES } from "../types";
+import {
+  LANGUAGE_OPTIONS,
+  normalizeMaiCandidateLocales,
+  TRANSCRIPTION_LANGUAGE_OPTIONS,
+} from "../i18n/languageConfig";
 import {
   getEffectiveMaiTranscribeStyle,
   isAzureChatModelFamilyId,
   isAzureChatModelFamilySource,
+  isTranscriptionProviderId,
+  QUOTA_PERIOD_VALUES,
 } from "./modelRegistry";
+import { LLM_PROVIDER_LIST } from "./llmProvider";
 
 export const BACKUP_FORMAT = "sayit-backup" as const;
 export const BACKUP_VERSION = 1 as const;
@@ -57,6 +70,8 @@ export const EXPORTABLE_SETTING_KEYS = [
   "enhancementThresholdCharCount",
   "recordingAutoCleanupEnabled",
   "recordingAutoCleanupDays",
+  "debugLogEnabled",
+  "debugLogRetentionDays",
   "copyTranscriptionToClipboard",
   "audioInputDeviceName",
   "groqApiKey",
@@ -88,6 +103,10 @@ export const EXPORTABLE_SETTING_KEYS = [
 ] as const;
 
 export type ExportableSettingKey = (typeof EXPORTABLE_SETTING_KEYS)[number];
+type ImportOnlySettingKey =
+  | "azureEndpoint"
+  | "azureSpeechEndpoint"
+  | "autoStartEnabled";
 
 /** 含明文金鑰／密鑰的敏感 key —— 「排除金鑰」匯出時會被剔除。 */
 export const SENSITIVE_SETTING_KEYS: readonly ExportableSettingKey[] = [
@@ -258,7 +277,7 @@ type ExpectedType =
  * 用於匯入前清洗：丟棄型別不符的 key，避免把壞值（如數字欄位存字串、
  * locale 存非字串）持久化後造成 runtime 狀態損壞。
  */
-const SETTING_VALUE_TYPES: Record<string, ExpectedType> = {
+const SETTING_VALUE_TYPES = {
   hotkeyTriggerKey: "stringOrObject",
   hotkeyTriggerMode: "string",
   customTriggerKey: "object",
@@ -284,6 +303,8 @@ const SETTING_VALUE_TYPES: Record<string, ExpectedType> = {
   enhancementThresholdCharCount: "number",
   recordingAutoCleanupEnabled: "boolean",
   recordingAutoCleanupDays: "number",
+  debugLogEnabled: "boolean",
+  debugLogRetentionDays: "number",
   copyTranscriptionToClipboard: "boolean",
   audioInputDeviceName: "string",
   groqApiKey: "string",
@@ -317,7 +338,25 @@ const SETTING_VALUE_TYPES: Record<string, ExpectedType> = {
   maiCandidateLocales: "stringArray",
   maiTranscribeStyle: "string",
   autoStartEnabled: "boolean",
-};
+} satisfies Record<ExportableSettingKey | ImportOnlySettingKey, ExpectedType>;
+
+const SUPPORTED_LOCALE_SET = new Set<string>(
+  LANGUAGE_OPTIONS.map((option) => option.locale),
+);
+const TRANSCRIPTION_LOCALE_SET = new Set<string>(
+  TRANSCRIPTION_LANGUAGE_OPTIONS.map((option) => option.locale),
+);
+const LLM_PROVIDER_ID_SET = new Set<string>(
+  LLM_PROVIDER_LIST.map((provider) => provider.id),
+);
+
+function getExpectedType(key: string): ExpectedType | undefined {
+  return SETTING_VALUE_TYPES[key as keyof typeof SETTING_VALUE_TYPES];
+}
+
+function isIntegerAtLeast(value: unknown, minimum: number): boolean {
+  return typeof value === "number" && Number.isInteger(value) && value >= minimum;
+}
 
 function matchesExpectedType(value: unknown, expected: ExpectedType): boolean {
   switch (expected) {
@@ -348,11 +387,71 @@ export function sanitizeSettingsPayload(
 ): SettingsPayload {
   const result: SettingsPayload = {};
   for (const [key, value] of Object.entries(settings)) {
-    const expected = SETTING_VALUE_TYPES[key];
+    const expected = getExpectedType(key);
     if (!expected) continue; // 未知 key
     if (!matchesExpectedType(value, expected)) continue; // 型別不符
     // 列舉型欄位光靠 typeof 檢查不夠：備份是可任意編輯的 JSON，
     // 未知的驗證模式會一路帶進 store 並讓下游 header 判斷失準。
+    if (key === "hotkeyTriggerKey" && !isValidTriggerKey(value)) continue;
+    if (
+      key === "customTriggerKey" &&
+      !isCustomTriggerKey(value) &&
+      !isComboTriggerKey(value)
+    ) {
+      continue;
+    }
+    if (
+      key === "hotkeyTriggerMode" &&
+      (typeof value !== "string" ||
+        !(TRIGGER_MODE_VALUES as readonly string[]).includes(value))
+    ) {
+      continue;
+    }
+    if (
+      key === "selectedLocale" &&
+      (typeof value !== "string" || !SUPPORTED_LOCALE_SET.has(value))
+    ) {
+      continue;
+    }
+    if (
+      key === "selectedTranscriptionLocale" &&
+      (typeof value !== "string" || !TRANSCRIPTION_LOCALE_SET.has(value))
+    ) {
+      continue;
+    }
+    if (
+      key === "llmProviderId" &&
+      (typeof value !== "string" || !LLM_PROVIDER_ID_SET.has(value))
+    ) {
+      continue;
+    }
+    if (
+      key === "whisperProviderId" &&
+      !isTranscriptionProviderId(value)
+    ) {
+      continue;
+    }
+    if (
+      key === "geminiFreeQuotaPeriod" &&
+      (typeof value !== "string" ||
+        !(QUOTA_PERIOD_VALUES as readonly string[]).includes(value))
+    ) {
+      continue;
+    }
+    if (
+      key === "geminiFreeQuotaRequests" &&
+      !isIntegerAtLeast(value, 0)
+    ) {
+      continue;
+    }
+    if (
+      (key === "enhancementThresholdCharCount" ||
+        key === "recordingAutoCleanupDays" ||
+        key === "debugLogRetentionDays") &&
+      !isIntegerAtLeast(value, 1)
+    ) {
+      continue;
+    }
     if (key === "azureAuthMode" && !isAzureAuthMode(value)) continue;
     if (key === "azureChatModelFamily" && !isAzureChatModelFamilyId(value)) {
       continue;

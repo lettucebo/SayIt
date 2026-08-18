@@ -13,7 +13,8 @@ export interface HudState {
   message: string;
 }
 
-export type TriggerMode = "hold" | "toggle";
+export const TRIGGER_MODE_VALUES = ["hold", "toggle"] as const;
+export type TriggerMode = (typeof TRIGGER_MODE_VALUES)[number];
 
 export interface HudTargetPosition {
   x: number;

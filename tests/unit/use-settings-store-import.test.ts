@@ -76,6 +76,8 @@ describe("useSettingsStore — exportSettings / importSettings", () => {
     it("[P0] 含 autoStartEnabled 合成欄位、排除內部旗標", async () => {
       h.mockStoreData.set("hotkeyTriggerKey", "option");
       h.mockStoreData.set("groqApiKey", "gsk_secret");
+      h.mockStoreData.set("debugLogEnabled", true);
+      h.mockStoreData.set("debugLogRetentionDays", 14);
       h.mockStoreData.set("lastSeenVersion", "9.9.9"); // 內部旗標，不應匯出
       h.mockStoreData.set("llmMigratedFromKimiK2", true); // 內部旗標
 
@@ -84,6 +86,8 @@ describe("useSettingsStore — exportSettings / importSettings", () => {
 
       expect(exported.hotkeyTriggerKey).toBe("option");
       expect(exported.groqApiKey).toBe("gsk_secret");
+      expect(exported.debugLogEnabled).toBe(true);
+      expect(exported.debugLogRetentionDays).toBe(14);
       expect(exported).toHaveProperty("autoStartEnabled");
       expect(exported).not.toHaveProperty("lastSeenVersion");
       expect(exported).not.toHaveProperty("llmMigratedFromKimiK2");
@@ -139,6 +143,21 @@ describe("useSettingsStore — exportSettings / importSettings", () => {
       expect(h.mockStoreSave).toHaveBeenCalled();
     });
 
+    it("[P0] store 匯入邊界也必須清洗損壞的快捷鍵設定", async () => {
+      const store = useSettingsStore();
+      await store.loadSettings();
+
+      await store.importSettings({
+        hotkeyTriggerKey: "not-a-hotkey",
+        hotkeyTriggerMode: "not-a-mode",
+      });
+
+      expect(h.mockStoreData.has("hotkeyTriggerKey")).toBe(false);
+      expect(h.mockStoreData.has("hotkeyTriggerMode")).toBe(false);
+      expect(store.hotkeyConfig?.triggerKey).toBe("rightAlt");
+      expect(store.hotkeyConfig?.triggerMode).toBe("hold");
+    });
+
     it("[P0] 匯入後向 Rust 重新註冊熱鍵（update_hotkey_config）", async () => {
       const store = useSettingsStore();
       // 正式流程在 mount 前就 await loadSettings()；未載入完成時匯入會被守門擋下
@@ -160,6 +179,31 @@ describe("useSettingsStore — exportSettings / importSettings", () => {
       await store.loadSettings();
       await store.importSettings({ azureApiKey: "new-key" });
       expect(h.mockClearAzureTokenCache).toHaveBeenCalled();
+    });
+
+    it("[P0] 匯入開啟除錯記錄時應立即同步 Rust", async () => {
+      const store = useSettingsStore();
+      await store.loadSettings();
+      h.mockInvoke.mockClear();
+
+      await store.importSettings({ debugLogEnabled: true });
+
+      expect(h.mockInvoke).toHaveBeenCalledWith("set_file_logging_enabled", {
+        enabled: true,
+      });
+    });
+
+    it("[P0] 匯入關閉除錯記錄時應立即同步 Rust", async () => {
+      h.mockStoreData.set("debugLogEnabled", true);
+      const store = useSettingsStore();
+      await store.loadSettings();
+      h.mockInvoke.mockClear();
+
+      await store.importSettings({ debugLogEnabled: false });
+
+      expect(h.mockInvoke).toHaveBeenCalledWith("set_file_logging_enabled", {
+        enabled: false,
+      });
     });
 
     it("[P0] 舊備份換 chat deployment 卻缺 profile 時不得沿用本機 profile", async () => {

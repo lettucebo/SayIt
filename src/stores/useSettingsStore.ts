@@ -125,6 +125,7 @@ import {
 } from "../lib/azureUserAuth";
 import {
   EXPORTABLE_SETTING_KEYS,
+  sanitizeSettingsPayload,
   stripSensitiveKeys,
   type ExportableSettingKey,
   type SettingsPayload,
@@ -3272,7 +3273,7 @@ export const useSettingsStore = defineStore("settings", () => {
    * ⚠️ 純 store.set 不足以正確生效，因此：
    * 1) 白名單 key 寫回 store（autoStartEnabled 例外，改走 plugin）。
    * 2) refreshCrossWindowSettings() 把持久化值讀回 reactive（含 locale i18n + html lang、provider 修正）。
-   * 3) 補 refresh 缺漏的副作用：熱鍵向 Rust 重新註冊、清 Azure token 快取、套用 autostart。
+   * 3) 補 refresh 缺漏的副作用：熱鍵向 Rust 重新註冊、同步檔案記錄、清 Azure token 快取、套用 autostart。
    * 4) emit 單一 SETTINGS_UPDATED 通知其他視窗。
    */
   async function importSettings(settings: SettingsPayload): Promise<void> {
@@ -3282,8 +3283,11 @@ export const useSettingsStore = defineStore("settings", () => {
       throw new Error("SETTINGS_NOT_LOADED");
     }
     const store = await load(STORE_NAME);
-    const migratedSettings = migrateLegacyAzureEndpoints(settings).settings;
+    const migratedSettings = migrateLegacyAzureEndpoints(
+      sanitizeSettingsPayload(settings),
+    ).settings;
     let autoStartDesired: boolean | null = null;
+    const importedDebugLogEnabled = migratedSettings["debugLogEnabled"];
 
     // 匯入會直接覆寫 tenant/client。若不先登出舊身分，舊帳號的 refresh token
     // 會留在 OS 憑證庫，而覆寫後再也算不出它的 key —— 永久孤兒。
@@ -3391,6 +3395,17 @@ export const useSettingsStore = defineStore("settings", () => {
       );
     }
     clearAzureTokenCache();
+    if (typeof importedDebugLogEnabled === "boolean") {
+      try {
+        await setFileLoggingEnabled(importedDebugLogEnabled);
+      } catch (err) {
+        console.error(
+          "[useSettingsStore] failed to sync imported debug log setting:",
+          extractErrorMessage(err),
+        );
+        captureError(err, { source: "settings", step: "import-debug-log" });
+      }
+    }
     // 匯入的備份不含 refresh token（在 OS 憑證庫），需重新確認登入狀態；
     // 換機匯入時這裡會是未登入，UI 應顯示「需要重新登入」而非已連線。
     await refreshAzureUserAccount();

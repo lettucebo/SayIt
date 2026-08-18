@@ -312,7 +312,24 @@ export type WhisperModelId = "whisper-large-v3" | "whisper-large-v3-turbo";
 // ── 轉錄 Provider ─────────────────────────────────────────
 
 /** 語音轉錄 provider。Gemini 與 MAI 均有專屬協定，非 Whisper multipart API。 */
-export type TranscriptionProviderId = "groq" | "azure" | "gemini" | "mai";
+export const TRANSCRIPTION_PROVIDER_ID_VALUES = [
+  "groq",
+  "azure",
+  "gemini",
+  "mai",
+] as const;
+
+export type TranscriptionProviderId =
+  (typeof TRANSCRIPTION_PROVIDER_ID_VALUES)[number];
+
+export function isTranscriptionProviderId(
+  value: unknown,
+): value is TranscriptionProviderId {
+  return (
+    typeof value === "string" &&
+    (TRANSCRIPTION_PROVIDER_ID_VALUES as readonly string[]).includes(value)
+  );
+}
 
 /**
  * 轉錄服務的使用者可見名稱。皆為專有名詞，五種介面語言共用。
@@ -334,6 +351,8 @@ export const TRANSCRIPTION_PROVIDER_DISPLAY_NAME: Record<
  * 因此額度模型必須同時支援兩種週期。
  */
 export type QuotaPeriod = "daily" | "monthly";
+
+export const QUOTA_PERIOD_VALUES = ["daily", "monthly"] as const;
 
 export const DEFAULT_QUOTA_PERIOD: QuotaPeriod = "daily";
 
@@ -747,10 +766,7 @@ export function getEffectiveWhisperModelId(
 export function getEffectiveTranscriptionProviderId(
   savedId: string | null | undefined,
 ): TranscriptionProviderId {
-  return savedId === "azure" ||
-    savedId === "gemini" ||
-    savedId === "groq" ||
-    savedId === "mai"
+  return isTranscriptionProviderId(savedId)
     ? savedId
     : DEFAULT_TRANSCRIPTION_PROVIDER_ID;
 }
