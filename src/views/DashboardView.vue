@@ -13,6 +13,7 @@ import {
   findLlmModelConfig,
   findWhisperModelConfig,
   getEffectiveGeminiTranscriptionRpd,
+  TRANSCRIPTION_PROVIDER_DISPLAY_NAME,
 } from "../lib/modelRegistry";
 import DashboardUsageChart from "../components/DashboardUsageChart.vue";
 import {
@@ -164,6 +165,26 @@ const quotaDimensionList = computed(() => {
 
 const hasFreeQuota = computed(() => quotaDimensionList.value.length > 0);
 
+const paidTranscriptionUsage = computed(() => {
+  const usage = historyStore.dashboardStats.dailyQuotaUsage;
+  switch (settingsStore.whisperProviderId) {
+    case "azure":
+      return {
+        provider: TRANSCRIPTION_PROVIDER_DISPLAY_NAME.azure,
+        requests: usage.whisperRequestCount,
+        audio: usage.whisperBilledAudioMs,
+      };
+    case "mai":
+      return {
+        provider: TRANSCRIPTION_PROVIDER_DISPLAY_NAME.mai,
+        requests: usage.maiRequestCount,
+        audio: usage.maiBilledAudioMs,
+      };
+    default:
+      return null;
+  }
+});
+
 // 計費方案（Azure/OpenAI/Anthropic）無免費額度，改顯示今日實際用量；
 // 額度不公開的 provider（Gemini）同樣改顯示用量，否則轉錄用量會完全不可見。
 const paidUsageList = computed(() => {
@@ -177,11 +198,12 @@ const paidUsageList = computed(() => {
         tokens: formatNumber(usage.geminiTranscriptionTotalTokens),
       }),
     });
-  } else if (isPaidWhisperProvider.value) {
+  } else if (paidTranscriptionUsage.value) {
     list.push({
-      label: t("dashboard.usageWhisper", {
-        requests: formatNumber(usage.whisperRequestCount),
-        audio: formatDurationFromMs(usage.whisperBilledAudioMs),
+      label: t("dashboard.usageTranscription", {
+        provider: paidTranscriptionUsage.value.provider,
+        requests: formatNumber(paidTranscriptionUsage.value.requests),
+        audio: formatDurationFromMs(paidTranscriptionUsage.value.audio),
       }),
     });
   }

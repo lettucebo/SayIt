@@ -27,6 +27,8 @@ function makeHistory(usage: Record<string, number> = {}) {
   const quotaUsage = {
     whisperRequestCount: 0,
     whisperBilledAudioMs: 0,
+    maiRequestCount: 0,
+    maiBilledAudioMs: 0,
     geminiTranscriptionRequestCount: 0,
     geminiTranscriptionTotalTokens: 0,
     llmRequestCount: 0,
@@ -179,7 +181,7 @@ describe("DashboardView 額度卡片", () => {
 
     expect(text).toContain("今日用量");
     expect(text).toContain("計費");
-    expect(text).toContain("Whisper：12 次");
+    expect(text).toContain("Azure OpenAI Whisper：12 次");
     expect(text).toContain("LLM：8 次 · 4,500 tokens");
     expect(text).toContain("付費方案 — 無免費額度限制");
     expect(text).not.toContain("%");
@@ -225,9 +227,37 @@ describe("DashboardView 額度卡片", () => {
     expect(text).toContain("%");
     expect(text).toContain("計費");
     // 付費 Whisper 用量行（含實際次數）出現在卡片主體
-    expect(text).toContain("Whisper：7 次");
+    expect(text).toContain("Azure OpenAI Whisper：7 次");
     expect(text).not.toContain("付費方案 — 無免費額度限制");
     expect(text).not.toContain("Infinity");
+  });
+
+  it("[P0] MAI provider：用量標籤顯示 MAI-Transcribe 且使用 MAI 分桶", () => {
+    settingsState = makeSettings({
+      whisperProviderId: "mai",
+      selectedLlmProviderId: "azure",
+    });
+    historyState = makeHistory({
+      whisperRequestCount: 9,
+      maiRequestCount: 12,
+      maiBilledAudioMs: 60_000,
+    });
+    const text = mountDashboard().text();
+
+    expect(text).toContain("MAI-Transcribe：12 次 · 1 分鐘");
+    expect(text).not.toContain("MAI-Transcribe：9 次");
+  });
+
+  it("[P0] Groq 免費額度不計入 MAI 用量", () => {
+    settingsState = makeSettings();
+    historyState = makeHistory({
+      whisperRequestCount: 1000,
+      maiRequestCount: 5000,
+    });
+    const text = mountDashboard(true).text();
+
+    expect(text).toContain("50%");
+    expect(text).toMatch(/Whisper 1,?000\/2,?000 次/);
   });
 
   it("[P0] 混用 tooltip 仍保留付費用量與無額度提示", () => {

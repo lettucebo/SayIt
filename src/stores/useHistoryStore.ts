@@ -148,13 +148,17 @@ const INSERT_API_USAGE_SQL = `
 const DAILY_QUOTA_USAGE_SQL = `
   SELECT
     api_type,
-    CASE WHEN model LIKE 'gemini-%' THEN 1 ELSE 0 END as is_gemini,
+    CASE
+      WHEN model LIKE 'gemini-%' THEN 'gemini'
+      WHEN model LIKE 'mai-%' THEN 'mai'
+      ELSE 'whisper'
+    END as provider_bucket,
     COUNT(*) as request_count,
     COALESCE(SUM(total_tokens), 0) as total_tokens,
     COALESCE(SUM(MAX(COALESCE(audio_duration_ms, 0), 10000)), 0) as billed_audio_ms
   FROM api_usage
   WHERE created_at >= $1 AND created_at < $2
-  GROUP BY api_type, is_gemini
+  GROUP BY api_type, provider_bucket
 `;
 
 const DAILY_USAGE_TREND_SQL = `
@@ -219,7 +223,7 @@ interface DashboardStatsRow {
 
 interface DailyQuotaUsageRow {
   api_type: string;
-  is_gemini: number;
+  provider_bucket: "gemini" | "mai" | "whisper";
   request_count: number;
   total_tokens: number;
   billed_audio_ms: number;
@@ -368,6 +372,8 @@ export const useHistoryStore = defineStore("history", () => {
   const EMPTY_QUOTA_USAGE: DailyQuotaUsage = {
     whisperRequestCount: 0,
     whisperBilledAudioMs: 0,
+    maiRequestCount: 0,
+    maiBilledAudioMs: 0,
     geminiTranscriptionRequestCount: 0,
     geminiTranscriptionTotalTokens: 0,
     llmRequestCount: 0,
@@ -445,6 +451,8 @@ export const useHistoryStore = defineStore("history", () => {
     const result: DailyQuotaUsage = {
       whisperRequestCount: 0,
       whisperBilledAudioMs: 0,
+      maiRequestCount: 0,
+      maiBilledAudioMs: 0,
       geminiTranscriptionRequestCount: 0,
       geminiTranscriptionTotalTokens: 0,
       llmRequestCount: 0,
@@ -453,17 +461,23 @@ export const useHistoryStore = defineStore("history", () => {
       vocabularyAnalysisTotalTokens: 0,
     };
 
-    // 每個 api_type 現在最多兩列（gemini / 非 gemini）→ 一律累加，不可覆寫
+    // 每個 api_type 依轉錄 provider 分桶；同一 bucket 仍可能有多筆，必須累加。
     for (const row of rows) {
-      const isGemini = row.is_gemini === 1;
       if (row.api_type === "whisper") {
-        if (isGemini) {
-          // Gemini 依 token 計量，音訊時長對它沒有計費意義
-          result.geminiTranscriptionRequestCount += row.request_count;
-          result.geminiTranscriptionTotalTokens += row.total_tokens;
-        } else {
-          result.whisperRequestCount += row.request_count;
-          result.whisperBilledAudioMs += row.billed_audio_ms;
+        switch (row.provider_bucket) {
+          case "gemini":
+            // Gemini 依 token 計量，音訊時長對它沒有計費意義
+            result.geminiTranscriptionRequestCount += row.request_count;
+            result.geminiTranscriptionTotalTokens += row.total_tokens;
+            break;
+          case "mai":
+            result.maiRequestCount += row.request_count;
+            result.maiBilledAudioMs += row.billed_audio_ms;
+            break;
+          case "whisper":
+            result.whisperRequestCount += row.request_count;
+            result.whisperBilledAudioMs += row.billed_audio_ms;
+            break;
         }
       } else if (row.api_type === "chat") {
         result.llmRequestCount += row.request_count;

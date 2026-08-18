@@ -22,9 +22,13 @@ export interface TranscriptionRecord {
 }
 
 export interface DailyQuotaUsage {
-  /** Whisper 系轉錄（Groq/Azure，依音訊時長計費）——不含 Gemini */
+  /** Whisper 系轉錄（Groq/Azure，依音訊時長計費） */
   whisperRequestCount: number;
   whisperBilledAudioMs: number;
+  /** MAI-Transcribe（依音訊時長計費）——與 Whisper 系分開統計，
+   *  否則同一天混用會讓 Groq 的免費額度條計入 MAI 的請求數。 */
+  maiRequestCount: number;
+  maiBilledAudioMs: number;
   /** Gemini 轉錄（依 token 計量，音訊約 32 tokens/秒）——與 Whisper 分開統計，
    *  否則同一天混用會讓 Groq 的免費額度條計入 Gemini 的請求數。 */
   geminiTranscriptionRequestCount: number;

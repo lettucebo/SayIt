@@ -2,6 +2,16 @@
 
 SayIt 版本更新紀錄。
 
+## [Unreleased]
+
+### Changed
+
+- 設定頁將 MAI-Transcribe 列為語音轉錄的首選項目，並標示品質最佳。
+
+### Fixed
+
+- 儀表板在使用 MAI-Transcribe 時會顯示正確服務名稱；其用量不再錯誤計入 Groq 的免費額度。
+
 ## [0.16.2] - 2026-08-10
 
 ### Fixed
