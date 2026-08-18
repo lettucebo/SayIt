@@ -19,6 +19,7 @@ use tauri::{
 /// App 重啟旗標：由 `request_app_restart` command 設定，
 /// `RunEvent::Exit` handler 在 `_exit(0)` 前檢查並 spawn 新 process。
 static RESTART_REQUESTED: AtomicBool = AtomicBool::new(false);
+const TRAY_ICON_ID: &str = "main-tray";
 
 /// 設定 macOS 視窗為瀏海覆蓋層級（與 BoringNotch 相同）
 #[cfg(target_os = "macos")]
@@ -102,11 +103,8 @@ fn update_hotkey_config(
     Ok(())
 }
 
-/// 讀取 OS 目前外觀（深/淺）。Windows 直接讀登錄檔 `AppsUseLightTheme`
-/// （0=深、1=淺），這是不受透明/隱藏視窗 WebView2 影響的權威來源；
-/// 其他平台回傳 `None`，前端沿用 `window.theme()` / matchMedia（本就正常）。
 #[cfg(target_os = "windows")]
-fn current_os_theme_is_dark() -> Option<bool> {
+fn windows_personalize_dword(value_name: windows::core::PCWSTR) -> Option<u32> {
     use windows::core::w;
     use windows::Win32::Foundation::ERROR_SUCCESS;
     use windows::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD};
@@ -117,7 +115,7 @@ fn current_os_theme_is_dark() -> Option<bool> {
         RegGetValueW(
             HKEY_CURRENT_USER,
             w!(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"),
-            w!("AppsUseLightTheme"),
+            value_name,
             RRF_RT_REG_DWORD,
             None,
             Some(&mut data as *mut u32 as *mut core::ffi::c_void),
@@ -125,15 +123,58 @@ fn current_os_theme_is_dark() -> Option<bool> {
         )
     };
     if status == ERROR_SUCCESS {
-        Some(data == 0)
+        Some(data)
     } else {
         None
     }
 }
 
+/// 讀取 OS 目前應用程式外觀（深/淺）。Windows 直接讀登錄檔 `AppsUseLightTheme`
+/// （0=深、1=淺），這是不受透明/隱藏視窗 WebView2 影響的權威來源；
+/// 其他平台回傳 `None`，前端沿用 `window.theme()` / matchMedia（本就正常）。
+#[cfg(target_os = "windows")]
+fn current_os_theme_is_dark() -> Option<bool> {
+    use windows::core::w;
+
+    windows_personalize_dword(w!("AppsUseLightTheme")).map(|value| value == 0)
+}
+
 #[cfg(not(target_os = "windows"))]
 fn current_os_theme_is_dark() -> Option<bool> {
     None
+}
+
+/// 讀取系統匣所在工作列的外觀。這與 `AppsUseLightTheme` 可在 Windows「自訂」
+/// 模式下不同，故不得拿應用程式主題代替。
+#[cfg(target_os = "windows")]
+fn tray_area_is_dark() -> Option<bool> {
+    use windows::core::w;
+
+    windows_personalize_dword(w!("SystemUsesLightTheme")).map(|value| value == 0)
+}
+
+#[cfg(target_os = "windows")]
+const WINDOWS_TRAY_ICON_DARK: &[u8] = include_bytes!("../icons/tray-icon-dark.png");
+#[cfg(target_os = "windows")]
+const WINDOWS_TRAY_ICON_LIGHT: &[u8] = include_bytes!("../icons/tray-icon-light.png");
+
+#[cfg(target_os = "windows")]
+fn windows_tray_icon_bytes(is_dark: Option<bool>) -> &'static [u8] {
+    match is_dark {
+        Some(false) => WINDOWS_TRAY_ICON_LIGHT,
+        Some(true) | None => WINDOWS_TRAY_ICON_DARK,
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn windows_tray_icon(is_dark: Option<bool>) -> tauri::Result<tauri::image::Image<'static>> {
+    if is_dark.is_none() {
+        log::warn!(
+            "[tray] Could not detect the taskbar theme; defaulting to the dark-taskbar icon"
+        );
+    }
+
+    tauri::image::Image::from_bytes(windows_tray_icon_bytes(is_dark))
 }
 
 /// 供前端在啟動/需要時查詢權威 OS 外觀（"dark" | "light"，未知回 null）。
@@ -706,40 +747,27 @@ pub fn run() {
             // （HUD / Dashboard 兩個 WebView 共用，避免各自輪替 refresh token）
             app.manage(plugins::azure_user_session::AzureUserAuthState::default());
 
-            // Windows：輪詢 OS 外觀並廣播變更。透明+隱藏的 HUD 視窗收不到
-            // WM_THEMECHANGED（漏接/延遲），改由 Rust 讀登錄檔，變更時以
-            // `theme:os-changed` 自訂事件可靠通知所有 webview。
-            #[cfg(target_os = "windows")]
-            {
-                use tauri::Emitter;
-                let handle = app.handle().clone();
-                std::thread::spawn(move || {
-                    let mut last = current_os_theme_is_dark();
-                    loop {
-                        std::thread::sleep(std::time::Duration::from_millis(1500));
-                        let now = current_os_theme_is_dark();
-                        if now != last {
-                            last = now;
-                            if let Some(dark) = now {
-                                let payload = if dark { "dark" } else { "light" };
-                                let _ = handle.emit("theme:os-changed", payload);
-                                log::info!("[theme] OS appearance changed → broadcast {payload}");
-                            }
-                        }
-                    }
-                });
-            }
-
             let open_dashboard_item =
                 MenuItem::with_id(app, "open-dashboard", "開啟 Dashboard", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Quit SayIt", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&open_dashboard_item, &quit_item])?;
 
-            TrayIconBuilder::new()
-                .icon(tauri::image::Image::from_bytes(include_bytes!(
-                    "../icons/tray-icon.png"
-                ))?)
-                .icon_as_template(true)
+            let tray_icon = {
+                #[cfg(target_os = "windows")]
+                {
+                    windows_tray_icon(tray_area_is_dark())?
+                }
+
+                #[cfg(not(target_os = "windows"))]
+                {
+                    tauri::image::Image::from_bytes(include_bytes!("../icons/tray-icon.png"))?
+                }
+            };
+            let tray_builder = TrayIconBuilder::with_id(TRAY_ICON_ID).icon(tray_icon);
+            #[cfg(target_os = "macos")]
+            let tray_builder = tray_builder.icon_as_template(true);
+
+            tray_builder
                 .menu(&menu)
                 // Windows：關閉左鍵選單，改由右鍵顯示選單、左鍵雙擊開啟 Dashboard；
                 // macOS/Linux：維持左鍵單擊顯示選單（menu bar 慣例）。
@@ -765,6 +793,69 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
+
+            // Windows：輪詢 OS 外觀並廣播應用程式主題變更。透明+隱藏的 HUD 視窗
+            // 收不到 WM_THEMECHANGED，故由 Rust 讀 `AppsUseLightTheme` 後可靠通知所有
+            // webview。系統匣則獨立讀 `SystemUsesLightTheme`，避免 Windows「自訂」模式
+            // 下的 App／系統主題不同步；每次換圖成功才更新快取，以便 Explorer 重啟後重試。
+            #[cfg(target_os = "windows")]
+            {
+                use tauri::Emitter;
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    let mut last_app_theme = current_os_theme_is_dark();
+                    let mut last_tray_theme = tray_area_is_dark();
+                    loop {
+                        std::thread::sleep(std::time::Duration::from_millis(1500));
+
+                        let app_theme = current_os_theme_is_dark();
+                        if app_theme != last_app_theme {
+                            last_app_theme = app_theme;
+                            if let Some(dark) = app_theme {
+                                let payload = if dark { "dark" } else { "light" };
+                                let _ = handle.emit("theme:os-changed", payload);
+                                log::info!("[theme] OS appearance changed → broadcast {payload}");
+                            }
+                        }
+
+                        let tray_theme = tray_area_is_dark();
+                        if tray_theme != last_tray_theme {
+                            match windows_tray_icon(tray_theme) {
+                                Ok(icon) => match handle.tray_by_id(TRAY_ICON_ID) {
+                                    Some(tray) => match tray.set_icon(Some(icon)) {
+                                        Ok(()) => {
+                                            last_tray_theme = tray_theme;
+                                            let theme = if tray_theme.unwrap_or(true) {
+                                                "dark"
+                                            } else {
+                                                "light"
+                                            };
+                                            log::info!(
+                                                "[tray] Taskbar appearance changed → {theme} icon"
+                                            );
+                                        }
+                                        Err(error) => {
+                                            log::error!(
+                                                "[tray] Failed to update taskbar icon; will retry: {error}"
+                                            );
+                                        }
+                                    },
+                                    None => {
+                                        log::error!(
+                                            "[tray] Could not find the taskbar icon; will retry"
+                                        );
+                                    }
+                                },
+                                Err(error) => {
+                                    log::error!(
+                                        "[tray] Failed to load taskbar icon; will retry: {error}"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                });
+            }
 
             if let Some(window) = app.get_webview_window("main") {
                 #[cfg(target_os = "macos")]
@@ -875,6 +966,19 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_tray_icon_uses_dark_icon_for_unknown_or_dark_taskbar() {
+        assert_eq!(
+            windows_tray_icon_bytes(None),
+            windows_tray_icon_bytes(Some(true))
+        );
+        assert_ne!(
+            windows_tray_icon_bytes(Some(true)),
+            windows_tray_icon_bytes(Some(false))
+        );
+    }
 
     // ============================================================
     // calculate_centered_window_x 測試
