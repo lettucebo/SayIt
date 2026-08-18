@@ -49,6 +49,11 @@ vi.mock("../../src/i18n/prompts", async () => {
 
 vi.mock("../../src/i18n/languageConfig", () => ({
   FALLBACK_LOCALE: "zh-TW",
+  LANGUAGE_OPTIONS: [{ locale: "zh-TW" }],
+  TRANSCRIPTION_LANGUAGE_OPTIONS: [
+    { locale: "auto" },
+    { locale: "zh-TW" },
+  ],
   detectSystemLocale: () => "zh-TW",
   getHtmlLangForLocale: () => "zh-TW",
   getWhisperCodeForTranscriptionLocale: () => null,
@@ -108,11 +113,13 @@ vi.mock("../../src/lib/modelRegistry", () => ({
   getEffectiveMaiTranscribeStyle: (style: string | null | undefined) =>
     style === "verbatim" ? "verbatim" : "default",
   DEFAULT_QUOTA_PERIOD: "daily",
+  QUOTA_PERIOD_VALUES: ["daily", "monthly"],
   getModelListByProvider: () => [],
   getDefaultModelIdForProvider: () => "test-llm",
 }));
 
 vi.mock("../../src/lib/llmProvider", () => ({
+  LLM_PROVIDER_LIST: [{ id: "groq" }],
   findProviderConfig: () => undefined,
   normalizeAzureEndpoint: (endpoint: string) => endpoint.replace(/\/+$/, ""),
   parseAzureProjectEndpoint: (endpoint: string) => ({

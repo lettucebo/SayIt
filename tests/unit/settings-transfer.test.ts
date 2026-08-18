@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   BACKUP_FORMAT,
@@ -22,12 +23,31 @@ import { buildExportFile } from "../../src/lib/vocabularyTransfer";
 import type { VocabularyExportFile } from "../../src/types/vocabulary";
 import type { ReplacementRule } from "../../src/types/replacement";
 import { createReplacementRule } from "../support/factories";
-import {
-  EXPORTABLE_SETTING_KEYS,
-  sanitizeSettingsPayload as _sanitizeCheck,
-} from "../../src/lib/settingsTransfer";
 
 describe("EXPORTABLE_SETTING_KEYS 完整性", () => {
+  const intentionallyExcludedKeys = new Set([
+    "hasInitAutoStart",
+    "lastSeenVersion",
+    "llmMigratedFromKimiK2",
+  ]);
+
+  it("[P0] 所有持久化設定都必須納入備份或明確排除", () => {
+    const source = readFileSync("src/stores/useSettingsStore.ts", "utf8");
+    const persistedKeys = new Set(
+      [...source.matchAll(/store\.set\(\s*"([^"]+)"/g)].map(
+        (match) => match[1],
+      ),
+    );
+
+    expect(persistedKeys.size).toBeGreaterThanOrEqual(50);
+    const missingKeys = [...persistedKeys].filter(
+      (key) =>
+        !intentionallyExcludedKeys.has(key) &&
+        !(EXPORTABLE_SETTING_KEYS as readonly string[]).includes(key),
+    );
+    expect(missingKeys).toEqual([]);
+  });
+
   it("[P0] 新增的轉錄設定必須納入備份（否則還原後會遺失）", () => {
     const required = [
       "whisperProviderId",
@@ -46,6 +66,8 @@ describe("EXPORTABLE_SETTING_KEYS 完整性", () => {
       "maiTranscribeStyle",
       "azureChatModelFamily",
       "azureChatModelFamilySource",
+      "debugLogEnabled",
+      "debugLogRetentionDays",
     ];
     for (const key of required) {
       expect(
@@ -73,7 +95,7 @@ describe("EXPORTABLE_SETTING_KEYS 完整性", () => {
       maiCandidateLocales: ["zh-TW"],
       maiTranscribeStyle: "verbatim",
     };
-    const cleaned = _sanitizeCheck(sample);
+    const cleaned = sanitizeSettingsPayload(sample);
     expect(cleaned.geminiTranscriptionModelId).toBe("gemini-3.5-flash-lite");
     expect(cleaned.geminiFreeQuotaRequests).toBe(500);
     expect(cleaned.geminiFreeQuotaPeriod).toBe("daily");
@@ -90,17 +112,48 @@ describe("EXPORTABLE_SETTING_KEYS 完整性", () => {
   });
 
   it("[P0] Azure 模型類型未知時必須在匯入前拒絕", () => {
-    const cleaned = _sanitizeCheck({
+    const cleaned = sanitizeSettingsPayload({
       azureChatModelFamily: "untrusted-model-family",
     });
     expect(cleaned.azureChatModelFamily).toBeUndefined();
   });
 
   it("[P0] Azure 模型類型來源未知時必須在匯入前拒絕", () => {
-    const cleaned = _sanitizeCheck({
+    const cleaned = sanitizeSettingsPayload({
       azureChatModelFamilySource: "untrusted-source",
     });
     expect(cleaned.azureChatModelFamilySource).toBeUndefined();
+  });
+
+  it("[P0] 損壞備份中的 hotkey、locale、provider 與範圍值必須被丟棄", () => {
+    const cleaned = sanitizeSettingsPayload({
+      hotkeyTriggerKey: "not-a-hotkey",
+      hotkeyTriggerMode: "not-a-mode",
+      customTriggerKey: { combo: { modifiers: [], keycode: 65_536 } },
+      selectedLocale: "not-a-locale",
+      selectedTranscriptionLocale: "not-a-transcription-locale",
+      llmProviderId: "not-a-provider",
+      whisperProviderId: "not-a-transcription-provider",
+      geminiFreeQuotaPeriod: "yearly",
+      geminiFreeQuotaRequests: -1,
+      enhancementThresholdCharCount: 0,
+      recordingAutoCleanupDays: 1.5,
+      debugLogRetentionDays: -1,
+    });
+
+    expect(cleaned).toEqual({});
+  });
+
+  it("[P1] 合法 debug log 設定必須通過型別與範圍清洗", () => {
+    const cleaned = sanitizeSettingsPayload({
+      debugLogEnabled: true,
+      debugLogRetentionDays: 14,
+    });
+
+    expect(cleaned).toEqual({
+      debugLogEnabled: true,
+      debugLogRetentionDays: 14,
+    });
   });
 });
 

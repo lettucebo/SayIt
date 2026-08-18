@@ -312,7 +312,24 @@ export type WhisperModelId = "whisper-large-v3" | "whisper-large-v3-turbo";
 // ── 轉錄 Provider ─────────────────────────────────────────
 
 /** 語音轉錄 provider。Gemini 與 MAI 均有專屬協定，非 Whisper multipart API。 */
-export type TranscriptionProviderId = "groq" | "azure" | "gemini" | "mai";
+export const TRANSCRIPTION_PROVIDER_ID_VALUES = [
+  "groq",
+  "azure",
+  "gemini",
+  "mai",
+] as const;
+
+export type TranscriptionProviderId =
+  (typeof TRANSCRIPTION_PROVIDER_ID_VALUES)[number];
+
+export function isTranscriptionProviderId(
+  value: unknown,
+): value is TranscriptionProviderId {
+  return (
+    typeof value === "string" &&
+    (TRANSCRIPTION_PROVIDER_ID_VALUES as readonly string[]).includes(value)
+  );
+}
 
 /**
  * 免費額度的計算週期。多數 provider 是每日（如 Gemini 的 RPD、Groq 的 RPD），
@@ -320,6 +337,8 @@ export type TranscriptionProviderId = "groq" | "azure" | "gemini" | "mai";
  * 因此額度模型必須同時支援兩種週期。
  */
 export type QuotaPeriod = "daily" | "monthly";
+
+export const QUOTA_PERIOD_VALUES = ["daily", "monthly"] as const;
 
 export const DEFAULT_QUOTA_PERIOD: QuotaPeriod = "daily";
 
@@ -733,10 +752,7 @@ export function getEffectiveWhisperModelId(
 export function getEffectiveTranscriptionProviderId(
   savedId: string | null | undefined,
 ): TranscriptionProviderId {
-  return savedId === "azure" ||
-    savedId === "gemini" ||
-    savedId === "groq" ||
-    savedId === "mai"
+  return isTranscriptionProviderId(savedId)
     ? savedId
     : DEFAULT_TRANSCRIPTION_PROVIDER_ID;
 }
