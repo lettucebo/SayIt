@@ -770,7 +770,7 @@ fn format_mai_error(status: u16, body: &str) -> String {
             "The Azure AI Speech endpoint, region, model, or API version was not found."
         }
         "InvalidRequest" if message.contains("Enhanced mode with model is currently not supported") => {
-            "This Azure AI Speech resource region does not currently support MAI-Transcribe-1.5. Use a Speech resource in a supported MAI region."
+            "This Azure AI Speech resource region does not currently support MAI-Transcribe-1.5. Use a Speech resource in a supported MAI region: East US, North Europe, Southeast Asia, or West US."
         }
         "InvalidRequest" if message.contains("requires at most one locale") => {
             "MAI-Transcribe-1.5 Fast Transcription accepts at most one language locale."
@@ -2452,6 +2452,9 @@ mod tests {
             r#"{"code":"InvalidRequest","message":"Enhanced mode with model is currently not supported yet."}"#,
         );
         assert!(error.contains("does not currently support MAI-Transcribe-1.5"));
+        for region in ["East US", "North Europe", "Southeast Asia", "West US"] {
+            assert!(error.contains(region), "missing supported region: {region}");
+        }
     }
 
     #[test]

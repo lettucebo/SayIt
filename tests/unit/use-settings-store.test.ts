@@ -922,4 +922,89 @@ describe("useSettingsStore", () => {
       expect(selectedLocaleSetCallList).toHaveLength(0);
     });
   });
+
+  describe("transcription provider display group", () => {
+    it("[P0] 載入既有 Azure provider 時顯示 Foundry 並記住 Azure Whisper", async () => {
+      mockStoreData.set("azureEnabled", true);
+      mockStoreData.set("whisperProviderId", "azure");
+
+      const { useSettingsStore } = await import(
+        "../../src/stores/useSettingsStore"
+      );
+      const store = useSettingsStore();
+      await store.loadSettings();
+
+      expect(store.transcriptionProviderGroup).toBe("foundry");
+      expect(store.foundryTranscriptionProviderId).toBe("azure");
+    });
+
+    it("[P0] 從非 Foundry provider 首次切入時預設使用 MAI", async () => {
+      mockStoreData.set("azureEnabled", true);
+      mockStoreData.set("whisperProviderId", "groq");
+
+      const { useSettingsStore } = await import(
+        "../../src/stores/useSettingsStore"
+      );
+      const store = useSettingsStore();
+      await store.loadSettings();
+
+      await store.saveTranscriptionProviderGroup("foundry");
+
+      expect(store.whisperProviderId).toBe("mai");
+      expect(store.foundryTranscriptionProviderId).toBe("mai");
+      expect(mockStoreSet).toHaveBeenLastCalledWith("whisperProviderId", "mai");
+    });
+
+    it("[P0] session 內離開 Foundry 後再切回會恢復上次模型", async () => {
+      mockStoreData.set("azureEnabled", true);
+
+      const { useSettingsStore } = await import(
+        "../../src/stores/useSettingsStore"
+      );
+      const store = useSettingsStore();
+      await store.loadSettings();
+
+      await store.saveFoundryTranscriptionProvider("azure");
+      await store.saveTranscriptionProviderGroup("gemini");
+      expect(store.foundryTranscriptionProviderId).toBe("azure");
+
+      await store.saveTranscriptionProviderGroup("foundry");
+
+      expect(store.whisperProviderId).toBe("azure");
+      expect(store.foundryTranscriptionProviderId).toBe("azure");
+    });
+
+    it("[P0] Azure 未啟用時切換 Foundry 仍由既有 guard fallback 到 Groq", async () => {
+      const { useSettingsStore } = await import(
+        "../../src/stores/useSettingsStore"
+      );
+      const store = useSettingsStore();
+      await store.loadSettings();
+
+      await store.saveTranscriptionProviderGroup("foundry");
+
+      expect(store.whisperProviderId).toBe("groq");
+      expect(store.transcriptionProviderGroup).toBe("groq");
+      expect(mockStoreSet).toHaveBeenLastCalledWith("whisperProviderId", "groq");
+    });
+
+    it("[P0] 跨視窗同步 Foundry provider 後應更新 session 記憶", async () => {
+      mockStoreData.set("azureEnabled", true);
+      mockStoreData.set("whisperProviderId", "mai");
+
+      const { useSettingsStore } = await import(
+        "../../src/stores/useSettingsStore"
+      );
+      const store = useSettingsStore();
+      await store.loadSettings();
+
+      mockStoreData.set("whisperProviderId", "azure");
+      await store.refreshCrossWindowSettings();
+      await store.saveTranscriptionProviderGroup("groq");
+      await store.saveTranscriptionProviderGroup("foundry");
+
+      expect(store.whisperProviderId).toBe("azure");
+      expect(store.foundryTranscriptionProviderId).toBe("azure");
+    });
+  });
 });

@@ -110,6 +110,11 @@ vi.mock("../../src/lib/modelRegistry", () => ({
     source === "auto" ? "auto" : "manual",
   GEMINI_TRANSCRIPTION_MODEL: "gemini-3.5-flash-lite",
   MAI_TRANSCRIPTION_MODEL_ID: "mai-transcribe-1.5",
+  DEFAULT_FOUNDRY_TRANSCRIPTION_PROVIDER: "mai",
+  toTranscriptionProviderGroup: (id: string) =>
+    id === "azure" || id === "mai" ? "foundry" : id,
+  isFoundryTranscriptionProvider: (id: unknown) =>
+    id === "azure" || id === "mai",
   getEffectiveMaiTranscribeStyle: (style: string | null | undefined) =>
     style === "verbatim" ? "verbatim" : "default",
   DEFAULT_QUOTA_PERIOD: "daily",

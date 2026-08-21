@@ -70,11 +70,11 @@ import {
   type LlmModelId,
   type LlmProviderId,
   type WhisperModelId,
-  type TranscriptionProviderId,
+  isTranscriptionProviderGroup,
+  isFoundryTranscriptionProvider,
   type QuotaPeriod,
   type GeminiTranscriptionModelId,
   type MaiTranscribeStyle,
-  MAI_TRANSCRIPTION_MODEL_ID,
   GEMINI_TRANSCRIPTION_MODEL_LIST,
   findGeminiTranscriptionModelConfig,
 } from "../lib/modelRegistry";
@@ -873,8 +873,7 @@ const azureChatDeploymentInput = ref("");
 const azureWhisperDeploymentInput = ref("");
 const azureSpeechApiKeyInput = ref("");
 const isAzureSpeechApiKeyVisible = ref(false);
-const isAzureTranscriptionResourcesVisible = ref(false);
-const isAzureEndpointOverridesVisible = ref(false);
+const isAzureAdvancedOverridesVisible = ref(false);
 const isLoadingAzureDeployments = ref(false);
 const azureDeploymentList = ref<AzureChatDeployment[]>([]);
 const azureDeploymentListResult = ref<AzureDeploymentListResult | null>(null);
@@ -955,13 +954,14 @@ function loadAzureInputsFromStore() {
   azureSpeechResourceNameInput.value = settingsStore.azureSpeechResourceName;
   azureSpeechEndpointOverrideInput.value =
     settingsStore.azureSpeechEndpointOverride;
-  isAzureTranscriptionResourcesVisible.value =
+  azureSpeechApiKeyInput.value = settingsStore.azureSpeechApiKey;
+  isAzureAdvancedOverridesVisible.value =
     azureWhisperResourceNameInput.value !== "" ||
-    azureSpeechResourceNameInput.value !== "";
-  isAzureEndpointOverridesVisible.value =
+    azureSpeechResourceNameInput.value !== "" ||
     azureEndpointOverrideInput.value !== "" ||
     azureWhisperEndpointOverrideInput.value !== "" ||
-    azureSpeechEndpointOverrideInput.value !== "";
+    azureSpeechEndpointOverrideInput.value !== "" ||
+    azureSpeechApiKeyInput.value !== "";
   azureAuthModeInput.value = settingsStore.azureAuthMode;
   azureApiKeyInput.value = settingsStore.azureApiKey;
   azureTenantIdInput.value = settingsStore.azureTenantId;
@@ -970,7 +970,6 @@ function loadAzureInputsFromStore() {
   azureApiVersionInput.value = settingsStore.azureApiVersion;
   azureChatDeploymentInput.value = settingsStore.azureChatDeployment;
   azureWhisperDeploymentInput.value = settingsStore.azureWhisperDeployment;
-  azureSpeechApiKeyInput.value = settingsStore.azureSpeechApiKey;
   // Gemini 免費額度：0 視為「未設定」，輸入框留空而非顯示 0
   geminiFreeQuotaInput.value =
     settingsStore.geminiFreeQuotaRequests > 0
@@ -1318,9 +1317,26 @@ function azureConnectionIssue(deployment: string, endpoint = settingsStore.azure
   return "";
 }
 
-async function handleWhisperProviderChange(id: TranscriptionProviderId) {
+async function handleTranscriptionProviderGroupChange(group: unknown) {
+  if (!isTranscriptionProviderGroup(group)) {
+    console.error("[SettingsView] Invalid transcription provider group:", group);
+    return;
+  }
   try {
-    await settingsStore.saveWhisperProvider(id);
+    await settingsStore.saveTranscriptionProviderGroup(group);
+    whisperProviderFeedback.show("success", t("settings.model.whisperUpdated"));
+  } catch (err) {
+    whisperProviderFeedback.show("error", extractErrorMessage(err));
+  }
+}
+
+async function handleFoundryTranscriptionProviderChange(id: unknown) {
+  if (!isFoundryTranscriptionProvider(id)) {
+    console.error("[SettingsView] Invalid Foundry transcription provider:", id);
+    return;
+  }
+  try {
+    await settingsStore.saveFoundryTranscriptionProvider(id);
     whisperProviderFeedback.show("success", t("settings.model.whisperUpdated"));
   } catch (err) {
     whisperProviderFeedback.show("error", extractErrorMessage(err));
@@ -2591,7 +2607,7 @@ onBeforeUnmount(() => {
         </div>
 
         <div v-if="azureAuthModeInput === 'key'" class="space-y-2">
-          <Label for="azure-api-key">{{ $t("settings.azure.apiKeyLabel") }}</Label>
+          <Label for="azure-api-key">{{ $t("settings.azure.primaryApiKeyLabel") }}</Label>
           <div class="flex gap-2">
             <Input
               id="azure-api-key"
@@ -2603,6 +2619,9 @@ onBeforeUnmount(() => {
               {{ isAzureApiKeyVisible ? $t('settings.apiKey.hide') : $t('settings.apiKey.show') }}
             </Button>
           </div>
+          <p class="text-xs text-muted-foreground">
+            {{ $t("settings.azure.primaryApiKeyHint") }}
+          </p>
         </div>
 
         <div v-else-if="azureAuthModeInput === 'entraUser'" class="space-y-2">
@@ -2683,73 +2702,41 @@ onBeforeUnmount(() => {
           />
         </div>
 
-        <div v-if="azureAuthModeInput === 'key'" class="space-y-2">
-          <Label for="azure-transcription-api-key">{{ $t("settings.azure.transcriptionApiKeyLabel") }}</Label>
-          <div class="flex gap-2">
-            <Input
-              id="azure-transcription-api-key"
-              v-model="azureSpeechApiKeyInput"
-              :type="isAzureSpeechApiKeyVisible ? 'text' : 'password'"
-              class="flex-1 font-mono text-xs"
-            />
-            <Button variant="outline" size="sm" @click="isAzureSpeechApiKeyVisible = !isAzureSpeechApiKeyVisible">
-              {{ isAzureSpeechApiKeyVisible ? $t('settings.apiKey.hide') : $t('settings.apiKey.show') }}
-            </Button>
-          </div>
-          <p class="text-xs text-muted-foreground">{{ $t("settings.azure.transcriptionApiKeyHint") }}</p>
-        </div>
-
         <div class="space-y-3 rounded-md border border-border p-3">
           <div class="flex items-center justify-between gap-3">
             <div>
-              <p class="text-sm font-medium">{{ $t("settings.azure.transcriptionResourcesTitle") }}</p>
-              <p class="text-xs text-muted-foreground">{{ $t("settings.azure.transcriptionResourcesHint") }}</p>
+              <p class="text-sm font-medium">{{ $t("settings.azure.advancedOverridesTitle") }}</p>
+              <p class="text-xs text-muted-foreground">{{ $t("settings.azure.advancedOverridesHint") }}</p>
             </div>
             <Button
               variant="outline"
               size="sm"
-              @click="isAzureTranscriptionResourcesVisible = !isAzureTranscriptionResourcesVisible"
+              @click="isAzureAdvancedOverridesVisible = !isAzureAdvancedOverridesVisible"
             >
-              {{ isAzureTranscriptionResourcesVisible ? $t("settings.azure.hideAdvanced") : $t("settings.azure.showAdvanced") }}
+              {{ isAzureAdvancedOverridesVisible ? $t("settings.azure.hideAdvanced") : $t("settings.azure.showAdvanced") }}
             </Button>
           </div>
-          <div v-if="isAzureTranscriptionResourcesVisible" class="grid gap-4 sm:grid-cols-2">
-            <div class="space-y-2">
-              <Label for="azure-whisper-resource-name">{{ $t("settings.azure.whisperResourceNameLabel") }}</Label>
-              <Input
-                id="azure-whisper-resource-name"
-                v-model="azureWhisperResourceNameInput"
-                :placeholder="$t('settings.azure.resourceNamePlaceholder')"
-                class="font-mono text-xs"
-              />
+          <div v-if="isAzureAdvancedOverridesVisible" class="space-y-4">
+            <div class="grid gap-4 sm:grid-cols-2">
+              <div class="space-y-2">
+                <Label for="azure-whisper-resource-name">{{ $t("settings.azure.whisperResourceNameLabel") }}</Label>
+                <Input
+                  id="azure-whisper-resource-name"
+                  v-model="azureWhisperResourceNameInput"
+                  :placeholder="$t('settings.azure.resourceNamePlaceholder')"
+                  class="font-mono text-xs"
+                />
+              </div>
+              <div class="space-y-2">
+                <Label for="azure-speech-resource-name">{{ $t("settings.azure.speechResourceNameLabel") }}</Label>
+                <Input
+                  id="azure-speech-resource-name"
+                  v-model="azureSpeechResourceNameInput"
+                  :placeholder="$t('settings.azure.resourceNamePlaceholder')"
+                  class="font-mono text-xs"
+                />
+              </div>
             </div>
-            <div class="space-y-2">
-              <Label for="azure-speech-resource-name">{{ $t("settings.azure.speechResourceNameLabel") }}</Label>
-              <Input
-                id="azure-speech-resource-name"
-                v-model="azureSpeechResourceNameInput"
-                :placeholder="$t('settings.azure.resourceNamePlaceholder')"
-                class="font-mono text-xs"
-              />
-            </div>
-          </div>
-        </div>
-
-        <div class="space-y-3 rounded-md border border-border p-3">
-          <div class="flex items-center justify-between gap-3">
-            <div>
-              <p class="text-sm font-medium">{{ $t("settings.azure.endpointOverridesTitle") }}</p>
-              <p class="text-xs text-muted-foreground">{{ $t("settings.azure.endpointOverridesHint") }}</p>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              @click="isAzureEndpointOverridesVisible = !isAzureEndpointOverridesVisible"
-            >
-              {{ isAzureEndpointOverridesVisible ? $t("settings.azure.hideAdvanced") : $t("settings.azure.showAdvanced") }}
-            </Button>
-          </div>
-          <div v-if="isAzureEndpointOverridesVisible" class="space-y-3">
             <div class="space-y-2">
               <Label for="azure-endpoint-override">{{ $t("settings.azure.mainEndpointOverrideLabel") }}</Label>
               <Input
@@ -2776,6 +2763,23 @@ onBeforeUnmount(() => {
                 :placeholder="$t('settings.azure.endpointOverridePlaceholder')"
                 class="font-mono text-xs"
               />
+            </div>
+            <div v-if="azureAuthModeInput === 'key'" class="space-y-2">
+              <Label for="azure-transcription-api-key">{{ $t("settings.azure.transcriptionApiKeyOverrideLabel") }}</Label>
+              <div class="flex gap-2">
+                <Input
+                  id="azure-transcription-api-key"
+                  v-model="azureSpeechApiKeyInput"
+                  :type="isAzureSpeechApiKeyVisible ? 'text' : 'password'"
+                  class="flex-1 font-mono text-xs"
+                />
+                <Button variant="outline" size="sm" @click="isAzureSpeechApiKeyVisible = !isAzureSpeechApiKeyVisible">
+                  {{ isAzureSpeechApiKeyVisible ? $t('settings.apiKey.hide') : $t('settings.apiKey.show') }}
+                </Button>
+              </div>
+              <p class="text-xs text-muted-foreground">
+                {{ $t("settings.azure.transcriptionApiKeyOverrideHint") }}
+              </p>
             </div>
           </div>
         </div>
@@ -2810,22 +2814,22 @@ onBeforeUnmount(() => {
         <div class="space-y-2">
           <Label for="whisper-model">{{ $t("settings.model.whisperLabel") }}</Label>
 
-          <!-- 轉錄 provider 切換：Groq / Gemini 常駐，Azure 啟用時顯示兩種 Azure 服務 -->
+          <!-- 顯示群組不改變既有 azure / mai wire value。 -->
           <RadioGroup
-            :model-value="settingsStore.whisperProviderId"
+            :model-value="settingsStore.transcriptionProviderGroup"
             class="grid gap-2"
-            :class="settingsStore.azureEnabled ? 'grid-cols-4' : 'grid-cols-2'"
-            @update:model-value="(v: unknown) => handleWhisperProviderChange(v as TranscriptionProviderId)"
+            :class="settingsStore.azureEnabled ? 'grid-cols-3' : 'grid-cols-2'"
+            @update:model-value="handleTranscriptionProviderGroupChange"
           >
             <Label
               v-if="settingsStore.azureEnabled"
-              for="whisper-provider-mai"
+              for="whisper-provider-foundry"
               class="flex cursor-pointer items-center gap-2.5 rounded-md border border-border p-3 transition-colors"
-              :class="settingsStore.whisperProviderId === 'mai' ? 'border-primary bg-primary/5' : 'hover:bg-muted/50'"
+              :class="settingsStore.transcriptionProviderGroup === 'foundry' ? 'border-primary bg-primary/5' : 'hover:bg-muted/50'"
             >
-              <RadioGroupItem id="whisper-provider-mai" value="mai" class="!size-0 !border-0 !shadow-none overflow-hidden" />
+              <RadioGroupItem id="whisper-provider-foundry" value="foundry" class="!size-0 !border-0 !shadow-none overflow-hidden" />
               <div class="flex min-w-0 items-center gap-1.5">
-                <span class="text-sm font-medium">MAI-Transcribe</span>
+                <span class="text-sm font-medium">{{ $t("settings.azure.foundryProvider") }}</span>
                 <Badge variant="outline" class="shrink-0 px-1 py-0 text-[10px]">
                   {{ $t("settings.model.bestQuality") }}
                 </Badge>
@@ -2834,7 +2838,7 @@ onBeforeUnmount(() => {
             <Label
               for="whisper-provider-groq"
               class="flex cursor-pointer items-center gap-2.5 rounded-md border border-border p-3 transition-colors"
-              :class="settingsStore.whisperProviderId === 'groq' ? 'border-primary bg-primary/5' : 'hover:bg-muted/50'"
+              :class="settingsStore.transcriptionProviderGroup === 'groq' ? 'border-primary bg-primary/5' : 'hover:bg-muted/50'"
             >
               <RadioGroupItem id="whisper-provider-groq" value="groq" class="!size-0 !border-0 !shadow-none overflow-hidden" />
               <span class="text-sm font-medium">Groq</span>
@@ -2842,25 +2846,41 @@ onBeforeUnmount(() => {
             <Label
               for="whisper-provider-gemini"
               class="flex cursor-pointer items-center gap-2.5 rounded-md border border-border p-3 transition-colors"
-              :class="settingsStore.whisperProviderId === 'gemini' ? 'border-primary bg-primary/5' : 'hover:bg-muted/50'"
+              :class="settingsStore.transcriptionProviderGroup === 'gemini' ? 'border-primary bg-primary/5' : 'hover:bg-muted/50'"
             >
               <RadioGroupItem id="whisper-provider-gemini" value="gemini" class="!size-0 !border-0 !shadow-none overflow-hidden" />
               <span class="text-sm font-medium">Gemini</span>
             </Label>
-            <Label
-              v-if="settingsStore.azureEnabled"
-              for="whisper-provider-azure"
-              class="flex cursor-pointer items-center gap-2.5 rounded-md border border-border p-3 transition-colors"
-              :class="settingsStore.whisperProviderId === 'azure' ? 'border-primary bg-primary/5' : 'hover:bg-muted/50'"
-            >
-              <RadioGroupItem id="whisper-provider-azure" value="azure" class="!size-0 !border-0 !shadow-none overflow-hidden" />
-              <span class="text-sm font-medium">Azure OpenAI</span>
-            </Label>
           </RadioGroup>
           <InlineFeedback :feedback="whisperProviderFeedback.state.value" class="block" />
 
+          <div
+            v-if="settingsStore.transcriptionProviderGroup === 'foundry'"
+            class="space-y-2"
+          >
+            <Label for="foundry-transcription-model">
+              {{ $t("settings.azure.foundryModelLabel") }}
+            </Label>
+            <Select
+              :model-value="settingsStore.foundryTranscriptionProviderId"
+              @update:model-value="handleFoundryTranscriptionProviderChange"
+            >
+              <SelectTrigger id="foundry-transcription-model" class="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="mai">
+                  {{ $t("settings.azure.foundryMaiModel") }}
+                </SelectItem>
+                <SelectItem value="azure">
+                  {{ $t("settings.azure.foundryWhisperModel") }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
           <!-- Groq Whisper 模型下拉 -->
-          <template v-if="settingsStore.whisperProviderId === 'groq'">
+          <template v-if="settingsStore.transcriptionProviderGroup === 'groq'">
             <Select
               :model-value="settingsStore.selectedWhisperModelId"
               @update:model-value="handleWhisperModelChange($event as WhisperModelId)"
@@ -2891,7 +2911,7 @@ onBeforeUnmount(() => {
           </template>
 
           <!-- Gemini 轉錄（模型固定，需 Gemini API Key；與 LLM 共用同一把 key） -->
-          <template v-else-if="settingsStore.whisperProviderId === 'gemini'">
+          <template v-else-if="settingsStore.transcriptionProviderGroup === 'gemini'">
             <Select
               :model-value="settingsStore.geminiTranscriptionModelId"
               @update:model-value="handleGeminiTranscriptionModelChange($event as GeminiTranscriptionModelId)"
@@ -2996,7 +3016,7 @@ onBeforeUnmount(() => {
           </template>
 
           <!-- Azure OpenAI Whisper 部署 -->
-          <template v-else-if="settingsStore.whisperProviderId === 'azure'">
+          <template v-else-if="settingsStore.foundryTranscriptionProviderId === 'azure'">
             <div class="flex items-baseline">
               <Label for="azure-whisper-deployment">{{ $t("settings.azure.whisperDeploymentLabel") }}</Label>
               <InlineFeedback :feedback="azureWhisperDeploymentFeedback.state.value" class="ms-2" />
@@ -3027,17 +3047,8 @@ onBeforeUnmount(() => {
 
           <!-- Azure AI Speech MAI-Transcribe -->
           <template v-else>
-            <div class="flex items-center gap-2">
-              <Label for="mai-transcribe-model">{{ $t("settings.azure.maiModelLabel") }}</Label>
-              <Badge variant="secondary">{{ $t("settings.azure.preview") }}</Badge>
-            </div>
-            <Input
-              id="mai-transcribe-model"
-              :model-value="MAI_TRANSCRIPTION_MODEL_ID"
-              readonly
-              class="font-mono text-xs"
-            />
             <p class="text-xs text-muted-foreground">{{ $t("settings.azure.maiHint") }}</p>
+            <p class="text-xs text-muted-foreground">{{ $t("settings.azure.maiRegionHint") }}</p>
             <InlineFeedback :feedback="maiOptionsFeedback.state.value" class="block" />
 
             <div class="space-y-2">
