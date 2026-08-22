@@ -2,6 +2,12 @@
 
 SayIt 版本更新紀錄。
 
+## [1.0.2] - 2026-08-22
+
+### Added
+
+- Microsoft Foundry 語音轉錄設定改為單一入口：Azure OpenAI Whisper 與 MAI-Transcribe 過去分散在不同服務選項，容易讓使用者誤以為需要不同的 Azure 設定。現在兩者統一歸入 Microsoft Foundry 群組，預設共用主要 Foundry 資源與金鑰，仍可個別覆寫轉錄資源；既有 provider ID、連線協定與已儲存設定維持相容。
+
 ## [1.0.1] - 2026-08-18
 
 ### Fixed

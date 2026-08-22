@@ -694,9 +694,7 @@
     },
     "upgradeNotice": {
       "title": "SayIt Update Summary",
-      "item1": "Windows tray icons now match light or dark taskbars: They could lack contrast under some system themes — SayIt now selects a high-contrast icon automatically.",
-      "item2": "MAI-Transcribe usage is now reported correctly: It was previously counted against your Groq free quota — it is now tracked separately and marked as the highest-quality transcription option in Settings.",
-      "item3": "Importing backups is safer: Corrupt or incompatible settings could disable your hotkey — SayIt now validates them first, restores debug logging preferences, and applies them immediately.",
+      "item1": "Microsoft Foundry transcription setup is now clearer: Azure OpenAI Whisper and MAI-Transcribe were split across separate options — they now share one Microsoft Foundry group and use the primary resource and key by default, while preserving resource overrides and existing settings.",
       "dismiss": "Got it"
     }
   },

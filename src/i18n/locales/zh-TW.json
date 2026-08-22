@@ -694,9 +694,7 @@
     },
     "upgradeNotice": {
       "title": "SayIt 更新摘要",
-      "item1": "Windows 系統匣圖示會配合淺色或深色工作列：過去圖示在部分系統主題下對比不足、難以辨識；現在會自動選用高對比圖示。",
-      "item2": "MAI-Transcribe 用量現在會正確顯示：過去它的使用量會被算進 Groq 免費額度；現在改為獨立統計，並在設定中標示為品質最佳的轉錄選項。",
-      "item3": "匯入備份更安全：過去損壞或不相容的設定可能讓快捷鍵失效；現在會先驗證資料，除錯記錄設定也會隨備份還原並立即套用。",
+      "item1": "Microsoft Foundry 轉錄設定更直覺：Azure OpenAI Whisper 與 MAI-Transcribe 過去分散在不同選項；現在統一放在 Microsoft Foundry 群組，預設共用主要資源與金鑰，也保留個別資源覆寫與既有設定。",
       "dismiss": "了解"
     }
   },
