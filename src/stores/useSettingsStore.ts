@@ -75,12 +75,15 @@ import {
   type LlmProviderId,
   type WhisperModelId,
   type TranscriptionProviderId,
+  type TranscriptionProviderGroup,
+  type FoundryTranscriptionProviderId,
   type QuotaPeriod,
   type GeminiTranscriptionModelId,
   type MaiTranscribeStyle,
   type AzureChatModelFamilyId,
   type AzureChatModelFamilySource,
   DEFAULT_QUOTA_PERIOD,
+  DEFAULT_FOUNDRY_TRANSCRIPTION_PROVIDER,
   DEFAULT_AZURE_CHAT_MODEL_FAMILY_ID,
   getEffectiveAzureChatModelFamilySource,
   GEMINI_TRANSCRIPTION_MODEL,
@@ -90,6 +93,8 @@ import {
   getEffectiveTranscriptionProviderId,
   getEffectiveGeminiTranscriptionModelId,
   getEffectiveMaiTranscribeStyle,
+  isFoundryTranscriptionProvider,
+  toTranscriptionProviderGroup,
 } from "../lib/modelRegistry";
 import type { AzureRequestOptions } from "../lib/llmProvider";
 import {
@@ -369,6 +374,18 @@ export const useSettingsStore = defineStore("settings", () => {
     }
   });
   const whisperProviderId = ref<TranscriptionProviderId>("groq");
+  const lastFoundryProvider = ref<FoundryTranscriptionProviderId>(
+    DEFAULT_FOUNDRY_TRANSCRIPTION_PROVIDER,
+  );
+  const transcriptionProviderGroup = computed(() =>
+    toTranscriptionProviderGroup(whisperProviderId.value),
+  );
+  const foundryTranscriptionProviderId =
+    computed<FoundryTranscriptionProviderId>(() =>
+      isFoundryTranscriptionProvider(whisperProviderId.value)
+        ? whisperProviderId.value
+        : lastFoundryProvider.value,
+    );
   const maiCandidateLocales = ref<MaiCandidateLocale[]>([]);
   const maiTranscribeStyle = ref<MaiTranscribeStyle>("default");
   /** Gemini 轉錄模型（Flash-Lite 免費額度高、Flash 品質優先） */
@@ -1053,6 +1070,9 @@ export const useSettingsStore = defineStore("settings", () => {
       const savedWhisperProviderId = getEffectiveTranscriptionProviderId(
         await store.get<string>("whisperProviderId"),
       );
+      if (isFoundryTranscriptionProvider(savedWhisperProviderId)) {
+        lastFoundryProvider.value = savedWhisperProviderId;
+      }
       whisperProviderId.value =
         !azureEnabled.value &&
         (savedWhisperProviderId === "azure" || savedWhisperProviderId === "mai")
@@ -2447,6 +2467,21 @@ export const useSettingsStore = defineStore("settings", () => {
     }
   }
 
+  async function saveTranscriptionProviderGroup(
+    group: TranscriptionProviderGroup,
+  ) {
+    await saveWhisperProvider(
+      group === "foundry" ? lastFoundryProvider.value : group,
+    );
+  }
+
+  async function saveFoundryTranscriptionProvider(
+    id: FoundryTranscriptionProviderId,
+  ) {
+    await saveWhisperProvider(id);
+    lastFoundryProvider.value = id;
+  }
+
   async function refreshLlmApiKey() {
     try {
       const store = await load(STORE_NAME);
@@ -3161,6 +3196,9 @@ export const useSettingsStore = defineStore("settings", () => {
           nextAzure.whisperProvider === "mai")
           ? "groq"
           : nextAzure.whisperProvider;
+      if (isFoundryTranscriptionProvider(nextAzure.whisperProvider)) {
+        lastFoundryProvider.value = nextAzure.whisperProvider;
+      }
       geminiFreeQuotaRequests.value =
         (await store.get<number>("geminiFreeQuotaRequests")) ?? 0;
       geminiFreeQuotaPeriod.value =
@@ -3514,6 +3552,8 @@ export const useSettingsStore = defineStore("settings", () => {
     clearAzureUserReauthFlag,
     azureUserReauthRequired,
     whisperProviderId,
+    transcriptionProviderGroup,
+    foundryTranscriptionProviderId,
     geminiTranscriptionModelId,
     saveGeminiTranscriptionModel,
     geminiFreeQuotaRequests,
@@ -3533,6 +3573,8 @@ export const useSettingsStore = defineStore("settings", () => {
     saveMaiTranscribeStyle,
     saveAzureOmitTemperature,
     saveWhisperProvider,
+    saveTranscriptionProviderGroup,
+    saveFoundryTranscriptionProvider,
     refreshLlmApiKey,
     saveWhisperModel,
     isMuteOnRecordingEnabled,

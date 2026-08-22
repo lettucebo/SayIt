@@ -398,6 +398,44 @@ describe("i18n 設定功能", () => {
   // ==========================================================================
 
   describe("翻譯檔 key 一致性", () => {
+    it("[P0] Foundry 轉錄 UI 新增文案在 5 語系皆存在", async () => {
+      const zhTW = await import("../../src/i18n/locales/zh-TW.json");
+      const en = await import("../../src/i18n/locales/en.json");
+      const ja = await import("../../src/i18n/locales/ja.json");
+      const zhCN = await import("../../src/i18n/locales/zh-CN.json");
+      const ko = await import("../../src/i18n/locales/ko.json");
+      const localeMap = {
+        "zh-TW": zhTW.default,
+        en: en.default,
+        ja: ja.default,
+        "zh-CN": zhCN.default,
+        ko: ko.default,
+      };
+      const requiredKeyList = [
+        "foundryProvider",
+        "foundryModelLabel",
+        "foundryMaiModel",
+        "foundryWhisperModel",
+        "primaryApiKeyLabel",
+        "primaryApiKeyHint",
+        "transcriptionApiKeyOverrideLabel",
+        "transcriptionApiKeyOverrideHint",
+        "advancedOverridesTitle",
+        "advancedOverridesHint",
+        "maiRegionHint",
+      ] as const;
+
+      for (const [locale, messages] of Object.entries(localeMap)) {
+        const azure = messages.settings.azure as Record<string, unknown>;
+        for (const key of requiredKeyList) {
+          expect(
+            typeof azure[key] === "string" && azure[key].length > 0,
+            `${locale} 缺少 settings.azure.${key}`,
+          ).toBe(true);
+        }
+      }
+    });
+
     it("[P0] 所有 5 個 locale JSON 檔的 key 集合應完全一致", async () => {
       const zhTW = await import("../../src/i18n/locales/zh-TW.json");
       const en = await import("../../src/i18n/locales/en.json");

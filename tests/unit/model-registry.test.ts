@@ -13,6 +13,14 @@ import {
   getEffectiveGeminiTranscriptionModelId,
   getEffectiveGeminiTranscriptionRpd,
   getEffectiveMaiTranscribeStyle,
+  TRANSCRIPTION_PROVIDER_ID_VALUES,
+  TRANSCRIPTION_PROVIDER_GROUP,
+  TRANSCRIPTION_PROVIDER_GROUP_VALUES,
+  FOUNDRY_TRANSCRIPTION_PROVIDER_VALUES,
+  DEFAULT_FOUNDRY_TRANSCRIPTION_PROVIDER,
+  toTranscriptionProviderGroup,
+  isTranscriptionProviderGroup,
+  isFoundryTranscriptionProvider,
   AZURE_CHAT_MODEL_FAMILY_LIST,
   DEFAULT_AZURE_CHAT_MODEL_FAMILY_ID,
   getEffectiveAzureChatModelFamilyId,
@@ -240,6 +248,42 @@ describe("modelRegistry — 轉錄模型說明文案", () => {
 });
 
 describe("modelRegistry — 轉錄 provider", () => {
+  it("[P0] display group 對應涵蓋所有既有 provider wire value", () => {
+    expect(Object.keys(TRANSCRIPTION_PROVIDER_GROUP).sort()).toEqual(
+      [...TRANSCRIPTION_PROVIDER_ID_VALUES].sort(),
+    );
+    expect(TRANSCRIPTION_PROVIDER_GROUP_VALUES).toEqual([
+      "foundry",
+      "groq",
+      "gemini",
+    ]);
+    expect(FOUNDRY_TRANSCRIPTION_PROVIDER_VALUES).toEqual(["mai", "azure"]);
+    expect(DEFAULT_FOUNDRY_TRANSCRIPTION_PROVIDER).toBe("mai");
+  });
+
+  it("[P0] Azure OpenAI 與 MAI 合併顯示為 Foundry，其餘 provider 保持獨立", () => {
+    expect(toTranscriptionProviderGroup("groq")).toBe("groq");
+    expect(toTranscriptionProviderGroup("azure")).toBe("foundry");
+    expect(toTranscriptionProviderGroup("gemini")).toBe("gemini");
+    expect(toTranscriptionProviderGroup("mai")).toBe("foundry");
+  });
+
+  it("[P0] Foundry provider guard 只接受既有 azure/mai wire value", () => {
+    expect(isFoundryTranscriptionProvider("mai")).toBe(true);
+    expect(isFoundryTranscriptionProvider("azure")).toBe(true);
+    expect(isFoundryTranscriptionProvider("groq")).toBe(false);
+    expect(isFoundryTranscriptionProvider("gemini")).toBe(false);
+    expect(isFoundryTranscriptionProvider(null)).toBe(false);
+  });
+
+  it("[P0] 顯示群組 guard 拒絕非字串與未知值", () => {
+    expect(isTranscriptionProviderGroup("foundry")).toBe(true);
+    expect(isTranscriptionProviderGroup("groq")).toBe(true);
+    expect(isTranscriptionProviderGroup("gemini")).toBe(true);
+    expect(isTranscriptionProviderGroup("azure")).toBe(false);
+    expect(isTranscriptionProviderGroup(null)).toBe(false);
+  });
+
   it("[P0] 已知 provider 原樣回傳", () => {
     expect(getEffectiveTranscriptionProviderId("groq")).toBe("groq");
     expect(getEffectiveTranscriptionProviderId("azure")).toBe("azure");

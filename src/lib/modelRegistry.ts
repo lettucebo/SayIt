@@ -322,6 +322,60 @@ export const TRANSCRIPTION_PROVIDER_ID_VALUES = [
 export type TranscriptionProviderId =
   (typeof TRANSCRIPTION_PROVIDER_ID_VALUES)[number];
 
+export const TRANSCRIPTION_PROVIDER_GROUP_VALUES = [
+  "foundry",
+  "groq",
+  "gemini",
+] as const;
+
+export type TranscriptionProviderGroup =
+  (typeof TRANSCRIPTION_PROVIDER_GROUP_VALUES)[number];
+
+/** Foundry 群組底下可選的轉錄模型；值刻意沿用既有 wire 值。 */
+export const FOUNDRY_TRANSCRIPTION_PROVIDER_VALUES = ["mai", "azure"] as const;
+
+export type FoundryTranscriptionProviderId =
+  (typeof FOUNDRY_TRANSCRIPTION_PROVIDER_VALUES)[number];
+
+export const DEFAULT_FOUNDRY_TRANSCRIPTION_PROVIDER: FoundryTranscriptionProviderId =
+  "mai";
+
+export const TRANSCRIPTION_PROVIDER_GROUP: Record<
+  TranscriptionProviderId,
+  TranscriptionProviderGroup
+> = {
+  groq: "groq",
+  azure: "foundry",
+  gemini: "gemini",
+  mai: "foundry",
+};
+
+export function toTranscriptionProviderGroup(
+  id: TranscriptionProviderId,
+): TranscriptionProviderGroup {
+  return TRANSCRIPTION_PROVIDER_GROUP[id];
+}
+
+export function isTranscriptionProviderGroup(
+  value: unknown,
+): value is TranscriptionProviderGroup {
+  return (
+    typeof value === "string" &&
+    (TRANSCRIPTION_PROVIDER_GROUP_VALUES as readonly string[]).includes(value)
+  );
+}
+
+export function isFoundryTranscriptionProvider(
+  value: unknown,
+): value is FoundryTranscriptionProviderId {
+  return (
+    typeof value === "string" &&
+    (FOUNDRY_TRANSCRIPTION_PROVIDER_VALUES as readonly string[]).includes(
+      value,
+    )
+  );
+}
+
 export function isTranscriptionProviderId(
   value: unknown,
 ): value is TranscriptionProviderId {
