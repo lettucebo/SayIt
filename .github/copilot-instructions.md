@@ -1,6 +1,6 @@
 # SayIt — GitHub Copilot 指南
 
-> Tauri v2 (Rust) + Vue 3 + TypeScript 語音轉書面語桌面工具。按住快捷鍵說話，放開後經 Whisper 轉錄 + LLM 整理為繁體中文書面語，貼入游標位置。Provider 可選 Groq（預設）/ OpenAI / Anthropic / Azure(Microsoft Foundry)。
+> Tauri v2 (Rust) + Vue 3 + TypeScript 語音轉書面語桌面工具。按住快捷鍵說話，放開後經語音轉錄 + LLM 整理為繁體中文書面語，貼入游標位置。LLM provider：Groq（預設）/ OpenAI / Anthropic / Gemini / Azure；轉錄 provider：Groq / Azure / Gemini / MAI。
 
 > 📌 **本檔是唯一權威 AI agent 指南**（已整合舊 `AGENTS.md` / `CLAUDE.md`）。本檔為 always-on 全域規則；**路徑相關細則切分在 `.github/instructions/*.instructions.md`，由 `applyTo` glob 自動套用**（編輯對應檔案時才載入）。預設以繁體中文回覆。
 
@@ -34,11 +34,14 @@ pnpm install --frozen-lockfile   # 安裝
 pnpm tauri dev                   # 開發：Vite(1420) HUD+Dashboard 雙 entry + Rust runtime
 pnpm dev                         # 純前端（Tauri Command 會 timeout，僅改 UI 時用）
 pnpm build                       # vue-tsc --noEmit && vite build（型別檢查 + 前端建置）
-npx vue-tsc --noEmit             # 只跑型別檢查
+pnpm exec vue-tsc --noEmit       # 只跑型別檢查
 pnpm exec eslint src             # ESLint（CI 用此指令，無 lint npm script；--fix 可自動修）
 pnpm test                        # Vitest 單元 + 元件測試（tests/unit, tests/component）
 pnpm test:e2e                    # Playwright E2E（tests/e2e，跑在 mock 過 Tauri 的 Vite dev server）
 pnpm test:coverage               # 覆蓋率報告
+cargo fmt --manifest-path src-tauri/Cargo.toml --check
+cargo clippy --manifest-path src-tauri/Cargo.toml --workspace --all-targets -- -D warnings
+cargo test --manifest-path src-tauri/Cargo.toml --workspace
 ./scripts/release.sh X.Y.Z       # 發版（更新版本號 + tag + push）
 ```
 
@@ -47,13 +50,14 @@ pnpm test:coverage               # 覆蓋率報告
 ```bash
 pnpm test enhancer                       # 跑檔名含 "enhancer" 的 Vitest 檔
 pnpm exec vitest run -t "test 名稱片段"   # 依測試名稱過濾
+pnpm exec playwright test tests/e2e/smoke.test.ts
+pnpm exec playwright test -g "test 名稱片段"
 cd src-tauri && cargo test find_monitor  # 跑特定 Rust 測試函式
-cd src-tauri && cargo test --workspace   # 全部 Rust 測試
 ```
 
 > 全套 vitest 在部分機器並行執行時會 flaky（環境時間暴增、5s timeout）；不穩時用 `pnpm exec vitest run --no-file-parallelism`。勿與 `cargo check`/`cargo test` 同時跑（CPU 競爭會拖垮 vitest）。
 
-CI（`.github/workflows/ci.yml`）：`vue-tsc --noEmit` → `eslint src` → `pnpm test`；另在 macOS + Windows 跑 `cargo clippy --workspace --all-targets -- -D warnings` + `cargo test --workspace`。
+CI（`.github/workflows/ci.yml`）：Ubuntu 跑 `vue-tsc --noEmit` → `eslint src` → feedback presentation guard（禁止 View 手寫 feedback，見 frontend instructions #10）→ `pnpm test` → `vite build`；另在 macOS + Windows 跑 `cargo clippy --workspace --all-targets -- -D warnings` + `cargo test --workspace`。本機命令仍優先使用 `pnpm exec`；CI 內既有的 `npx` 不代表可改用 npm 安裝依賴。
 
 ## 架構大圖
 
@@ -71,7 +75,7 @@ CI（`.github/workflows/ci.yml`）：`vue-tsc --noEmit` → `eslint src` → `pn
  │ │   HUD    │  │      Dashboard           │       │
  │ │ index.   │  │   main-window.html       │       │
  │ │ html     │  │   MainApp.vue + Router   │       │
- │ │ App.vue  │  │   4 views + DB + Store   │       │
+ │ │ App.vue  │  │   5 views + DB + Store   │       │
  │ │ NotchHud │  │   shadcn-vue UI          │       │
  │ └──────────┘  └──────────────────────────┘       │
  │  label:main    label:main-window                 │
@@ -82,23 +86,26 @@ CI（`.github/workflows/ci.yml`）：`vue-tsc --noEmit` → `eslint src` → `pn
 ```
 
 - **HUD**（`index.html` → `App.vue` → `NotchHud.vue`，window label `main`）：透明、alwaysOnTop 狀態浮窗。
-- **Dashboard**（`main-window.html` → `MainApp.vue` + Router，label `main-window`）：設定/歷史/字典/統計，預設隱藏，960x680。
+- **Dashboard**（`main-window.html` → `MainApp.vue` + hash Router，label `main-window`）：Dashboard/歷史/字典/設定/功能介紹五個 lazy-loaded views，預設隱藏，960x680。
 - 視窗間溝通：Rust `emit()` 廣播事件；前端 → Rust 用 `invoke()`。也有「Frontend-only 事件」不經 Rust（清單見下方 IPC 契約表）。
+- **啟動順序不可任意調換**：Dashboard 在 mount 前初始化 DB、註冊 `database:ready-ping` 回應、載入 settings 與執行 replacement migration；HUD 不跑 migration，透過 `database:ready` / ping-replay 協定等待 DB。設定載入失敗時仍須 mount，避免白畫面，但 store 會守住寫入。
 
-**Rust backend** — `src-tauri/src/lib.rs` 用 `generate_handler!` 註冊所有 command（**漏註冊 → 前端 invoke 會 timeout**）；功能切成 `src/plugins/*.rs`（`hotkey_listener`、`clipboard_paste`、`audio_recorder`、`transcription`、`keyboard_monitor`、`audio_control`、`text_field_reader`、`sound_feedback`、`azure_auth`、`logging`、`file_transfer`）。
+**Rust backend** — `src-tauri/src/lib.rs` 用 `generate_handler!` 註冊所有 command（**漏註冊 → 前端 invoke 會 timeout**）；功能切成 `src/plugins/*.rs`，涵蓋熱鍵、剪貼簿、錄音/轉錄、音訊控制、鍵盤監控、文字欄位讀取、Azure auth/session、logging、檔案傳輸與音效。敏感 token 的 OS credential-store adapter 在 `plugins/secret_store.rs`。
 
 **前端依賴方向（硬規則）：**
 
 ```
   views/ ──→ components/ + stores/ + composables/
   stores/ ──→ lib/
-  lib/   ──→ 外部 API（Groq / OpenAI / Anthropic / Azure Foundry）
+  lib/   ──→ 前端外部 API（Groq / OpenAI / Anthropic / Azure Foundry / Gemini）
 
   ❌ views/ 不可直接 import lib/（一律經 Pinia store：useSettingsStore / useHistoryStore / useVocabularyStore / useVoiceFlowStore）
   ❌ 元件不可直接執行 SQL（經 src/lib/database.ts + store）
 ```
 
-**網路信任邊界：** 前端 HTTP（chat 整理、連線測試、Entra token）走 `@tauri-apps/plugin-http`，受 `src-tauri/capabilities/default.json` allowlist + `tauri.conf.json` CSP `connect-src` 約束；Rust 的 `transcription.rs` / `azure_auth.rs` 用 `reqwest` 直連，**不**受該 allowlist 約束。
+**網路信任邊界：** 前端 HTTP（chat 整理、連線測試）走 `@tauri-apps/plugin-http`，受 `src-tauri/capabilities/default.json` allowlist + `tauri.conf.json` CSP `connect-src` 約束；Rust 的 `transcription.rs` / `azure_auth.rs` / `azure_user_session.rs` 用 `reqwest` 直連，**不**受該 allowlist 約束。MAI 轉錄只走 Rust `transcription.rs`。
+
+**資料儲存邊界：** 歷史、詞彙、用量統計與幻覺詞表放 SQLite；replacement rules、API keys、Azure 設定與一般使用者設定放 `tauri-plugin-store`；Entra 使用者 token/refresh token 由 Rust session + `plugins/secret_store.rs` 的 OS credential store 管理。不要把秘密寫入 SQLite。
 
 ## IPC 契約表
 
@@ -198,6 +205,7 @@ CI（`.github/workflows/ci.yml`）：`vue-tsc --noEmit` → `eslint src` → `pn
 - **加設定欄位：** `src/types/settings.ts` → `useSettingsStore.ts`（state + load/save）→ `SettingsView.vue`（shadcn-vue）→ 必要時 emit `settings:updated`。
 - **加 LLM Provider：** `src/lib/llmProvider.ts`（型別 + `buildFetchParams` + `parseProviderResponse`）→ `modelRegistry.ts` → `src-tauri/capabilities/default.json`（http allowlist）→ `src-tauri/tauri.conf.json` CSP `connect-src`（**很容易漏**）。
 - **加 i18n 字串：** `src/i18n/locales/` 五個語系（`zh-TW`, `zh-CN`, `en`, `ja`, `ko`）都要加。
+- **加外部連結：** 使用 `src/components/ExternalLink.vue`，由 `src/lib/externalLink.ts` 透過系統瀏覽器開啟；不要新增裸 `<a target="_blank">`。HTTPS 由前端 helper 驗證，並由 `tauri.conf.json` 的 `plugins.shell.open` validator 再次限制。
 
 ## 自動更新機制
 
@@ -306,9 +314,10 @@ CI（`.github/workflows/ci.yml`）：`vue-tsc --noEmit` → `eslint src` → `pn
 
 ```
 □ pnpm test               單元/元件測試通過
-□ npx vue-tsc --noEmit    無型別錯誤
+□ pnpm exec vue-tsc --noEmit 無型別錯誤
 □ pnpm exec eslint src    ESLint 無錯
-□ cargo check (src-tauri) Rust 編譯通過
+□ cargo fmt --check + cargo clippy --workspace --all-targets -- -D warnings
+□ cargo test --workspace（src-tauri）
 □ 改 IPC → tauri-reviewer / ipc-review subagent 審查
 □ 改 SQL schema → 寫 v(N+1) migration，不動舊 migration
 ```
