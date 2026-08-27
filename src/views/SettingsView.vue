@@ -164,6 +164,7 @@ import { openLogFolder } from "../lib/logger";
 import type { AudioInputDeviceInfo } from "../types/audio";
 import { useAudioPreview } from "../composables/useAudioPreview";
 import ConnectionTestButton from "../components/ConnectionTestButton.vue";
+import ExternalLink from "../components/ExternalLink.vue";
 import InlineFeedback from "../components/InlineFeedback.vue";
 import SettingsActionRow from "../components/SettingsActionRow.vue";
 import SettingsControlRow from "../components/SettingsControlRow.vue";
@@ -2251,50 +2252,50 @@ onBeforeUnmount(() => {
         <div class="space-y-3">
           <div class="flex flex-wrap items-baseline gap-x-2 gap-y-1">
             <span class="text-sm text-muted-foreground">{{ $t("settings.about.author") }}</span>
-            <a href="https://github.com/lettucebo" target="_blank" rel="noopener noreferrer" class="text-base font-semibold text-foreground hover:text-primary transition-colors">Money Yu</a>
+            <ExternalLink href="https://github.com/lettucebo" class="text-base font-semibold text-foreground hover:text-primary transition-colors">Money Yu</ExternalLink>
           </div>
 
           <div class="flex flex-wrap gap-x-4 gap-y-2">
-            <a href="https://github.com/lettucebo" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors">
+            <ExternalLink href="https://github.com/lettucebo" class="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors">
               <Globe class="size-4" />
               <span>{{ $t("settings.about.website") }}</span>
-            </a>
-            <a href="https://www.facebook.com/lettucebo" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors">
+            </ExternalLink>
+            <ExternalLink href="https://www.facebook.com/lettucebo" class="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors">
               <Facebook class="size-4" />
               <span>Facebook</span>
-            </a>
-            <a href="https://www.instagram.com/moneyyu816/" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors">
+            </ExternalLink>
+            <ExternalLink href="https://www.instagram.com/moneyyu816/" class="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors">
               <Instagram class="size-4" />
               <span>Instagram</span>
-            </a>
-            <a href="https://www.threads.com/@moneyyu816" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors">
+            </ExternalLink>
+            <ExternalLink href="https://www.threads.com/@moneyyu816" class="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors">
               <AtSign class="size-4" />
               <span>Threads</span>
-            </a>
-            <a href="https://www.linkedin.com/in/abc12207/" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors">
+            </ExternalLink>
+            <ExternalLink href="https://www.linkedin.com/in/abc12207/" class="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors">
               <Linkedin class="size-4" />
               <span>LinkedIn</span>
-            </a>
+            </ExternalLink>
           </div>
         </div>
 
         <Separator />
 
         <div class="flex flex-wrap gap-x-4 gap-y-2">
-          <a href="https://github.com/lettucebo/SayIt" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors">
+          <ExternalLink href="https://github.com/lettucebo/SayIt" class="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors">
             <Github class="size-4" />
             <span>{{ $t("settings.about.sourceCode") }}</span>
-          </a>
-          <a href="https://github.com/lettucebo/SayIt/issues" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors">
+          </ExternalLink>
+          <ExternalLink href="https://github.com/lettucebo/SayIt/issues" class="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors">
             <CircleAlert class="size-4" />
             <span>{{ $t("settings.about.reportIssue") }}</span>
-          </a>
+          </ExternalLink>
         </div>
 
         <!-- 原作者（不起眼小字 credit） -->
         <p class="text-xs text-muted-foreground/60">
           {{ $t("settings.about.originalAuthor") }}
-          <a href="https://jackle.pro" target="_blank" rel="noopener noreferrer" class="underline-offset-2 hover:text-muted-foreground hover:underline">Jackle Chen</a>
+          <ExternalLink href="https://jackle.pro" class="underline-offset-2 hover:text-muted-foreground hover:underline">Jackle Chen</ExternalLink>
         </p>
       </CardContent>
     </Card>
@@ -2462,14 +2463,12 @@ onBeforeUnmount(() => {
             {{ apiKeyStatusLabel }}
           </Badge>
         </div>
-        <a
+        <ExternalLink
           href="https://console.groq.com/keys"
-          target="_blank"
-          rel="noreferrer"
           class="text-sm text-muted-foreground hover:text-foreground transition-colors"
         >
           {{ $t("settings.apiKey.goToConsole") }} &rarr;
-        </a>
+        </ExternalLink>
       </CardHeader>
       <CardContent class="space-y-4">
         <p class="text-sm text-muted-foreground leading-relaxed">
@@ -2971,7 +2970,7 @@ onBeforeUnmount(() => {
             <p class="text-xs text-muted-foreground">
               {{ $t("settings.providerApiKey.geminiInstruction") }}
               ·
-              <a :href="findProviderConfig('gemini')?.consoleUrl" target="_blank" rel="noopener noreferrer" class="underline">{{ $t("settings.providerApiKey.goToGemini") }}</a>
+              <ExternalLink :href="findProviderConfig('gemini')?.consoleUrl" class="underline">{{ $t("settings.providerApiKey.goToGemini") }}</ExternalLink>
             </p>
             <ConnectionTestButton
               :on-test="testGeminiWhisperConnection"
@@ -3011,7 +3010,7 @@ onBeforeUnmount(() => {
             <p class="text-xs text-muted-foreground">
               {{ $t("settings.model.geminiQuotaHint") }}
               ·
-              <a href="https://aistudio.google.com/rate-limit" target="_blank" rel="noopener noreferrer" class="underline">{{ $t("settings.model.geminiQuotaLink") }}</a>
+              <ExternalLink href="https://aistudio.google.com/rate-limit" class="underline">{{ $t("settings.model.geminiQuotaLink") }}</ExternalLink>
             </p>
           </template>
 
@@ -3161,7 +3160,7 @@ onBeforeUnmount(() => {
           <p class="text-xs text-muted-foreground">
             {{ $t("settings.providerApiKey.openaiInstruction") }}
             ·
-            <a :href="findProviderConfig('openai')?.consoleUrl" target="_blank" rel="noopener noreferrer" class="underline">{{ $t("settings.providerApiKey.goToOpenai") }}</a>
+            <ExternalLink :href="findProviderConfig('openai')?.consoleUrl" class="underline">{{ $t("settings.providerApiKey.goToOpenai") }}</ExternalLink>
           </p>
         </div>
 
@@ -3199,7 +3198,7 @@ onBeforeUnmount(() => {
           <p class="text-xs text-muted-foreground">
             {{ $t("settings.providerApiKey.anthropicInstruction") }}
             ·
-            <a :href="findProviderConfig('anthropic')?.consoleUrl" target="_blank" rel="noopener noreferrer" class="underline">{{ $t("settings.providerApiKey.goToAnthropic") }}</a>
+            <ExternalLink :href="findProviderConfig('anthropic')?.consoleUrl" class="underline">{{ $t("settings.providerApiKey.goToAnthropic") }}</ExternalLink>
           </p>
         </div>
 
@@ -3237,7 +3236,7 @@ onBeforeUnmount(() => {
           <p class="text-xs text-muted-foreground">
             {{ $t("settings.providerApiKey.geminiInstruction") }}
             ·
-            <a :href="findProviderConfig('gemini')?.consoleUrl" target="_blank" rel="noopener noreferrer" class="underline">{{ $t("settings.providerApiKey.goToGemini") }}</a>
+            <ExternalLink :href="findProviderConfig('gemini')?.consoleUrl" class="underline">{{ $t("settings.providerApiKey.goToGemini") }}</ExternalLink>
           </p>
         </div>
 
