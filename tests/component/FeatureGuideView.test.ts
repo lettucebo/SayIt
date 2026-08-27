@@ -3,8 +3,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createI18n } from "vue-i18n";
 import { nextTick } from "vue";
 import zhTW from "../../src/i18n/locales/zh-TW.json";
+import zhCN from "../../src/i18n/locales/zh-CN.json";
 import en from "../../src/i18n/locales/en.json";
+import ja from "../../src/i18n/locales/ja.json";
+import ko from "../../src/i18n/locales/ko.json";
 import FeatureGuideView from "../../src/views/FeatureGuideView.vue";
+
+const mocks = vi.hoisted(() => ({
+  open: vi.fn(),
+}));
+
+vi.mock("@tauri-apps/plugin-shell", () => ({
+  open: mocks.open,
+}));
 
 type Messages = Record<string, unknown>;
 
@@ -35,6 +46,8 @@ describe("FeatureGuideView 更新亮點卡片", () => {
   beforeEach(() => {
     // vitest 未套用 vite define，須手動注入 __APP_VERSION__，否則 mount 會 ReferenceError。
     vi.stubGlobal("__APP_VERSION__", "9.9.9");
+    mocks.open.mockReset();
+    mocks.open.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -90,6 +103,36 @@ describe("FeatureGuideView 更新亮點卡片", () => {
     expect(items).toEqual(canonicalItems(en));
   });
 
+  it("[P1] 應以真正的 anchor 開啟 fork 版本更新說明", async () => {
+    const wrapper = mount(FeatureGuideView, {
+      global: { plugins: [createTestI18n()] },
+    });
+    const link = wrapper.get('[data-testid="all-releases-link"]');
+
+    expect(link.attributes("href")).toBe(
+      "https://github.com/lettucebo/SayIt/releases",
+    );
+    expect(link.text()).toContain("查看所有版本更新說明");
+    expect(wrapper.findAll('[data-testid="whats-new"] button')).toHaveLength(0);
+
+    await link.trigger("click");
+
+    expect(mocks.open).toHaveBeenCalledWith(
+      "https://github.com/lettucebo/SayIt/releases",
+    );
+  });
+
+  it("[P1] 所有 5 個語系都應有非空的版本更新說明文案", () => {
+    const localeMessages = [zhTW, zhCN, en, ja, ko] as Messages[];
+
+    for (const messages of localeMessages) {
+      const featureGuide = messages.featureGuide as Record<string, unknown>;
+      const whatsNew = featureGuide.whatsNew as Record<string, unknown>;
+      expect(typeof whatsNew.allReleases).toBe("string");
+      expect((whatsNew.allReleases as string).trim().length).toBeGreaterThan(0);
+    }
+  });
+
   it("[P2] itemN key 非連續且亂序時應依數字順序渲染", () => {
     const messages = structuredClone(zhTW) as Messages;
     const mainApp = messages.mainApp as Record<string, unknown>;
@@ -114,7 +157,7 @@ describe("FeatureGuideView 更新亮點卡片", () => {
     expect(items).toEqual(["第一項", "第二項", "第十項"]);
   });
 
-  it("[P3] upgradeNotice 無任何 item 時應隱藏卡片", () => {
+  it("[P3] upgradeNotice 無任何 item 時仍應保留版本更新入口", () => {
     const noItems = structuredClone(zhTW) as Messages;
     const mainApp = noItems.mainApp as Record<string, unknown>;
     const notice = mainApp.upgradeNotice as Record<string, unknown>;
@@ -126,6 +169,10 @@ describe("FeatureGuideView 更新亮點卡片", () => {
       global: { plugins: [createTestI18n("zh-TW", { "zh-TW": noItems, en })] },
     });
 
-    expect(wrapper.find('[data-testid="whats-new"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="whats-new"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="whats-new"] ol').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="all-releases-link"]').exists()).toBe(
+      true,
+    );
   });
 });

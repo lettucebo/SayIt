@@ -9,13 +9,17 @@ import {
   BookOpen,
   History,
   Rocket,
+  ExternalLink as ExternalLinkIcon,
 } from "lucide-vue-next";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import ExternalLink from "@/components/ExternalLink.vue";
 import { useI18n } from "vue-i18n";
 import { computed, markRaw } from "vue";
 
 declare const __APP_VERSION__: string;
 const appVersion = __APP_VERSION__;
+const releasesUrl = "https://github.com/lettucebo/SayIt/releases";
 
 const { t, tm } = useI18n();
 
@@ -51,7 +55,7 @@ const featureList = [
 
 <template>
   <div class="p-6 space-y-4 text-foreground">
-    <Card v-if="whatsNewItems.length" data-testid="whats-new">
+    <Card data-testid="whats-new">
       <CardHeader class="border-b border-border py-3">
         <CardTitle class="text-base flex items-center gap-2">
           <Rocket class="size-4 text-muted-foreground" aria-hidden="true" />
@@ -60,12 +64,29 @@ const featureList = [
       </CardHeader>
       <CardContent class="pt-3 pb-4">
         <ol
+          v-if="whatsNewItems.length"
           class="space-y-3 text-sm text-muted-foreground leading-relaxed list-decimal list-outside pl-5"
         >
           <li v-for="(item, index) in whatsNewItems" :key="index">
             {{ item }}
           </li>
         </ol>
+        <div
+          :class="
+            whatsNewItems.length ? 'mt-3 border-t border-border pt-2' : ''
+          "
+        >
+          <Button as-child variant="link" class="h-auto p-0 text-muted-foreground">
+            <ExternalLink
+              :href="releasesUrl"
+              data-testid="all-releases-link"
+              class="gap-1.5 hover:text-primary"
+            >
+              {{ t("featureGuide.whatsNew.allReleases") }}
+              <ExternalLinkIcon class="size-3.5" aria-hidden="true" />
+            </ExternalLink>
+          </Button>
+        </div>
       </CardContent>
     </Card>
 

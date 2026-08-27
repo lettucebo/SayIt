@@ -700,7 +700,8 @@
   },
   "featureGuide": {
     "whatsNew": {
-      "title": "本次更新重點（v{version}）"
+      "title": "本次更新重點（v{version}）",
+      "allReleases": "查看所有版本更新說明"
     },
     "subtitle": "以下是 SayIt 所有可用的操作功能，幫助你快速上手。",
     "voiceInput": {

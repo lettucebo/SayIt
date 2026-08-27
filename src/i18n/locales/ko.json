@@ -700,7 +700,8 @@
   },
   "featureGuide": {
     "whatsNew": {
-      "title": "이번 업데이트 내용 (v{version})"
+      "title": "이번 업데이트 내용 (v{version})",
+      "allReleases": "모든 릴리스 보기"
     },
     "subtitle": "SayIt에서 사용할 수 있는 모든 기능을 소개합니다.",
     "voiceInput": {
