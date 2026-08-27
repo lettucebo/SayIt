@@ -694,7 +694,7 @@
     },
     "upgradeNotice": {
       "title": "SayIt アップデート概要",
-      "item1": "Microsoft Foundry の文字起こし設定が分かりやすくなりました：Azure OpenAI Whisper と MAI-Transcribe は別々の選択肢に分かれていました。現在は Microsoft Foundry グループに統合され、既定では主要リソースとキーを共有しながら、個別のリソース上書きと既存設定も維持します。",
+      "item1": "バージョン更新情報を確認しやすくなりました：機能ガイドから SayIt のリリース履歴を直接開けます。設定画面の GitHub や各サービスの管理画面などの外部リンクも、システムブラウザーで確実に開きます。",
       "dismiss": "了解"
     }
   },

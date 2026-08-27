@@ -694,7 +694,7 @@
     },
     "upgradeNotice": {
       "title": "SayIt 업데이트 요약",
-      "item1": "Microsoft Foundry 전사 설정이 더 명확해집니다: Azure OpenAI Whisper와 MAI-Transcribe가 서로 다른 옵션에 나뉘어 있었습니다. 이제 하나의 Microsoft Foundry 그룹에서 기본 리소스와 키를 공유하며, 개별 리소스 재정의와 기존 설정도 그대로 유지합니다.",
+      "item1": "버전 업데이트 설명을 더 쉽게 확인할 수 있습니다: 기능 안내에서 SayIt의 릴리스 내역을 바로 열 수 있습니다. 설정의 GitHub 및 서비스 관리 콘솔 등 외부 링크도 시스템 브라우저에서 안정적으로 열립니다.",
       "dismiss": "확인"
     }
   },

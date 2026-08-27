@@ -694,7 +694,7 @@
     },
     "upgradeNotice": {
       "title": "SayIt 更新摘要",
-      "item1": "Microsoft Foundry 转录设置更直观：Azure OpenAI Whisper 与 MAI-Transcribe 过去分散在不同选项中；现在统一归入 Microsoft Foundry 分组，默认共用主要资源和密钥，同时保留单独的资源覆盖与现有设置。",
+      "item1": "版本更新说明更容易找到：功能介绍页现在可直接打开 SayIt 的版本更新页面；设置页的 GitHub、服务管理后台等外部链接也会可靠地通过系统浏览器打开。",
       "dismiss": "了解"
     }
   },

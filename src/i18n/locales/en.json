@@ -694,7 +694,7 @@
     },
     "upgradeNotice": {
       "title": "SayIt Update Summary",
-      "item1": "Microsoft Foundry transcription setup is now clearer: Azure OpenAI Whisper and MAI-Transcribe were split across separate options — they now share one Microsoft Foundry group and use the primary resource and key by default, while preserving resource overrides and existing settings.",
+      "item1": "Release notes are easier to find: the Feature Guide now opens SayIt's release history — external links in Settings, such as GitHub and provider consoles, also open reliably in the system browser.",
       "dismiss": "Got it"
     }
   },
