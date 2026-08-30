@@ -146,16 +146,19 @@ const quotaDimensionList = computed(() => {
     const lConfig = findLlmModelConfig(settingsStore.selectedLlmModelId);
     const lRpdLimit = lConfig?.freeQuotaRpd ?? 1000;
     const lTpdLimit = lConfig?.freeQuotaTpd ?? 100_000;
+    const lUsage = usage.llmUsageByModel[
+      settingsStore.selectedLlmModelId
+    ] ?? { requestCount: 0, totalTokens: 0 };
     if (lRpdLimit > 0) {
       dimensionList.push({
-        remaining: 1 - usage.llmRequestCount / lRpdLimit,
-        label: t("dashboard.quotaLlmRequests", { used: usage.llmRequestCount, limit: formatNumber(lRpdLimit) }),
+        remaining: 1 - lUsage.requestCount / lRpdLimit,
+        label: t("dashboard.quotaLlmRequests", { used: lUsage.requestCount, limit: formatNumber(lRpdLimit) }),
       });
     }
     if (lTpdLimit > 0) {
       dimensionList.push({
-        remaining: 1 - usage.llmTotalTokens / lTpdLimit,
-        label: t("dashboard.quotaLlmTokens", { used: formatNumber(usage.llmTotalTokens), limit: formatNumber(lTpdLimit) }),
+        remaining: 1 - lUsage.totalTokens / lTpdLimit,
+        label: t("dashboard.quotaLlmTokens", { used: formatNumber(lUsage.totalTokens), limit: formatNumber(lTpdLimit) }),
       });
     }
   }

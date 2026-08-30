@@ -100,9 +100,10 @@
         "flash": "Latest flagship with the strongest multimodal understanding, but a very small free quota (~20/day, 5/min). Use it sparingly when accuracy matters most"
       },
       "llmDescription": {
-        "qwen": "Balanced speed and quality; a Groq preview model that can be withdrawn without notice",
-        "oss120b": "Open-weight large model with steadier output; slower than 20B but better quality",
-        "oss20b": "Fastest and cheapest, good for short sentences and light clean-up",
+        "qwen36": "The default balance of speed and quality; free tier: 1,000 requests and 200K tokens per day. Groq preview model that can be withdrawn without notice",
+        "qwen38": "Free tier: 1,000 requests and 2M tokens per day (10× the token quota of other Groq models), but slightly slower. Groq preview model that can be withdrawn without notice",
+        "oss120b": "Open-weight large model with steadier output; slower than 20B but better quality. Free tier: 1,000 requests and 200K tokens per day",
+        "oss20b": "Fastest and cheapest, good for short sentences and light clean-up. Free tier: 1,000 requests and 200K tokens per day",
         "gemini36Flash": "Latest flagship Flash with the strongest understanding of complex sentences; free tier ~20/day",
         "gemini35Flash": "Previous flagship Flash, high quality; free tier ~20/day",
         "gemini35FlashLite": "Google's most cost-efficient GA model; free tier ~500/day (highest quota), good for frequent use",
@@ -131,6 +132,7 @@
     "modelBadge": {
       "accurate": "Accuracy first",
       "highQuota": "Highest free quota",
+      "highTokenQuota": "Highest token quota",
       "balanced": "Balanced · Default",
       "stableProduction": "Stable · Production",
       "fastCheap": "Fastest · Cheapest",
