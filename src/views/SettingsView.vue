@@ -117,6 +117,11 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -154,6 +159,7 @@ import {
   Pencil,
   Plus,
   RefreshCw,
+  Star,
   Trash2,
   X,
   Upload,
@@ -2814,41 +2820,70 @@ onBeforeUnmount(() => {
           <Label for="whisper-model">{{ $t("settings.model.whisperLabel") }}</Label>
 
           <!-- 顯示群組不改變既有 azure / mai wire value。 -->
+          <!-- lg 第三欄只在 Foundry 實際渲染時才開，避免 Azure 停用時留下空欄。 -->
           <RadioGroup
             :model-value="settingsStore.transcriptionProviderGroup"
-            class="grid gap-2"
-            :class="settingsStore.azureEnabled ? 'grid-cols-3' : 'grid-cols-2'"
+            data-testid="whisper-provider-group"
+            class="grid gap-2 grid-cols-1 md:grid-cols-2"
+            :class="settingsStore.azureEnabled ? 'lg:grid-cols-3' : undefined"
             @update:model-value="handleTranscriptionProviderGroupChange"
           >
             <Label
               v-if="settingsStore.azureEnabled"
               for="whisper-provider-foundry"
-              class="flex cursor-pointer items-center gap-2.5 rounded-md border border-border p-3 transition-colors"
+              data-testid="whisper-provider-option-foundry"
+              class="flex min-w-0 cursor-pointer items-center gap-2.5 rounded-md border border-border p-3 transition-colors"
               :class="settingsStore.transcriptionProviderGroup === 'foundry' ? 'border-primary bg-primary/5' : 'hover:bg-muted/50'"
             >
-              <RadioGroupItem id="whisper-provider-foundry" value="foundry" class="!size-0 !border-0 !shadow-none overflow-hidden" />
+              <RadioGroupItem
+                id="whisper-provider-foundry"
+                value="foundry"
+                data-testid="whisper-provider-radio-foundry"
+                class="!size-0 !border-0 !shadow-none overflow-hidden"
+              />
               <div class="flex min-w-0 items-center gap-1.5">
-                <span class="text-sm font-medium">{{ $t("settings.azure.foundryProvider") }}</span>
-                <Badge variant="outline" class="shrink-0 px-1 py-0 text-[10px]">
-                  {{ $t("settings.model.bestQuality") }}
-                </Badge>
+                <span class="min-w-0 text-sm font-medium">{{ $t("settings.azure.foundryProvider") }}</span>
+                <Tooltip>
+                  <TooltipTrigger as-child>
+                    <span
+                      data-testid="whisper-provider-foundry-best-quality"
+                      class="inline-flex shrink-0 items-center text-primary"
+                    >
+                      <Star class="size-3.5 fill-current" aria-hidden="true" />
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent data-testid="whisper-provider-foundry-best-quality-tooltip">{{ $t("settings.model.bestQuality") }}</TooltipContent>
+                </Tooltip>
+                <span data-testid="whisper-provider-foundry-best-quality-text" class="sr-only">{{ $t("settings.model.bestQuality") }}</span>
               </div>
             </Label>
             <Label
               for="whisper-provider-groq"
-              class="flex cursor-pointer items-center gap-2.5 rounded-md border border-border p-3 transition-colors"
+              data-testid="whisper-provider-option-groq"
+              class="flex min-w-0 cursor-pointer items-center gap-2.5 rounded-md border border-border p-3 transition-colors"
               :class="settingsStore.transcriptionProviderGroup === 'groq' ? 'border-primary bg-primary/5' : 'hover:bg-muted/50'"
             >
-              <RadioGroupItem id="whisper-provider-groq" value="groq" class="!size-0 !border-0 !shadow-none overflow-hidden" />
-              <span class="text-sm font-medium">Groq</span>
+              <RadioGroupItem
+                id="whisper-provider-groq"
+                value="groq"
+                data-testid="whisper-provider-radio-groq"
+                class="!size-0 !border-0 !shadow-none overflow-hidden"
+              />
+              <span class="min-w-0 text-sm font-medium">Groq</span>
             </Label>
             <Label
               for="whisper-provider-gemini"
-              class="flex cursor-pointer items-center gap-2.5 rounded-md border border-border p-3 transition-colors"
+              data-testid="whisper-provider-option-gemini"
+              class="flex min-w-0 cursor-pointer items-center gap-2.5 rounded-md border border-border p-3 transition-colors"
               :class="settingsStore.transcriptionProviderGroup === 'gemini' ? 'border-primary bg-primary/5' : 'hover:bg-muted/50'"
             >
-              <RadioGroupItem id="whisper-provider-gemini" value="gemini" class="!size-0 !border-0 !shadow-none overflow-hidden" />
-              <span class="text-sm font-medium">Gemini</span>
+              <RadioGroupItem
+                id="whisper-provider-gemini"
+                value="gemini"
+                data-testid="whisper-provider-radio-gemini"
+                class="!size-0 !border-0 !shadow-none overflow-hidden"
+              />
+              <span class="min-w-0 text-sm font-medium">Gemini</span>
             </Label>
           </RadioGroup>
           <InlineFeedback :feedback="whisperProviderFeedback.state.value" class="block" />
@@ -3104,18 +3139,20 @@ onBeforeUnmount(() => {
           <p class="text-xs text-muted-foreground">{{ $t("settings.provider.description") }}</p>
           <RadioGroup
             :model-value="settingsStore.selectedLlmProviderId"
-            class="grid grid-cols-2 gap-2"
+            data-testid="llm-provider-group"
+            class="grid grid-cols-1 md:grid-cols-2 gap-2"
             @update:model-value="(v: unknown) => handleProviderChange(v as LlmProviderId)"
           >
             <Label
               v-for="provider in LLM_PROVIDER_LIST"
               :key="provider.id"
               :for="`provider-${provider.id}`"
-              class="flex cursor-pointer items-center gap-2.5 rounded-md border border-border p-3 transition-colors"
+              :data-testid="`llm-provider-option-${provider.id}`"
+              class="flex min-w-0 cursor-pointer items-center gap-2.5 rounded-md border border-border p-3 transition-colors"
               :class="settingsStore.selectedLlmProviderId === provider.id ? 'border-primary bg-primary/5' : 'hover:bg-muted/50'"
             >
               <RadioGroupItem :id="`provider-${provider.id}`" :value="provider.id" class="!size-0 !border-0 !shadow-none overflow-hidden" />
-              <span class="text-sm font-medium">{{ $t(`settings.provider.${provider.id}`) }}</span>
+              <span class="min-w-0 text-sm font-medium">{{ $t(`settings.provider.${provider.id}`) }}</span>
             </Label>
           </RadioGroup>
           <InlineFeedback :feedback="llmProviderFeedback.state.value" class="block" />
@@ -3468,38 +3505,42 @@ onBeforeUnmount(() => {
           <Label>{{ $t("settings.prompt.modeTitle") }}</Label>
           <RadioGroup
             :model-value="selectedPromptMode"
-            class="grid grid-cols-3 gap-2"
+            data-testid="prompt-mode-group"
+            class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2"
             @update:model-value="handlePromptModeChange"
           >
             <Label
               for="mode-minimal"
-              class="flex cursor-pointer items-start gap-2.5 rounded-md border border-border p-3 transition-colors"
+              data-testid="prompt-mode-option-minimal"
+              class="flex min-w-0 cursor-pointer items-start gap-2.5 rounded-md border border-border p-3 transition-colors"
               :class="selectedPromptMode === 'minimal' ? 'border-primary bg-primary/5' : 'hover:bg-muted/50'"
             >
               <RadioGroupItem id="mode-minimal" value="minimal" class="!size-0 !border-0 !shadow-none overflow-hidden" />
-              <div>
+              <div class="min-w-0">
                 <span class="text-sm font-medium">{{ $t("settings.prompt.modeMinimal") }}</span>
                 <p class="text-xs leading-relaxed text-muted-foreground">{{ $t("settings.prompt.modeMinimalDescription") }}</p>
               </div>
             </Label>
             <Label
               for="mode-active"
-              class="flex cursor-pointer items-start gap-2.5 rounded-md border border-border p-3 transition-colors"
+              data-testid="prompt-mode-option-active"
+              class="flex min-w-0 cursor-pointer items-start gap-2.5 rounded-md border border-border p-3 transition-colors"
               :class="selectedPromptMode === 'active' ? 'border-primary bg-primary/5' : 'hover:bg-muted/50'"
             >
               <RadioGroupItem id="mode-active" value="active" class="!size-0 !border-0 !shadow-none overflow-hidden" />
-              <div>
+              <div class="min-w-0">
                 <span class="text-sm font-medium">{{ $t("settings.prompt.modeActive") }}</span>
                 <p class="text-xs leading-relaxed text-muted-foreground">{{ $t("settings.prompt.modeActiveDescription") }}</p>
               </div>
             </Label>
             <Label
               for="mode-custom"
-              class="flex cursor-pointer items-start gap-2.5 rounded-md border border-border p-3 transition-colors"
+              data-testid="prompt-mode-option-custom"
+              class="flex min-w-0 cursor-pointer items-start gap-2.5 rounded-md border border-border p-3 transition-colors"
               :class="selectedPromptMode === 'custom' ? 'border-primary bg-primary/5' : 'hover:bg-muted/50'"
             >
               <RadioGroupItem id="mode-custom" value="custom" class="!size-0 !border-0 !shadow-none overflow-hidden" />
-              <div>
+              <div class="min-w-0">
                 <span class="text-sm font-medium">{{ $t("settings.prompt.modeCustom") }}</span>
                 <p class="text-xs leading-relaxed text-muted-foreground">{{ $t("settings.prompt.modeCustomDescription") }}</p>
               </div>

@@ -51,3 +51,11 @@
 - **發現**：`clipboard_paste.rs` 的 `paste_text` 入口有一行非 `cfg(debug_assertions)` 包覆的 println，會在 release build 持續打到 stdout。
 - **延後理由**：此 println 是 baseline 既有程式碼，非本 story 引入；且在 Tauri app 中 stdout 通常被 OS 吞掉。屬於既有 tech-debt。
 - **後續切入點**：未來做 logging 統一改造時一併處理（`tracing` crate 整合）。
+
+## 來自 spec-settings-model-grid-overflow.md（2026-08-30）
+
+### 1. E2E smoke test 仍斷言舊產品名稱
+
+- **發現**：`tests/e2e/smoke.test.ts:12` 期待頁面標題符合 `/whisper/i`，但 baseline commit `39e5616` 的 `index.html:6` 已是 `<title>SayIt</title>`；完整 `pnpm test:e2e` 因此固定失敗。
+- **延後理由**：這是本次 UI 跑版修正前即存在的測試腐化，與模型選項、Tooltip 或響應式 grid 無關；依範圍規則不順手修改。
+- **後續切入點**：另案將 smoke assertion 改為正式且穩定的產品標題，再重跑完整 E2E suite。
