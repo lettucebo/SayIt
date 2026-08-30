@@ -64,11 +64,11 @@
     },
     "provider": {
       "title": "LLM プロバイダー",
-      "description": "テキスト整理と辞書分析に使用する AI サービスを選択します。Groq と Gemini は無料枠あり、OpenAI と Anthropic は有料です。",
-      "groq": "Groq（無料）",
-      "openai": "OpenAI（おすすめ）",
+      "description": "テキスト整理と辞書分析に使用する AI サービスを選択します。",
+      "groq": "Groq",
+      "openai": "OpenAI",
       "anthropic": "Anthropic",
-      "gemini": "Google Gemini（無料枠あり）",
+      "gemini": "Google Gemini",
       "groqNote": "上記の Groq API Key を使用",
       "azure": "Azure / Microsoft Foundry"
     },
@@ -123,6 +123,8 @@
       "llmUpdated": "テキスト整理モデルが更新されました",
       "default": "デフォルト",
       "bestQuality": "最高品質",
+      "freeBadge": "無料",
+      "recommended": "おすすめ",
       "costPerHour": "1時間あたり ${cost}",
       "whisperDescription": {
         "largeV3": "精度が高く（WER 10.3%）、中国語と英語の混在にはこちらを推奨。英訳にも対応",

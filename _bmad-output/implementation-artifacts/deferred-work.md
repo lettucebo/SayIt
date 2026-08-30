@@ -59,3 +59,9 @@
 - **發現**：`tests/e2e/smoke.test.ts:12` 期待頁面標題符合 `/whisper/i`，但 baseline commit `39e5616` 的 `index.html:6` 已是 `<title>SayIt</title>`；完整 `pnpm test:e2e` 因此固定失敗。
 - **延後理由**：這是本次 UI 跑版修正前即存在的測試腐化，與模型選項、Tooltip 或響應式 grid 無關；依範圍規則不順手修改。
 - **後續切入點**：另案將 smoke assertion 改為正式且穩定的產品標題，再重跑完整 E2E suite。
+
+### 2. RadioGroup 的無障礙名稱不隨即時語系切換更新
+
+- **發現**：`reka-ui` 的 `Radio.vue` 以 computed 讀取 `[for=id]` Label 的 `innerText` 產生 `aria-label`，但 DOM 文字不是 Vue reactive dependency。設定頁不重新 mount 就切換語系時，可見文案會更新，radio 的無障礙名稱仍停在舊語言。既有 Foundry「品質最佳」Star 與 LLM provider 標記都受影響。
+- **延後理由**：本次需求是將 provider 的免費／推薦後綴改為 Badge / Star；改用 `aria-labelledby` 需重構三組 RadioGroup 的名稱組合與既有無障礙測試，超出本次視覺標記範圍。固定語系首次載入時的無障礙名稱仍正確。
+- **後續切入點**：為 provider 名稱、Badge 與 sr-only marker 配置穩定 ID，RadioGroupItem 改用可隨 DOM 文案更新的 `aria-labelledby` 組合，並新增 zh-TW → en 即時切換後的 E2E。

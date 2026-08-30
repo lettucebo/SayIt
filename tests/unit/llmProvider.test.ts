@@ -5,6 +5,7 @@ import {
   getProviderTimeout,
   findProviderConfig,
   getProviderIdForModel,
+  LLM_PROVIDER_LIST,
   type LlmChatRequest,
 } from "../../src/lib/llmProvider";
 
@@ -21,6 +22,24 @@ const BASE_REQUEST: LlmChatRequest = {
 };
 
 describe("llmProvider.ts", () => {
+  describe("LLM_PROVIDER_LIST", () => {
+    it("[P1] 免費層只標記 Groq 與 Gemini", () => {
+      expect(
+        LLM_PROVIDER_LIST.filter((provider) => provider.hasFreeTier).map(
+          (provider) => provider.id,
+        ),
+      ).toEqual(["groq", "gemini"]);
+    });
+
+    it("[P1] 推薦服務只標記 Groq", () => {
+      expect(
+        LLM_PROVIDER_LIST.filter((provider) => provider.isRecommended).map(
+          (provider) => provider.id,
+        ),
+      ).toEqual(["groq"]);
+    });
+  });
+
   // ==========================================================================
   // buildFetchParams
   // ==========================================================================
