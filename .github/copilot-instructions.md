@@ -38,6 +38,7 @@ pnpm exec vue-tsc --noEmit       # 只跑型別檢查
 pnpm exec eslint src             # ESLint（CI 用此指令，無 lint npm script；--fix 可自動修）
 pnpm test                        # Vitest 單元 + 元件測試（tests/unit, tests/component）
 pnpm test:e2e                    # Playwright E2E（tests/e2e，跑在 mock 過 Tauri 的 Vite dev server）
+pnpm exec playwright install chromium # 首次執行 E2E 前安裝 Chromium
 pnpm test:coverage               # 覆蓋率報告
 cargo fmt --manifest-path src-tauri/Cargo.toml --check
 cargo clippy --manifest-path src-tauri/Cargo.toml --workspace --all-targets -- -D warnings
@@ -56,8 +57,10 @@ cd src-tauri && cargo test find_monitor  # 跑特定 Rust 測試函式
 ```
 
 > 全套 vitest 在部分機器並行執行時會 flaky（環境時間暴增、5s timeout）；不穩時用 `pnpm exec vitest run --no-file-parallelism`。勿與 `cargo check`/`cargo test` 同時跑（CPU 競爭會拖垮 vitest）。
+>
+> `playwright.config.ts` 本機預設 `fullyParallel`；資源吃緊時可能多個 worker 同時卡在 `page.goto`，改用 `pnpm exec playwright test <file> --workers=1` 重跑。CI 已固定單 worker。
 
-CI（`.github/workflows/ci.yml`）：Ubuntu 跑 `vue-tsc --noEmit` → `eslint src` → feedback presentation guard（禁止 View 手寫 feedback，見 frontend instructions #10）→ `pnpm test` → `vite build`；另在 macOS + Windows 跑 `cargo clippy --workspace --all-targets -- -D warnings` + `cargo test --workspace`。本機命令仍優先使用 `pnpm exec`；CI 內既有的 `npx` 不代表可改用 npm 安裝依賴。
+CI（`.github/workflows/ci.yml`）：Ubuntu 跑 `vue-tsc --noEmit` → `eslint src` → feedback presentation guard（禁止 View 手寫 feedback，見 frontend instructions #10）→ `pnpm test` → `vite build`；另在 macOS + Windows 跑 `cargo clippy --workspace --all-targets -- -D warnings` + `cargo test --workspace`。**CI 目前不跑 Playwright**，UI / E2E 變更須在本機跑對應的 targeted E2E。本機命令仍優先使用 `pnpm exec`；CI 內既有的 `npx` 不代表可改用 npm 安裝依賴。
 
 ## 架構大圖
 
@@ -230,6 +233,7 @@ CI（`.github/workflows/ci.yml`）：Ubuntu 跑 `vue-tsc --noEmit` → `eslint s
 
 - **Node 24**（`.nvmrc`）、**pnpm 10.28.2**（`corepack enable && corepack prepare`）、**Rust stable**。
 - **`Cargo.lock` / `pnpm-lock.yaml` 禁止手動修改**；改 `tauri.conf.json` / `Cargo.toml` 需審慎。
+- **`pnpm tauri dev` 會使用與已安裝 App 相同的 SQLite 路徑**（Windows `%APPDATA%\com.sayit.app\app.db`）；破壞性 migration / 資料測試前先備份，能用 Playwright mock 就不要碰真 DB。
 - **CSP / 安全功能必須用 `pnpm tauri build --debug` 測**，dev mode 不受 CSP 影響。
 - **macOS IPC binary**：`tauri::ipc::Response` raw bytes 走 JSON `number[]`，前端用 `new Uint8Array(raw)` 轉換。`convertFileSrc` 產生 `asset://localhost/`，但 CSP `media-src` 需 `http://asset.localhost`；偏好 Rust IPC + Blob URL 繞過。
 - Rust / Windows 專屬細節（VK_F23、`windows` crate 0.61、rustls）見 `.github/instructions/rust.instructions.md`。
