@@ -64,11 +64,11 @@
     },
     "provider": {
       "title": "LLM 模型服務",
-      "description": "選擇文字整理和字典分析使用的 AI 服務。Groq 和 Gemini 提供免費額度，OpenAI 和 Anthropic 為付費服務。",
-      "groq": "Groq（免費）",
-      "openai": "OpenAI（推薦）",
+      "description": "選擇文字整理和字典分析使用的 AI 服務。",
+      "groq": "Groq",
+      "openai": "OpenAI",
       "anthropic": "Anthropic",
-      "gemini": "Google Gemini（免費額度）",
+      "gemini": "Google Gemini",
       "groqNote": "使用上方 Groq API Key",
       "azure": "Azure / Microsoft Foundry"
     },
@@ -123,6 +123,8 @@
       "llmUpdated": "文字整理模型已更新",
       "default": "預設",
       "bestQuality": "品質最佳",
+      "freeBadge": "免費",
+      "recommended": "推薦",
       "costPerHour": "每小時 ${cost}",
       "whisperDescription": {
         "largeV3": "準確度較高（WER 10.3%），中英夾雜建議選這個；另支援翻譯成英文",

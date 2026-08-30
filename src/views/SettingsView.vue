@@ -2869,7 +2869,17 @@ onBeforeUnmount(() => {
                 data-testid="whisper-provider-radio-groq"
                 class="!size-0 !border-0 !shadow-none overflow-hidden"
               />
-              <span class="min-w-0 text-sm font-medium">Groq</span>
+              <div class="flex min-w-0 items-center gap-1.5">
+                <span class="min-w-0 text-sm font-medium">Groq</span>
+                <Badge
+                  as="span"
+                  variant="secondary"
+                  data-testid="whisper-provider-free-badge-groq"
+                  class="shrink-0"
+                >
+                  {{ $t("settings.model.freeBadge") }}
+                </Badge>
+              </div>
             </Label>
             <Label
               for="whisper-provider-gemini"
@@ -2883,7 +2893,17 @@ onBeforeUnmount(() => {
                 data-testid="whisper-provider-radio-gemini"
                 class="!size-0 !border-0 !shadow-none overflow-hidden"
               />
-              <span class="min-w-0 text-sm font-medium">Gemini</span>
+              <div class="flex min-w-0 items-center gap-1.5">
+                <span class="min-w-0 text-sm font-medium">Gemini</span>
+                <Badge
+                  as="span"
+                  variant="secondary"
+                  data-testid="whisper-provider-free-badge-gemini"
+                  class="shrink-0"
+                >
+                  {{ $t("settings.model.freeBadge") }}
+                </Badge>
+              </div>
             </Label>
           </RadioGroup>
           <InlineFeedback :feedback="whisperProviderFeedback.state.value" class="block" />
@@ -3151,8 +3171,44 @@ onBeforeUnmount(() => {
               class="flex min-w-0 cursor-pointer items-center gap-2.5 rounded-md border border-border p-3 transition-colors"
               :class="settingsStore.selectedLlmProviderId === provider.id ? 'border-primary bg-primary/5' : 'hover:bg-muted/50'"
             >
-              <RadioGroupItem :id="`provider-${provider.id}`" :value="provider.id" class="!size-0 !border-0 !shadow-none overflow-hidden" />
-              <span class="min-w-0 text-sm font-medium">{{ $t(`settings.provider.${provider.id}`) }}</span>
+              <RadioGroupItem
+                :id="`provider-${provider.id}`"
+                :value="provider.id"
+                :data-testid="`llm-provider-radio-${provider.id}`"
+                class="!size-0 !border-0 !shadow-none overflow-hidden"
+              />
+              <div class="flex min-w-0 items-center gap-1.5">
+                <span class="min-w-0 text-sm font-medium">{{ $t(`settings.provider.${provider.id}`) }}</span>
+                <Tooltip v-if="provider.isRecommended">
+                  <TooltipTrigger as-child>
+                    <span
+                      :data-testid="`llm-provider-recommended-${provider.id}`"
+                      class="inline-flex shrink-0 items-center text-primary"
+                    >
+                      <Star class="size-3.5 fill-current" aria-hidden="true" />
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent :data-testid="`llm-provider-recommended-${provider.id}-tooltip`">
+                    {{ $t("settings.model.recommended") }}
+                  </TooltipContent>
+                </Tooltip>
+                <span
+                  v-if="provider.isRecommended"
+                  :data-testid="`llm-provider-recommended-${provider.id}-text`"
+                  class="sr-only"
+                >
+                  {{ $t("settings.model.recommended") }}
+                </span>
+                <Badge
+                  v-if="provider.hasFreeTier"
+                  as="span"
+                  variant="secondary"
+                  :data-testid="`llm-provider-free-badge-${provider.id}`"
+                  class="shrink-0"
+                >
+                  {{ $t("settings.model.freeBadge") }}
+                </Badge>
+              </div>
             </Label>
           </RadioGroup>
           <InlineFeedback :feedback="llmProviderFeedback.state.value" class="block" />

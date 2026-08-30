@@ -17,6 +17,9 @@ export interface LlmProviderConfig {
   baseUrl: string;
   consoleUrl: string;
   apiKeyPrefix: string;
+  /** UI-level provider marker only; model-specific billing must be evaluated separately. */
+  hasFreeTier: boolean;
+  isRecommended?: boolean;
 }
 
 export const LLM_PROVIDER_LIST: LlmProviderConfig[] = [
@@ -26,6 +29,8 @@ export const LLM_PROVIDER_LIST: LlmProviderConfig[] = [
     baseUrl: "https://api.groq.com/openai/v1/chat/completions",
     consoleUrl: "https://console.groq.com/keys",
     apiKeyPrefix: "gsk_",
+    hasFreeTier: true,
+    isRecommended: true,
   },
   {
     id: "gemini",
@@ -33,6 +38,7 @@ export const LLM_PROVIDER_LIST: LlmProviderConfig[] = [
     baseUrl: "https://generativelanguage.googleapis.com/v1beta",
     consoleUrl: "https://aistudio.google.com/apikey",
     apiKeyPrefix: "AI",
+    hasFreeTier: true,
   },
   {
     id: "openai",
@@ -40,6 +46,7 @@ export const LLM_PROVIDER_LIST: LlmProviderConfig[] = [
     baseUrl: "https://api.openai.com/v1/chat/completions",
     consoleUrl: "https://platform.openai.com/api-keys",
     apiKeyPrefix: "sk-",
+    hasFreeTier: false,
   },
   {
     id: "anthropic",
@@ -47,6 +54,7 @@ export const LLM_PROVIDER_LIST: LlmProviderConfig[] = [
     baseUrl: "https://api.anthropic.com/v1/messages",
     consoleUrl: "https://console.anthropic.com/settings/keys",
     apiKeyPrefix: "sk-ant-",
+    hasFreeTier: false,
   },
   {
     id: "azure",
@@ -55,6 +63,7 @@ export const LLM_PROVIDER_LIST: LlmProviderConfig[] = [
     baseUrl: "",
     consoleUrl: "https://ai.azure.com/",
     apiKeyPrefix: "",
+    hasFreeTier: false,
   },
 ];
 

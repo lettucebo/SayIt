@@ -64,11 +64,11 @@
     },
     "provider": {
       "title": "LLM 제공업체",
-      "description": "텍스트 정리와 사전 분석에 사용할 AI 서비스를 선택하세요. Groq와 Gemini는 무료 할당량을 제공하며, OpenAI와 Anthropic는 유료입니다.",
-      "groq": "Groq (무료)",
-      "openai": "OpenAI (추천)",
+      "description": "텍스트 정리와 사전 분석에 사용할 AI 서비스를 선택하세요.",
+      "groq": "Groq",
+      "openai": "OpenAI",
       "anthropic": "Anthropic",
-      "gemini": "Google Gemini (무료 할당량)",
+      "gemini": "Google Gemini",
       "groqNote": "위의 Groq API Key 사용",
       "azure": "Azure / Microsoft Foundry"
     },
@@ -123,6 +123,8 @@
       "llmUpdated": "텍스트 정리 모델이 업데이트되었습니다",
       "default": "기본",
       "bestQuality": "최고 품질",
+      "freeBadge": "무료",
+      "recommended": "추천",
       "costPerHour": "시간당 ${cost}",
       "whisperDescription": {
         "largeV3": "정확도가 높고(WER 10.3%) 중국어-영어 혼용에 권장됩니다. 영어 번역도 지원",

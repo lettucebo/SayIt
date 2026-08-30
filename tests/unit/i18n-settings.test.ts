@@ -398,6 +398,65 @@ describe("i18n 設定功能", () => {
   // ==========================================================================
 
   describe("翻譯檔 key 一致性", () => {
+    it("[P1] Provider 標記與簡化文案在 5 語系皆為精確值", async () => {
+      const zhTW = await import("../../src/i18n/locales/zh-TW.json");
+      const en = await import("../../src/i18n/locales/en.json");
+      const ja = await import("../../src/i18n/locales/ja.json");
+      const zhCN = await import("../../src/i18n/locales/zh-CN.json");
+      const ko = await import("../../src/i18n/locales/ko.json");
+      const localeMap = {
+        "zh-TW": {
+          messages: zhTW.default,
+          freeBadge: "免費",
+          recommended: "推薦",
+          description: "選擇文字整理和字典分析使用的 AI 服務。",
+        },
+        en: {
+          messages: en.default,
+          freeBadge: "Free",
+          recommended: "Recommended",
+          description:
+            "Select the AI service for text enhancement and dictionary analysis.",
+        },
+        ja: {
+          messages: ja.default,
+          freeBadge: "無料",
+          recommended: "おすすめ",
+          description:
+            "テキスト整理と辞書分析に使用する AI サービスを選択します。",
+        },
+        "zh-CN": {
+          messages: zhCN.default,
+          freeBadge: "免费",
+          recommended: "推荐",
+          description: "选择文字整理和字典分析使用的 AI 服务。",
+        },
+        ko: {
+          messages: ko.default,
+          freeBadge: "무료",
+          recommended: "추천",
+          description:
+            "텍스트 정리와 사전 분석에 사용할 AI 서비스를 선택하세요.",
+        },
+      };
+
+      for (const [
+        locale,
+        { messages, freeBadge, recommended, description },
+      ] of Object.entries(localeMap)) {
+        expect(messages.settings.model.freeBadge, locale).toBe(freeBadge);
+        expect(messages.settings.model.recommended, locale).toBe(recommended);
+        expect(messages.settings.provider.groq, locale).toBe("Groq");
+        expect(messages.settings.provider.openai, locale).toBe("OpenAI");
+        expect(messages.settings.provider.gemini, locale).toBe(
+          "Google Gemini",
+        );
+        expect(messages.settings.provider.description, locale).toBe(
+          description,
+        );
+      }
+    });
+
     it("[P0] Foundry 轉錄 UI 新增文案在 5 語系皆存在", async () => {
       const zhTW = await import("../../src/i18n/locales/zh-TW.json");
       const en = await import("../../src/i18n/locales/en.json");

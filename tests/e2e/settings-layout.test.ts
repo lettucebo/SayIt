@@ -26,6 +26,18 @@ const LAYOUT_CASE_LIST = [
   { width: 1025, expectedColumns: 3 },
 ] as const;
 const LAYOUT_LOCALE_LIST = ["zh-TW", "en"] as const;
+const PROVIDER_MARKER_TEXT_BY_LOCALE = {
+  "zh-TW": {
+    free: "免費",
+    recommended: "推薦",
+    bestQuality: "品質最佳",
+  },
+  en: {
+    free: "Free",
+    recommended: "Recommended",
+    bestQuality: "Best quality",
+  },
+} as const;
 
 async function openSettings(
   page: Page,
@@ -33,6 +45,7 @@ async function openSettings(
     azureEnabled: boolean;
     locale?: (typeof LAYOUT_LOCALE_LIST)[number];
     width?: number;
+    llmProviderId?: "groq" | "openai" | "anthropic" | "gemini" | "azure";
   },
 ): Promise<void> {
   await page.setViewportSize({
@@ -43,6 +56,7 @@ async function openSettings(
     storeValues: {
       azureEnabled: options.azureEnabled,
       selectedLocale: options.locale ?? "zh-TW",
+      llmProviderId: options.llmProviderId,
     },
   });
   await page.goto(SETTINGS_URL, { waitUntil: "domcontentloaded" });
@@ -278,8 +292,100 @@ test.describe("Settings model selector layout", () => {
     );
     await expect(
       page.getByTestId("whisper-provider-radio-gemini"),
+    ).toHaveAttribute("data-state", "unchecked"    );
+  });
+
+  test("[P1] Groq 推薦 Star 可點選、可 hover 並只觸發一次 provider 切換", async ({
+    page,
+  }) => {
+    // Given: 明確從非 Groq provider 起始，否則點已選取的 radio 不會觸發變更
+    await openSettings(page, {
+      azureEnabled: true,
+      llmProviderId: "openai",
+      width: 769,
+    });
+
+    const groqOption = page.getByTestId("llm-provider-option-groq");
+    const groqRadio = page.getByTestId("llm-provider-radio-groq");
+    const star = page.getByTestId("llm-provider-recommended-groq");
+    const recommendedText =
+      PROVIDER_MARKER_TEXT_BY_LOCALE["zh-TW"].recommended;
+    await expect(groqRadio).toHaveAttribute("data-state", "unchecked");
+
+    // Then: 推薦 marker 只存在於 Groq，且不是沿用「品質最佳」文案
+    await expect(star).toHaveCount(1);
+    for (const providerId of ["openai", "anthropic", "gemini", "azure"]) {
+      await expect(
+        page.getByTestId(`llm-provider-recommended-${providerId}`),
+      ).toHaveCount(0);
+      await expect(
+        page.getByTestId(`llm-provider-radio-${providerId}`),
+      ).not.toHaveAccessibleName(new RegExp(escapeRegExp(recommendedText)));
+    }
+    await expect(
+      groqOption.getByTestId("llm-provider-recommended-groq-text"),
+    ).toHaveText(recommendedText);
+    await expect(groqRadio).toHaveAccessibleName(
+      new RegExp(escapeRegExp(recommendedText)),
+    );
+
+    // When: hover Star
+    await star.hover();
+
+    // Then: Tooltip 顯示「推薦」，而非 Foundry 的「品質最佳」
+    const tooltip = page.getByTestId(
+      "llm-provider-recommended-groq-tooltip",
+    );
+    await expect(tooltip).toBeVisible();
+    await expect(tooltip).toContainText(recommendedText);
+    await expect(tooltip).not.toContainText(
+      PROVIDER_MARKER_TEXT_BY_LOCALE["zh-TW"].bestQuality,
+    );
+
+    const writeCountBefore = await getStoreSetCount(page, "llmProviderId");
+
+    // When: 直接點擊 Star
+    await star.click();
+
+    // Then: Label 只觸發一次持久化，Groq 成為唯一選取項目
+    await expect
+      .poll(async () => getStoreSetCount(page, "llmProviderId"))
+      .toBe(writeCountBefore + 1);
+    await expect(groqRadio).toHaveAttribute("data-state", "checked");
+    await expect(
+      page.getByTestId("llm-provider-radio-openai"),
     ).toHaveAttribute("data-state", "unchecked");
   });
+
+  for (const locale of LAYOUT_LOCALE_LIST) {
+    test(`[P1] ${locale} 免費 Badge 只顯示於 Groq 與 Gemini`, async ({
+      page,
+    }) => {
+      // Given: Azure 啟用，兩組 provider 選項全部可見
+      await openSettings(page, { azureEnabled: true, locale, width: 769 });
+      const expectedText = PROVIDER_MARKER_TEXT_BY_LOCALE[locale].free;
+
+      // Then: LLM 與轉錄的 Groq / Gemini 都顯示該語系的免費 Badge
+      for (const testId of [
+        "llm-provider-free-badge-groq",
+        "llm-provider-free-badge-gemini",
+        "whisper-provider-free-badge-groq",
+        "whisper-provider-free-badge-gemini",
+      ]) {
+        await expect(page.getByTestId(testId)).toHaveText(expectedText);
+      }
+
+      // And: 付費 provider 與 Foundry 不得出現免費 Badge
+      for (const testId of [
+        "llm-provider-free-badge-openai",
+        "llm-provider-free-badge-anthropic",
+        "llm-provider-free-badge-azure",
+        "whisper-provider-free-badge-foundry",
+      ]) {
+        await expect(page.getByTestId(testId)).toHaveCount(0);
+      }
+    });
+  }
 
   test("[P1] Azure 停用時寬視窗維持兩欄且可切換", async ({ page }) => {
     // Given: Azure 停用且寬度已超過 lg 斷點

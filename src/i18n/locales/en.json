@@ -64,11 +64,11 @@
     },
     "provider": {
       "title": "LLM Provider",
-      "description": "Select the AI service for text enhancement and dictionary analysis. Groq and Gemini offer free quota, OpenAI and Anthropic are paid services.",
-      "groq": "Groq (Free)",
-      "openai": "OpenAI (Recommended)",
+      "description": "Select the AI service for text enhancement and dictionary analysis.",
+      "groq": "Groq",
+      "openai": "OpenAI",
       "anthropic": "Anthropic",
-      "gemini": "Google Gemini (Free Quota)",
+      "gemini": "Google Gemini",
       "groqNote": "Uses Groq API Key above",
       "azure": "Azure / Microsoft Foundry"
     },
@@ -123,6 +123,8 @@
       "llmUpdated": "Text enhancement model updated",
       "default": "Default",
       "bestQuality": "Best quality",
+      "freeBadge": "Free",
+      "recommended": "Recommended",
       "costPerHour": "${cost}/hour",
       "whisperDescription": {
         "largeV3": "Higher accuracy (10.3% WER); recommended for Chinese-English mixing. Also supports translation to English",
