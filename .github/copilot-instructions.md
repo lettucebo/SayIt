@@ -43,7 +43,8 @@ pnpm test:coverage               # 覆蓋率報告
 cargo fmt --manifest-path src-tauri/Cargo.toml --check
 cargo clippy --manifest-path src-tauri/Cargo.toml --workspace --all-targets -- -D warnings
 cargo test --manifest-path src-tauri/Cargo.toml --workspace
-./scripts/release.sh X.Y.Z       # 發版（更新版本號 + tag + push）
+.\scripts\release.ps1 X.Y.Z      # Windows 發版（先等 main CI 綠燈，再推 tag）
+./scripts/release.sh X.Y.Z       # macOS/Linux 發版
 ```
 
 **跑單一測試：**
@@ -240,7 +241,7 @@ CI（`.github/workflows/ci.yml`）：Ubuntu 跑 `vue-tsc --noEmit` → `eslint s
 
 ## CI/CD 與發版
 
-> 🍴 **Fork 發版政策（硬規則）**：本 repo 是 `chenjackle45/SayIt` 的 fork，採**自走 release**。所有 release / CICD 相關修改——GitHub workflow、secrets/variables、`release.yml`、`tauri.conf.json`（updater endpoint/pubkey、簽名設定）、`scripts/release.sh`、`sayit-release` skill 等——**只保留在本 fork（`lettucebo/SayIt`），不得同步或開 PR 回上游 `chenjackle45/SayIt`**；自上游 sync 時須保留我方版本。
+> 🍴 **Fork 發版政策（硬規則）**：本 repo 是 `chenjackle45/SayIt` 的 fork，採**自走 release**。所有 release / CICD 相關修改——GitHub workflow、secrets/variables、`release.yml`、`tauri.conf.json`（updater endpoint/pubkey、簽名設定）、`scripts/release.sh` / `release.ps1`、`sayit-release` skill 等——**只保留在本 fork（`lettucebo/SayIt`），不得同步或開 PR 回上游 `chenjackle45/SayIt`**；自上游 sync 時須保留我方版本。
 > - macOS **未簽名**（無 Apple Developer 憑證，使用者需右鍵開啟）；updater 用 **fork 專屬簽章金鑰**，endpoint/pubkey 指向 `lettucebo/SayIt`。
 > - 非機密設定（Sentry DSN/Org/Project 等）一律用 **GitHub variable**；私鑰、token、app 密碼才用 **secret**。
 > - **不得 backlink 上游**：`main` 的 commit / PR / issue / CHANGELOG / release notes 一律不指向上游 issue/PR，詳見下方「`main` 分支與上游關聯政策（硬規則）」。
@@ -259,7 +260,7 @@ CI（`.github/workflows/ci.yml`）：Ubuntu 跑 `vue-tsc --noEmit` → `eslint s
 
 **發版硬規則：**
 
-- `./scripts/release.sh X.Y.Z`：版本號須在 `git tag` / `package.json` / `src-tauri/tauri.conf.json` / `src-tauri/Cargo.toml` 四處一致。
+- Windows 使用 `.\scripts\release.ps1 X.Y.Z`；macOS/Linux 使用 `./scripts/release.sh X.Y.Z`。版本號須在 `git tag` / `package.json` / `src-tauri/tauri.conf.json` / `src-tauri/Cargo.toml` 四處一致。
 - 正式版 Sentry release 一律由 `.github/workflows/release.yml` 產生（格式固定 `sayit@<version>`），前端與 Rust 不可各自手動指定不同名稱，不得繞過 workflow 手動上傳 sourcemap/telemetry。
 - 本機 Windows 安裝檔：`pnpm tauri build --bundles nsis --config <json 將 bundle.createUpdaterArtifacts 設 false>`；輸出 `target\release\bundle\nsis\SayIt_<ver>_x64-setup.exe`（缺正式簽署私鑰時用此繞過）。
 - 固定下載連結（官網）：`SayIt-mac-arm64.dmg` / `SayIt-mac-x64.dmg` / `SayIt-windows-x64.exe`（GitHub releases/latest/download）。

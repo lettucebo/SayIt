@@ -94,11 +94,20 @@ npx vue-tsc --noEmit
 
 ### 發版
 
+```powershell
+.\scripts\release.ps1 1.1.0
+```
+
 ```bash
-./scripts/release.sh 0.2.0
+./scripts/release.sh 1.1.0
+```
+
+兩者都會：
+
+```text
 # → 自動更新版本號、commit、tag、push
 # → GitHub Actions 建構 macOS + Windows 安裝檔
-# → 到 GitHub Releases 手動 Publish
+# → Release workflow 完成後自動公開 GitHub Release
 ```
 
 ## License

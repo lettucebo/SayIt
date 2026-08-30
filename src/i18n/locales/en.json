@@ -698,7 +698,9 @@
     },
     "upgradeNotice": {
       "title": "SayIt Update Summary",
-      "item1": "Release notes are easier to find: the Feature Guide now opens SayIt's release history — external links in Settings, such as GitHub and provider consoles, also open reliably in the system browser.",
+      "item1": "Groq Qwen3.8 27B Preview is now available — its free tier includes 1,000 requests and 2 million tokens per day, ten times the token quota of other Groq models. Qwen3.6 remains the default balance of speed and cost.",
+      "item2": "Free-quota tracking is more accurate — Groq LLM usage is now separated by model and includes dictionary analysis for that model, without mixing in usage from other models or providers.",
+      "item3": "Model services are easier to scan — Groq and Gemini show localized free badges, the recommendation star now marks Groq, and responsive columns prevent labels from crowding or overflowing in narrower windows.",
       "dismiss": "Got it"
     }
   },

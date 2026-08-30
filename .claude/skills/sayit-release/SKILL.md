@@ -1,6 +1,6 @@
 ---
 name: sayit-release
-description: SayIt 發版流程編排 — 起草 CHANGELOG、同步 5 語系升級彈窗、對齊 upgradeNoticeItemCount、最後呼叫 ./scripts/release.sh。當使用者說「準備發新版」「要 release vX.Y.Z」「準備 release v0.10.0」「要發版了」「更新 CHANGELOG」「要更新升級彈窗」「同步多語系升級提示」之類的話時必須觸發；即使對方沒講「sayit-release」這幾個字、只說「我們來發 v0.11.0」也要觸發。負責 release.sh 之前的所有準備工作，呼叫 release.sh 前一定要先取得使用者明確同意。
+description: Use when a SayIt release is requested, a target version is named, CHANGELOG or upgrade notices need synchronization, or release workflows and assets must be published and verified.
 ---
 
 # SayIt 發版流程
@@ -23,20 +23,18 @@ release.sh 的 guard 設計（working tree 乾淨、CHANGELOG 含目標版本區
  ② 蒐集材料（git log 上一個 tag..HEAD、git status）
      │
      ▼
- ③ 起草 CHANGELOG（分類 → 寫入頂部 → 等使用者遷訂）
+ ③ 產生 CHANGELOG（分類 → 寫入頂部）
      │
      ▼
- ④ 起草 upgradeNotice（詢問亮點 → zh-TW → 翻譯 4 語 → 同步 itemCount）
+ ④ 產生 upgradeNotice（從 CHANGELOG 選亮點 → 翻譯 4 語 → 同步 itemCount）
      │
      ▼
  ⑤ Sanity check（5 語系 key 對齊、itemCount 對得上、CHANGELOG 含目標版本區塊）
      │
      ▼
- ⑥ 詢問使用者「要跑 release.sh 嗎？」
-     │
-     │ 使用者明確同意（「跑」「部署」「go」「發吧」之類）
-     ▼
- ⑦ 跑 ./scripts/release.sh X.Y.Z（只在使用者明確同意時跑）
+ ⑥ Pre-flight checks（任一失敗即停止，不推送）
+      ▼
+ ⑦ 執行平台對應腳本（Windows: release.ps1；macOS/Linux: release.sh）
      │
      ▼
  ⑧ 發版後驗證（gh --repo、監看 workflow、確認 Release 發佈與資產）
@@ -51,12 +49,22 @@ release.sh 的 guard 設計（working tree 乾淨、CHANGELOG 含目標版本區
 jq -r .version C:/Source/Repos/SayIt/src-tauri/tauri.conf.json
 ```
 
-如果使用者已經在指令裡明說（「發 v0.11.0」），直接用。如果沒明說，用 semver 規則推薦：
-- 只有 bug fix → patch（0.10.0 → 0.10.1）
-- 有新功能但不破壞相容性 → minor（0.10.0 → 0.11.0）
-- 破壞相容性 → major（0.10.0 → 1.0.0）
+如果使用者已經在指令裡明說（「發 v1.1.0」），驗證格式與遞增關係後直接使用。如果沒明說，依下表自行判定、在最終報告說明理由，不停下來等待確認。
 
-把推薦版本號告訴使用者，等他確認或修改。**版本號未確認前不要往下走**。
+| Bump | 判準 | 例子 |
+|------|------|------|
+| **major** `X.0.0` | 產品級重大變更（新增一整條核心工作流、主要介面重做、移除既有能力），或使用者可見的破壞性變更（既有設定不相容、無法安全回退） | 語音輸入流程整體替換、設定格式不相容 |
+| **minor** `X.Y.0` | 使用者多了一個可以主動選用的能力 | 新 provider、新模型、新設定項、新頁面 |
+| **patch** `X.Y.Z` | 修正或改善既有能力，沒有新增可選功能 | bug fix、UI 排版／標籤、文案、效能、內部重構 |
+
+判定規則：
+
+1. **minor vs patch 的分界**：使用者是否多了一個能主動選用的東西；能選新模型是 minor，既有選單換 Badge 是 patch。
+2. 同一版混合多種變更時，取最高類別。
+3. 使用者可見的破壞性變更一律至少 major，即使改動程式碼很少。
+4. 版本必須嚴格大於目前版本；禁止降版或重用已存在的 tag。
+
+這是桌面產品的產品導向版本策略，不等同函式庫 API semver。歷史版本曾多次把 Added 發成 patch，不能照舊例機械推斷；以本表為新準則。
 
 ## 步驟 ② 蒐集材料
 
@@ -70,7 +78,7 @@ git -C C:/Source/Repos/SayIt log "$(git -C C:/Source/Repos/SayIt describe --tags
 git -C C:/Source/Repos/SayIt status --short
 ```
 
-如果 working tree 不乾淨，先告知使用者「目前有 N 個未 commit 變更，release.sh 會擋下來，要先處理」。讓他決定是先 commit 那些變更、還是先繼續 skill 流程（變更可能會被一起包進這次 release）。
+如果開始發版前 working tree 已有不屬於本次 release-prep 的變更，立即 fail closed 並停止，不詢問是否混入發版。skill 自己產生的 CHANGELOG / upgradeNotice / 文件／腳本變更則全部納入 release-prep commit，再進 pre-flight。
 
 ## 步驟 ③ 起草 CHANGELOG
 
@@ -151,11 +159,9 @@ SayIt 版本更新紀錄。
 ## [上一個版本] - ...        ← 已存在
 ```
 
-### 起草後的檢查
+### 寫入後的檢查
 
-寫完先把草稿展示給使用者，**不要直接寫進檔案**。等使用者說「OK」或「改 X」再實際 Edit 寫入。
-
-理由：CHANGELOG 是面向使用者的文案，每個發版的人對「什麼算亮點、用什麼語氣、要不要提技術細節」都有不同直覺，先給使用者看草稿可以避免一改再改。
+使用者已明示發版時，直接寫入檔案，不再等待文案確認。完成後在最終報告列出 CHANGELOG 條目；若內容需要調整，仍可由下一個 patch release 修正。
 
 ## 步驟 ④ 起草 upgradeNotice
 
@@ -190,7 +196,7 @@ SayIt 版本更新紀錄。
 
 ### 翻譯流程
 
-使用者只寫 zh-TW，skill 自動翻 4 種。**不要叫使用者寫 5 種**。
+從本版 CHANGELOG 自動挑選 1-3 個最有感的亮點，先產生 zh-TW，再自動翻 4 種。**不要停下來詢問亮點，也不要叫使用者寫 5 種**。
 
 #### 翻譯時的 5 語系語感
 
@@ -213,14 +219,13 @@ SayIt 版本更新紀錄。
 ### 寫入步驟
 
 ```
-① 詢問使用者本版 1-3 個亮點主題
-② 使用者用 zh-TW 描述（一兩句話即可）
-③ skill 把 zh-TW 整理成「主題冒號 + 使用者場景 + why + how」格式
-④ skill 翻譯 4 語系（zh-CN / en / ja / ko）
-⑤ 把整組 upgradeNotice（5 語系 × N 個 item）展示給使用者遷訂
-⑥ 使用者 OK 後實際 Edit 6 個檔案：
+① 從本版 CHANGELOG 依「內容策略」選 1-3 個亮點
+② 整理 zh-TW 為「主題冒號 + 使用者場景 + why + how」格式
+③ 翻譯 4 語系（zh-CN / en / ja / ko）
+④ 直接 Edit 6 個檔案：
    - 5 個 .json 的 mainApp.upgradeNotice 區塊
    - MainApp.vue 的 upgradeNoticeItemCount
+⑤ 在最終報告列出 5 語系內容與 itemCount
 ```
 
 ### 重要：itemN 處理策略
@@ -254,40 +259,47 @@ rg -n "^## \[X.Y.Z\]" C:/Source/Repos/SayIt/CHANGELOG.md
 
 任何一項對不上，回去把它修好再走步驟 ⑥。
 
-## 步驟 ⑥ 取得跑 release.sh 的明確同意
+## 步驟 ⑥ Pre-flight checks
 
-不要自動跑 release.sh。用 AskUserQuestion 問使用者：
+使用者明示發版即為 commit、tag、push 與觸發 CI/CD 的授權，不再詢問第二次。改用以下客觀檢查；**任一項失敗即 STOP，且不得 push/tag**：
 
-- **問題**：「要不要現在跑 ./scripts/release.sh X.Y.Z？這會自動 bump 4 處版本號、commit、打 tag、push 到 remote 觸發 CI/CD（不可逆）。」
-- **選項**：
-  - 「跑 release.sh」
-  - 「先看一下 git diff 再決定」
-  - 「先別跑，我手動處理」
+1. 目標版號符合 `X.Y.Z` 且嚴格大於目前版本。
+2. `vX.Y.Z` tag 不存在。
+3. 目前在 `main` branch，且非 detached HEAD。
+4. 發版材料已 commit；working tree 乾淨（忽略明確列入 `.git/info/exclude` 的本機工具產物）。
+5. CHANGELOG 含非空的 `## [X.Y.Z]` 區塊。
+6. 5 語系 `upgradeNotice` 只有 `title` + `item1..itemN` + `dismiss`，且 key 集合一致。
+7. `upgradeNoticeItemCount === N`。
+8. `pnpm build` 與 `pnpm test` 通過。
+9. Windows 先執行 `.\scripts\release.ps1 X.Y.Z -WhatIf`；macOS/Linux 檢查 `jq`、`python3` 可用。
 
-只有第一個選項才往下跑步驟 ⑦。
+## 步驟 ⑦ 執行平台對應發版腳本
 
-## 步驟 ⑦ 跑 release.sh
+### Windows（主要路徑）
+
+```powershell
+cd C:\Source\Repos\SayIt
+.\scripts\release.ps1 X.Y.Z
+```
+
+`release.ps1` 涵蓋 `release.sh` 的基礎 guard，並額外強制版號遞增、main-only、`cargo metadata --locked` 與 CI-before-tag。它會先推 main，自動找出同一 commit 的 CI run 並等待成功，只有 CI 綠燈才建立並推 tag；CI 失敗時不建立 tag，可修復／重跑 CI 後用 `.\scripts\release.ps1 X.Y.Z -ResumeTag` 安全續跑。發版前可用 `-WhatIf` 驗證所有 guard 與取代目標，不寫檔、不 commit、不 push。
+
+### macOS / Linux
 
 ```bash
 cd C:/Source/Repos/SayIt && ./scripts/release.sh X.Y.Z
 ```
-
-> ⚠️ **Windows 注意（本機無 `jq`）**：`release.sh` 依賴 bash+jq+python3，在 `C:\Source\Repos\SayIt` 無法直接跑（jq 不存在、bash 為 WSL）。改用**等價手動 bump**（0.12.1 已驗證可行）：
-> 1. 改 `package.json` / `src-tauri/tauri.conf.json`：最穩是「唯一字串取代」只換 `"version": "OLD",` 那一行（先確認該字串在檔內唯一），以免 JSON round-trip 因序列化格式與原檔不同而整檔重排、diff 爆炸（release.sh 本身是用 jq 改這兩檔）。`src-tauri/Cargo.toml` 換第一個（`[package]` 下的）`version = "OLD"`。
-> 2. `src-tauri/Cargo.lock` 在此 checkout 是 **CRLF**（git 內其實存 LF，因 `core.autocrlf`；release.sh 的 python 用 `\n` 比對）：用 PowerShell `[IO.File]::ReadAllText` + `String.Replace`（比對含 `\r\n` 的 `name = "sayit"` 與 `version` 兩行）+ `WriteAllText`（UTF8 no BOM）精準改那一行、保留原換行；**勿用 edit 工具**（可能假設 LF 而 mismatch）。只改 sayit 自己的版本、不動任何相依。
-> 3. 驗證：四處皆新版本、`git --no-pager diff` 只有 4 行版本變更；`cd src-tauri; cargo metadata --locked`（只驗證相依解析 / lock 與 Cargo.toml 一致，exit 0 = 一致；**不編譯、不跑測試**，比 `cargo build` 快很多）。
-> 4. `git add` 四檔 → `git commit -S -m "chore: bump version to X.Y.Z"` → `git tag vX.Y.Z` → 先 `git push origin main`、**確認推送成功後**再 `git push origin vX.Y.Z`（分開推送，避免 branch+tags 一起推時 tag 事件遺失）。注意：緊接著推 tag **不會**等 main CI 跑完（CI 與 Release 是兩支獨立 workflow、幾乎同時開跑、互不相依）；若要 CI 綠燈才發 release，須先 `gh run watch` 等 main CI 完成再推 tag。
 
 ### release.sh 可能擋下來的情況
 
 | 訊息 | 原因 | 處理方式 |
 |------|------|---------|
 | `CHANGELOG.md 缺少 vX.Y.Z 的紀錄` | 步驟 ③ 沒寫進去 | 回到步驟 ③ |
-| `有未 commit 的變更` | 之前有殘留 | 提示使用者「skill 改的檔案還沒 commit，跑 release 之前要先 commit」並協助 git add + git commit |
+| `有未 commit 的變更` | release-prep 尚未 commit，或混有其他變更 | release-prep 自動 commit；若是既有／不相關變更則 fail closed |
 | `tag vX.Y.Z 已存在` | 版本號用過了 | 提示使用者要不同版本號 |
 | `目前不在 git branch 上` | detached HEAD | 提示 `git switch main` |
 
-注意：**skill 完成步驟 ④ 的 Edit 後，這些變更需要先 commit 才能跑 release.sh**。skill 在步驟 ⑥ 應該主動建議「我已經改了 CHANGELOG.md / 5 個 i18n .json / MainApp.vue 共 7 個檔，要不要我 commit 起來？」，使用者同意後再 commit、再進步驟 ⑦。
+注意：**skill 完成步驟 ④ 的 Edit 後，這些變更需要先 commit 才能執行發版腳本**。直接完成 release-prep commit，不再詢問。
 
 ### Commit message 範例
 
@@ -319,18 +331,13 @@ push tag 後 release workflow 才剛開始，要確認「真的觸發、建置�
 
 ## 共通注意事項
 
-### 不要動 Cargo.lock（Windows 手動 bump 除外）
+### 不要手動修改 Cargo.lock
 
-Cargo.lock 是 release.sh 自動處理的（release.sh 用 python 直接**字串取代** `sayit` 的版本行，**不是**跑 cargo build）。一般情況 skill 不要手動編輯 Cargo.lock，那是 hard-block 的保護檔案。
-
-**唯一例外**：Windows 無法跑 release.sh 時（見步驟 ⑦），可**只**改 `sayit` 自己的 `version` 那一行——這正是 release.sh 對 Cargo.lock 做的同一件事（字串取代版本行，差別只在 checkout 是 CRLF），不算改相依。改完務必 `cargo metadata --locked` 驗證一致。
+`Cargo.lock` 由平台對應發版腳本自動處理：Windows 的 `release.ps1` 使用 CRLF-safe 精準取代，macOS/Linux 的 `release.sh` 使用 Python 精準取代。Agent 不得在腳本外手動修改；Windows 路徑另以 `cargo metadata --locked` 驗證 lockfile 一致。
 
 ### 分支歸屬
 
-主要發版從 `main` 出。如果使用者在 feature branch 上跑這個 skill，先確認意圖：
-
-- 「PR 已 merge 進 main、我剛切回 main」→ OK
-- 「我在 feature branch 上想直接發」→ 提示「release.sh 不擋這個但通常不是你想要的，CI/CD release.yml 也只認 tag 不認 branch」，讓使用者自己決定
+發版只允許從 `main` 執行。若目前是 feature branch、detached HEAD，或 `origin/main` 尚未包含要發的變更，立即 fail closed；不得詢問是否直接從 feature branch 發版。
 
 ### 日期一致性
 
@@ -339,7 +346,3 @@ CHANGELOG 標題的日期應該等於今天日期，不是亮點被開發的日�
 ### 跨檔案修改後的交叉驗證
 
 修改完 7 個檔案（CHANGELOG + 5 個 .json + MainApp.vue），用步驟 ⑤ 的 sanity check 命令交叉驗證一次。同時修改多個相關文件時必須交叉驗證，這一步是硬性的。
-
-### 語音通知
-
-每次觸發此 skill 都遵守語音通知慣例：開始時 say、執行中 say、完成前 say。內容反映當前任務（「我來起草 CHANGELOG」「翻譯 4 語完成」「等你決定要不要跑 release.sh」），20 字以內。
