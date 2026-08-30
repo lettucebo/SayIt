@@ -479,6 +479,7 @@ describe("useHistoryStore", () => {
         geminiTranscriptionTotalTokens: 0,
         llmRequestCount: 0,
         llmTotalTokens: 0,
+        llmUsageByModel: {},
         vocabularyAnalysisRequestCount: 0,
         vocabularyAnalysisTotalTokens: 0,
       });
@@ -520,6 +521,7 @@ describe("useHistoryStore", () => {
       mockDbSelect.mockResolvedValueOnce([
         {
           api_type: "whisper",
+          model: "whisper-large-v3",
           provider_bucket: "whisper",
           request_count: 5,
           total_tokens: 0,
@@ -527,6 +529,7 @@ describe("useHistoryStore", () => {
         },
         {
           api_type: "whisper",
+          model: "gemini-3.5-flash-lite",
           provider_bucket: "gemini",
           request_count: 2,
           total_tokens: 3840,
@@ -534,6 +537,7 @@ describe("useHistoryStore", () => {
         },
         {
           api_type: "whisper",
+          model: "mai-transcribe-1.5",
           provider_bucket: "mai",
           request_count: 4,
           total_tokens: 0,
@@ -541,6 +545,7 @@ describe("useHistoryStore", () => {
         },
         {
           api_type: "chat",
+          model: "qwen/qwen3.6-27b",
           provider_bucket: "whisper",
           request_count: 3,
           total_tokens: 1500,
@@ -571,9 +576,74 @@ describe("useHistoryStore", () => {
         geminiTranscriptionTotalTokens: 3840,
         llmRequestCount: 3,
         llmTotalTokens: 1500,
+        llmUsageByModel: {
+          "qwen/qwen3.6-27b": {
+            requestCount: 3,
+            totalTokens: 1500,
+          },
+        },
         vocabularyAnalysisRequestCount: 0,
         vocabularyAnalysisTotalTokens: 0,
       });
+    });
+
+    it("[P0] LLM 用量應依模型分桶，同時保留跨模型總量", async () => {
+      mockDbSelect.mockResolvedValueOnce([
+        {
+          total_count: 0,
+          total_characters: 0,
+          total_recording_duration_ms: 0,
+        },
+      ]);
+      mockDbSelect.mockResolvedValueOnce([
+        {
+          api_type: "chat",
+          model: "qwen/qwen3.6-27b",
+          provider_bucket: "whisper",
+          request_count: 4,
+          total_tokens: 120_000,
+          billed_audio_ms: 40_000,
+        },
+        {
+          api_type: "chat",
+          model: "qwen/qwen3.8-27b",
+          provider_bucket: "whisper",
+          request_count: 2,
+          total_tokens: 80_000,
+          billed_audio_ms: 20_000,
+        },
+        {
+          api_type: "vocabulary_analysis",
+          model: "qwen/qwen3.8-27b",
+          provider_bucket: "whisper",
+          request_count: 1,
+          total_tokens: 5_000,
+          billed_audio_ms: 10_000,
+        },
+      ]);
+      mockDbSelect.mockResolvedValueOnce([]);
+
+      const { useHistoryStore } = await import(
+        "../../src/stores/useHistoryStore"
+      );
+      const stats = await useHistoryStore().fetchDashboardStats();
+
+      expect(stats.dailyQuotaUsage.llmRequestCount).toBe(6);
+      expect(stats.dailyQuotaUsage.llmTotalTokens).toBe(200_000);
+      expect(stats.dailyQuotaUsage.llmUsageByModel).toEqual({
+        "qwen/qwen3.6-27b": {
+          requestCount: 4,
+          totalTokens: 120_000,
+        },
+        "qwen/qwen3.8-27b": {
+          requestCount: 3,
+          totalTokens: 85_000,
+        },
+      });
+      expect(stats.dailyQuotaUsage.vocabularyAnalysisRequestCount).toBe(1);
+      expect(stats.dailyQuotaUsage.vocabularyAnalysisTotalTokens).toBe(5_000);
+      const quotaSql = mockDbSelect.mock.calls[1][0] as string;
+      expect(quotaSql).toContain("GROUP BY api_type, provider_bucket, model");
     });
   });
 
@@ -595,6 +665,7 @@ describe("useHistoryStore", () => {
       mockDbSelect.mockResolvedValueOnce([
         {
           api_type: "whisper",
+          model: "whisper-large-v3",
           provider_bucket: "whisper",
           request_count: 2,
           total_tokens: 0,
@@ -660,6 +731,7 @@ describe("useHistoryStore", () => {
         geminiTranscriptionTotalTokens: 0,
         llmRequestCount: 0,
         llmTotalTokens: 0,
+        llmUsageByModel: {},
         vocabularyAnalysisRequestCount: 0,
         vocabularyAnalysisTotalTokens: 0,
       });

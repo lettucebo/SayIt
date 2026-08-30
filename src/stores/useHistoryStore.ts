@@ -148,6 +148,7 @@ const INSERT_API_USAGE_SQL = `
 const DAILY_QUOTA_USAGE_SQL = `
   SELECT
     api_type,
+    model,
     CASE
       WHEN model LIKE 'gemini-%' THEN 'gemini'
       WHEN model LIKE 'mai-%' THEN 'mai'
@@ -158,7 +159,7 @@ const DAILY_QUOTA_USAGE_SQL = `
     COALESCE(SUM(MAX(COALESCE(audio_duration_ms, 0), 10000)), 0) as billed_audio_ms
   FROM api_usage
   WHERE created_at >= $1 AND created_at < $2
-  GROUP BY api_type, provider_bucket
+  GROUP BY api_type, provider_bucket, model
 `;
 
 const DAILY_USAGE_TREND_SQL = `
@@ -223,6 +224,7 @@ interface DashboardStatsRow {
 
 interface DailyQuotaUsageRow {
   api_type: string;
+  model: string;
   provider_bucket: "gemini" | "mai" | "whisper";
   request_count: number;
   total_tokens: number;
@@ -369,26 +371,29 @@ export const useHistoryStore = defineStore("history", () => {
     }
   }
 
-  const EMPTY_QUOTA_USAGE: DailyQuotaUsage = {
-    whisperRequestCount: 0,
-    whisperBilledAudioMs: 0,
-    maiRequestCount: 0,
-    maiBilledAudioMs: 0,
-    geminiTranscriptionRequestCount: 0,
-    geminiTranscriptionTotalTokens: 0,
-    llmRequestCount: 0,
-    llmTotalTokens: 0,
-    vocabularyAnalysisRequestCount: 0,
-    vocabularyAnalysisTotalTokens: 0,
-  };
+  function createEmptyQuotaUsage(): DailyQuotaUsage {
+    return {
+      whisperRequestCount: 0,
+      whisperBilledAudioMs: 0,
+      maiRequestCount: 0,
+      maiBilledAudioMs: 0,
+      geminiTranscriptionRequestCount: 0,
+      geminiTranscriptionTotalTokens: 0,
+      llmRequestCount: 0,
+      llmTotalTokens: 0,
+      llmUsageByModel: {},
+      vocabularyAnalysisRequestCount: 0,
+      vocabularyAnalysisTotalTokens: 0,
+    };
+  }
 
   const dashboardStats = ref<DashboardStats>({
     totalTranscriptions: 0,
     totalCharacters: 0,
     totalRecordingDurationMs: 0,
     estimatedTimeSavedMs: 0,
-    dailyQuotaUsage: { ...EMPTY_QUOTA_USAGE },
-    monthlyQuotaUsage: { ...EMPTY_QUOTA_USAGE },
+    dailyQuotaUsage: createEmptyQuotaUsage(),
+    monthlyQuotaUsage: createEmptyQuotaUsage(),
   });
   const dailyUsageTrendList = ref<DailyUsageTrend[]>([]);
 
@@ -448,17 +453,17 @@ export const useHistoryStore = defineStore("history", () => {
       endUtc,
     ]);
 
-    const result: DailyQuotaUsage = {
-      whisperRequestCount: 0,
-      whisperBilledAudioMs: 0,
-      maiRequestCount: 0,
-      maiBilledAudioMs: 0,
-      geminiTranscriptionRequestCount: 0,
-      geminiTranscriptionTotalTokens: 0,
-      llmRequestCount: 0,
-      llmTotalTokens: 0,
-      vocabularyAnalysisRequestCount: 0,
-      vocabularyAnalysisTotalTokens: 0,
+    const result = createEmptyQuotaUsage();
+
+    const addLlmModelUsage = (row: DailyQuotaUsageRow) => {
+      const modelUsage = result.llmUsageByModel[row.model] ?? {
+        requestCount: 0,
+        totalTokens: 0,
+      };
+      result.llmUsageByModel[row.model] = {
+        requestCount: modelUsage.requestCount + row.request_count,
+        totalTokens: modelUsage.totalTokens + row.total_tokens,
+      };
     };
 
     // 每個 api_type 依轉錄 provider 分桶；同一 bucket 仍可能有多筆，必須累加。
@@ -482,9 +487,11 @@ export const useHistoryStore = defineStore("history", () => {
       } else if (row.api_type === "chat") {
         result.llmRequestCount += row.request_count;
         result.llmTotalTokens += row.total_tokens;
+        addLlmModelUsage(row);
       } else if (row.api_type === "vocabulary_analysis") {
         result.vocabularyAnalysisRequestCount += row.request_count;
         result.vocabularyAnalysisTotalTokens += row.total_tokens;
+        addLlmModelUsage(row);
       }
     }
 

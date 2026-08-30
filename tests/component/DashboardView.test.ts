@@ -1,6 +1,7 @@
 import { mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import i18n from "../../src/i18n";
+import type { DailyQuotaUsage } from "../../src/types/transcription";
 import DashboardView from "../../src/views/DashboardView.vue";
 
 vi.mock("../../src/composables/useTauriEvents", () => ({
@@ -23,7 +24,7 @@ vi.mock("../../src/stores/useHistoryStore", () => ({
   useHistoryStore: () => historyState,
 }));
 
-function makeHistory(usage: Record<string, number> = {}) {
+function makeHistory(usage: Partial<DailyQuotaUsage> = {}) {
   const quotaUsage = {
     whisperRequestCount: 0,
     whisperBilledAudioMs: 0,
@@ -33,6 +34,7 @@ function makeHistory(usage: Record<string, number> = {}) {
     geminiTranscriptionTotalTokens: 0,
     llmRequestCount: 0,
     llmTotalTokens: 0,
+    llmUsageByModel: {},
     vocabularyAnalysisRequestCount: 0,
     vocabularyAnalysisTotalTokens: 0,
     ...usage,
@@ -44,7 +46,10 @@ function makeHistory(usage: Record<string, number> = {}) {
       estimatedTimeSavedMs: 0,
       totalTranscriptions: 0,
       dailyQuotaUsage: quotaUsage,
-      monthlyQuotaUsage: { ...quotaUsage },
+      monthlyQuotaUsage: {
+        ...quotaUsage,
+        llmUsageByModel: { ...quotaUsage.llmUsageByModel },
+      },
     },
     dailyUsageTrendList: [],
     usageTrendDays: 14,
@@ -258,6 +263,31 @@ describe("DashboardView 額度卡片", () => {
 
     expect(text).toContain("50%");
     expect(text).toMatch(/Whisper 1,?000\/2,?000 次/);
+  });
+
+  it("[P0] Groq LLM 額度只計入目前選定模型的用量", () => {
+    settingsState = makeSettings({
+      selectedLlmModelId: "qwen/qwen3.8-27b",
+    });
+    historyState = makeHistory({
+      llmRequestCount: 13,
+      llmTotalTokens: 1_900_000,
+      llmUsageByModel: {
+        "qwen/qwen3.6-27b": {
+          requestCount: 10,
+          totalTokens: 1_800_000,
+        },
+        "qwen/qwen3.8-27b": {
+          requestCount: 3,
+          totalTokens: 100_000,
+        },
+      },
+    });
+    const text = mountDashboard(true).text();
+
+    expect(text).toMatch(/LLM 3\/1,?000 次/);
+    expect(text).toMatch(/LLM 100,?000\/2,?000,?000 tokens/);
+    expect(text).not.toMatch(/LLM 13\/1,?000 次/);
   });
 
   it("[P0] 混用 tooltip 仍保留付費用量與無額度提示", () => {

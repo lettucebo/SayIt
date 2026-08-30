@@ -79,16 +79,19 @@ describe("llmProvider.ts", () => {
       expect(body.temperature).toBe(0.1);
     });
 
-    it("[P0] Groq qwen：關閉思考（reasoning_effort:none）但仍送 temperature", () => {
-      const { init } = buildFetchParams(
-        "groq",
-        { ...BASE_REQUEST, model: "qwen/qwen3.6-27b" },
-        TEST_API_KEY,
-      );
-      const body = JSON.parse(init.body as string);
-      expect(body.reasoning_effort).toBe("none");
-      expect(body.temperature).toBe(0.1);
-    });
+    it.each(["qwen/qwen3.6-27b", "qwen/qwen3.8-27b"])(
+      "[P0] Groq qwen %s：關閉思考（reasoning_effort:none）但仍送 temperature",
+      (model) => {
+        const { init } = buildFetchParams(
+          "groq",
+          { ...BASE_REQUEST, model },
+          TEST_API_KEY,
+        );
+        const body = JSON.parse(init.body as string);
+        expect(body.reasoning_effort).toBe("none");
+        expect(body.temperature).toBe(0.1);
+      },
+    );
 
     it("[P1] Groq 非推理模型：不加 reasoning 欄位、照常送 temperature", () => {
       const { init } = buildFetchParams("groq", BASE_REQUEST, TEST_API_KEY);
