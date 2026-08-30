@@ -359,6 +359,18 @@ describe("modelRegistry — 模型遷移", () => {
       expect(config).toBeDefined();
       expect(config?.providerId).toBe("gemini");
     });
+
+    it("[P0] qwen3.8-27b 使用官方免費額度與價格", () => {
+      const config = findLlmModelConfig("qwen/qwen3.8-27b");
+      expect(config).toMatchObject({
+        providerId: "groq",
+        inputCostPerMillion: 0.8,
+        outputCostPerMillion: 4,
+        freeQuotaRpd: 1_000,
+        freeQuotaTpd: 2_000_000,
+        isDefault: false,
+      });
+    });
   });
 
   describe("getEffectiveLlmModelId", () => {

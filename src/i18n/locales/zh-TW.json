@@ -100,9 +100,10 @@
         "flash": "最新旗艦、多模態理解最強，但免費額度極少（約 20 次/日、5 次/分），適合少量但要求最準的場合"
       },
       "llmDescription": {
-        "qwen": "速度與品質均衡的預設選擇；Groq preview 模型，可能無預警下架",
-        "oss120b": "開源大模型，輸出較穩定；比 20B 慢但品質更好",
-        "oss20b": "最快、最省，適合短句與簡單整理",
+        "qwen36": "速度與品質均衡的預設選擇；免費層每日 1,000 次、20 萬 tokens。Groq preview 模型，可能無預警下架",
+        "qwen38": "免費層每日 1,000 次、200 萬 tokens（token 額度是其他 Groq 模型的 10 倍）；速度稍慢。Groq preview 模型，可能無預警下架",
+        "oss120b": "開源大模型，輸出較穩定；比 20B 慢但品質更好。免費層每日 1,000 次、20 萬 tokens",
+        "oss20b": "最快、最省，適合短句與簡單整理。免費層每日 1,000 次、20 萬 tokens",
         "gemini36Flash": "最新旗艦 Flash，複雜語句理解最強；免費層約 20 次/日",
         "gemini35Flash": "上一代旗艦 Flash，品質高；免費層約 20 次/日",
         "gemini35FlashLite": "官方稱最具成本效益的正式版；免費層約 500 次/日（額度最高），適合高頻使用",
@@ -131,6 +132,7 @@
     "modelBadge": {
       "accurate": "準確度優先",
       "highQuota": "免費額度最高",
+      "highTokenQuota": "Token 額度最高",
       "balanced": "平衡 · 預設",
       "stableProduction": "穩定 · 正式版",
       "fastCheap": "最快 · 最便宜",

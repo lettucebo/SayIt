@@ -35,6 +35,11 @@ export interface DailyQuotaUsage {
   geminiTranscriptionTotalTokens: number;
   llmRequestCount: number;
   llmTotalTokens: number;
+  /** Groq 等服務的免費額度按模型獨立計算，額度條不得混入其他模型用量。 */
+  llmUsageByModel: Record<
+    string,
+    { requestCount: number; totalTokens: number }
+  >;
   vocabularyAnalysisRequestCount: number;
   vocabularyAnalysisTotalTokens: number;
 }

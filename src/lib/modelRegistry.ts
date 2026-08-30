@@ -294,6 +294,7 @@ export function resolveAzureFamilyFromDeployment(
 
 export type LlmModelId =
   | "qwen/qwen3.6-27b"
+  | "qwen/qwen3.8-27b"
   | "openai/gpt-oss-120b"
   | "openai/gpt-oss-20b"
   | "gpt-5.6-luna"
@@ -571,13 +572,26 @@ export const LLM_MODEL_LIST: LlmModelConfig[] = [
     providerId: "groq",
     displayName: "Qwen3.6 27B (Preview)",
     badgeKey: "settings.modelBadge.balanced",
-    descriptionKey: "settings.model.llmDescription.qwen",
+    descriptionKey: "settings.model.llmDescription.qwen36",
     speedTps: 500,
     inputCostPerMillion: 0.6,
     outputCostPerMillion: 3.0,
     freeQuotaRpd: 1_000,
     freeQuotaTpd: 200_000,
     isDefault: true,
+  },
+  {
+    id: "qwen/qwen3.8-27b",
+    providerId: "groq",
+    displayName: "Qwen3.8 27B (Preview)",
+    badgeKey: "settings.modelBadge.highTokenQuota",
+    descriptionKey: "settings.model.llmDescription.qwen38",
+    speedTps: 450,
+    inputCostPerMillion: 0.8,
+    outputCostPerMillion: 4.0,
+    freeQuotaRpd: 1_000,
+    freeQuotaTpd: 2_000_000,
+    isDefault: false,
   },
   {
     id: "openai/gpt-oss-120b",

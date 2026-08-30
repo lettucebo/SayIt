@@ -2,6 +2,16 @@
 
 SayIt 版本更新紀錄。
 
+## [Unreleased]
+
+### Added
+
+- Groq 文字整理模型新增 Qwen3.8 27B Preview；免費層每日可用 1,000 次、200 萬 tokens，token 額度是其他 Groq 模型的 10 倍。Qwen3.6 27B 仍維持預設，優先兼顧整理速度與成本。
+
+### Fixed
+
+- 儀表板的 Groq LLM 免費額度改為依模型分開統計，同模型的自訂字典分析也會計入。切換模型後不會再把其他 Groq、Gemini、OpenAI、Anthropic 或 Azure 模型的用量套到目前模型的額度上。
+
 ## [1.0.3] - 2026-08-27
 
 ### Improved
