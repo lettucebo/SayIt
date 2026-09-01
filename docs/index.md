@@ -77,7 +77,7 @@
 ### 3.4 元件與開發
 
 - [Component Inventory — Frontend](./component-inventory-frontend.md) — 11 自製元件 + 21 shadcn-vue 元件
-- [Development Guide](./development-guide.md) — 環境、指令、常見任務、Hooks、Pitfalls
+- [Development Guide](./development-guide.md) — 環境、指令、常見任務、Hooks（`.github/hooks/`）、Pitfalls
 - [Azure Entra 使用者登入](./azure-entra-user-sign-in.md) — App Registration 設定、RBAC、疑難排解
 - [Deployment Guide](./deployment-guide.md) — CI/CD、Apple Notarize、發版流程、回滾
 
@@ -98,6 +98,9 @@
 - [`design.pen`](../design.pen) — Pencil MCP 設計稿（UI 實作前必讀）
 
 ### 4.2 規劃 / 故事文件（`_bmad-output/`）
+
+> BMAD runtime（`_bmad/`、`.agents/`、`.claude/`）已於 2026-08 移除；`_bmad-output/` 原地保留，
+> 哪些內容仍具權威性、哪些純為歷史紀錄，見 [`_bmad-output/README.md`](../_bmad-output/README.md)。
 
 - `planning-artifacts/prd.md` — 產品需求文件
 - `planning-artifacts/epics.md` — Epic 拆分
@@ -149,7 +152,7 @@
 8. **❌ 直接 import Tauri event API** → ✅ 透過 `composables/useTauriEvents.ts`
 9. **❌ 未經 Pencil 設計直接寫 UI** → ✅ 先在 `design.pen` 完成設計
 10. **❌ 改舊 SQL migration**（v1～v8） → ✅ 追加 v9 等新版本
-11. **❌ 改 `Cargo.lock` / `pnpm-lock.yaml`** → ✅ 受 `protect-config.sh` 阻擋
+11. **❌ 改 `Cargo.lock` / `pnpm-lock.yaml`** → ✅ 受 `protect-config` PreToolUse hook 阻擋
 
 ---
 
@@ -158,7 +161,6 @@
 | 問題                                                                | 建議                                              |
 | ------------------------------------------------------------------- | ------------------------------------------------- |
 | `tauri.conf.json` CSP `connect-src` 缺 OpenAI / Anthropic           | 加入 `https://api.openai.com` + `https://api.anthropic.com` |
-| CI 沒跑 `cargo test`、`cargo clippy`、`eslint`                       | 加進 `ci.yml`                                     |
 | `addApiUsage` FK 失敗（787）偶發                                     | 調查 `transcriptions` 與 `api_usage` 寫入 race    |
 | autoUpdater 用 `window.confirm` 在 Tauri WKWebView 靜默忽略           | 改 in-app UI                                      |
 | `text_field_reader::read_selected_text` Fn-c 字元穿透（issue #25）   | 待修                                              |
@@ -207,9 +209,11 @@ pnpm tauri dev
 
 ## 十、Documentation Workflow Metadata
 
+> 本節是**歷史紀錄**：這批文件的初版由 BMAD Document Project 工作流產生，該 runtime（`_bmad/`、`.agents/`、`.claude/`）已於 2026-08 從 repo 移除。後續維護由人工／Copilot 進行，欄位保留供追溯，不代表現在還能重跑。
+
 | 欄位             | 值                                              |
 | ---------------- | ----------------------------------------------- |
-| 工作流           | `bmad-document-project`（v1.2.0）               |
+| 工作流（歷史）   | `bmad-document-project`（v1.2.0，runtime 已移除） |
 | 模式             | `initial_scan`                                  |
 | Scan level       | `exhaustive`                                    |
 | 開始時間         | 2026-05-08 14:14:11 +08:00                      |

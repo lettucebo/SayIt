@@ -10,7 +10,7 @@ applyTo: "src-tauri/**/*.rs"
 
 - 每個 `#[command]` 寫在 `src/plugins/<module>.rs`，**必須**在 `src/lib.rs` 的 `generate_handler!` 註冊——**漏註冊 → 前端 `invoke()` 會 timeout**。
 - 功能切在 `src/plugins/*.rs`：`hotkey_listener`、`clipboard_paste`、`audio_recorder`、`transcription`、`keyboard_monitor`、`audio_control`、`text_field_reader`、`sound_feedback`、`azure_auth`、`logging`、`file_transfer`。
-- 變更 IPC（Command/Event）後用 **`ipc-review` / `tauri-reviewer` subagent** 審查 Rust↔Vue 對齊（Command 註冊、Event 名稱、Payload 型別）。
+- 變更 IPC（Command/Event）後用 **`ipc-review` skill** 或 **`tauri-reviewer` custom agent** 審查 Rust↔Vue 對齊（Command 註冊、Event 名稱、Payload 型別）。
 
 ## 錯誤處理
 

@@ -68,10 +68,10 @@ pnpm dev
 ### 3.3 型別檢查
 
 ```bash
-npx vue-tsc --noEmit          # 一次性
+pnpm exec vue-tsc --noEmit    # 一次性
 ```
 
-> hook 設定：`.claude/settings.json` 的 `typecheck.sh` 會在每次編輯 `.ts` / `.vue` 後自動跑（**非阻斷**，僅報告）。
+> 型別檢查**不會**自動執行。要在編輯後手動觸發可用 `scripts/hooks/typecheck.sh <file>`（選用 handler，未註冊為自動 hook）。
 
 ### 3.4 測試
 
@@ -93,11 +93,11 @@ cargo test find_monitor       # 跑特定函式測試
 ### 3.5 Lint / Format
 
 ```bash
-pnpm exec eslint src --fix    # ESLint（hook 自動跑於編輯後，跳過 components/ui/）
-cd src-tauri && cargo fmt     # rustfmt（hook 自動跑）
+pnpm exec eslint src                                   # ESLint（CI 用的範圍；--fix 才會改檔）
+cargo fmt --manifest-path src-tauri/Cargo.toml         # rustfmt
 ```
 
-> 目前 Rust 沒設 `cargo clippy` 在 CI / hook，建議手動 `cargo clippy --workspace -- -D warnings`。
+> Lint / format **不會**自動執行。`cargo clippy` 已在 CI 的 macOS + Windows job 執行（`--workspace --all-targets -- -D warnings`），本機可用相同命令先跑一次。
 
 ### 3.6 Build（不打 binary）
 
@@ -137,7 +137,7 @@ pnpm tauri build --debug      # debug 模式（保留 symbols，產出較大但�
 3. （若有 event）模組頂部加 pub const NAME = "..."
 4. src/types/events.ts                ── 加 *Payload 介面
 5. src/composables/useTauriEvents.ts  ── 加 event 常數
-6. 用 tauri-reviewer subagent 審查
+6. 用 ipc-review skill / tauri-reviewer agent 審查
 ```
 
 ### 4.3 加一個 SQLite 欄位
@@ -220,16 +220,32 @@ sqlite3 %APPDATA%\com.sayit.app\app.db
 
 ---
 
-## 六、Hooks（自動化）
+## 六、Copilot Hook 與選用檢查腳本
 
-`.claude/settings.json` 設定四個 PostToolUse / PreToolUse hooks（觸發 Edit/Write 工具）：
+`.github/hooks/protect-config.json` 是本 repo 唯一的 Copilot 原生 hook 設定（`version: 1`），只註冊一個 `PreToolUse` hook（matcher `Edit|Write`）：
 
-| Hook                    | 行為                                                                       |
-| ----------------------- | -------------------------------------------------------------------------- |
-| `protect-config.sh`     | 🔴 阻擋 `Cargo.lock` / `pnpm-lock.yaml` 修改；🟡 警告 `tauri.conf.json` / `Cargo.toml` |
-| `typecheck.sh`          | `.ts` / `.vue` 編輯後跑 `vue-tsc --noEmit`（非阻斷）                       |
-| `rustfmt.sh`            | `.rs` 編輯後跑 `rustfmt`                                                   |
-| `eslint.sh`             | `.ts` / `.vue` 編輯後 `eslint --fix`（跳過 `components/ui/`）              |
+| Hook | 行為 |
+| ---- | ---- |
+| `scripts/hooks/protect-config.sh`（Bash）<br>`scripts/hooks/protect-config.ps1`（PowerShell） | 🔴 直接修改 `Cargo.lock` / `pnpm-lock.yaml` / `package-lock.json` / `yarn.lock` → 回 `permissionDecision: deny` 並附理由；🟡 `tauri.conf.json` / `Cargo.toml` 送出提醒但放行；其他檔案不輸出、走預設權限流程 |
+
+判定細節：兩支 handler 都同時支援 PascalCase（`tool_input`）與 camelCase（`toolArgs`）payload、物件型 `path` / `file_path`，以及 freeform `apply_patch`／unified diff。判定順序為：
+
+1. 蒐集候選路徑 =「明確 path 欄位」∪「patch / diff header 路徑」（含 rename 目的地 `*** Move to:` 與 Windows 絕對路徑）。掃 patch header 前會先清空 `old_str` / `new_str` / `file_text` 等**內容欄位**，所以文件裡的 ```` ```diff ```` 範例不會被誤判成真的要改 lockfile。
+2. 任一候選的 basename 是 lockfile → deny（`docs/my-pnpm-lock.yaml.md` 這種不同檔名不會誤判）。
+3. `tauri.conf.json` / `Cargo.toml` → 送出提醒後放行。
+4. **候選為空、payload 為空、stdin 讀取失敗，或候選路徑含無法還原的 `\uXXXX` 跳脫 → fail-closed（deny + exit 2）**。
+
+兩支 handler 對同一組合成 payload 的判定必須完全一致（已用 25 組 payload 交叉驗證）。
+
+`scripts/hooks/` 另有三支**選用、預設不啟用**的檢查 handler：
+
+| Handler | 行為 |
+| ------- | ---- |
+| `typecheck.sh` | `pnpm exec vue-tsc --noEmit`（全專案檢查） |
+| `eslint.sh` | `pnpm exec eslint <file>`（**不帶 `--fix`**，不改工作樹） |
+| `rustfmt.sh` | `rustfmt --check --edition 2021 <file>`（只回報差異） |
+
+三支都接受「檔案路徑當第一個參數」或「hook JSON 從 stdin」兩種輸入，並保留底層工具的原始 exit code。`typecheck.sh` / `eslint.sh` 會先找 `pnpm`，找不到時改用 `corepack pnpm`；必要工具、repository root 或目標檔案不存在時會明確回傳非零，不會把「未執行」誤報為通過。刻意**不**註冊為自動 PostToolUse hook：每次編輯都跑全專案型別檢查太昂貴，而自動 `--fix` / 格式化會在使用者不知情下改動工作樹。
 
 ---
 
@@ -274,22 +290,28 @@ sqlite3 %APPDATA%\com.sayit.app\app.db
 ## 八、Pre-commit Checklist
 
 ```
-□ pnpm test                  全部單元測試通過
-□ npx vue-tsc --noEmit       無型別錯誤
-□ cargo check (src-tauri)    Rust 編譯通過
-□ pnpm exec eslint src       ESLint 無錯（hook 已自動跑）
-□ 若改 IPC：用 tauri-reviewer subagent 雙端對齊審查
+□ pnpm test                                    全部單元測試通過
+□ pnpm exec vue-tsc --noEmit                   無型別錯誤
+□ pnpm exec eslint src                         ESLint 無錯
+□ cargo fmt --manifest-path src-tauri/Cargo.toml --check
+□ cargo clippy --manifest-path src-tauri/Cargo.toml --workspace --all-targets -- -D warnings
+□ cargo test --manifest-path src-tauri/Cargo.toml --workspace
+□ 若改 IPC：用 ipc-review skill / tauri-reviewer agent 雙端對齊審查
 □ 若改 UI：先在 design.pen 完成設計稿
 □ 若改 SQL schema：寫 v(N+1) migration 不改舊 migration
 ```
 
+> 也可以直接用 `verify` skill，它就是上面這組權威命令的清單。
+
 ---
 
-## 九、Subagents（Claude Code）
+## 九、Copilot Custom Agents
 
-| Subagent           | 用途                                                            |
-| ------------------ | --------------------------------------------------------------- |
-| `tauri-reviewer`   | 審查 Rust↔Vue IPC 一致性（Command 註冊、Event 名稱、Payload 型別） |
+| Agent | 位置 | 用途 |
+| ----- | ---- | ---- |
+| `tauri-reviewer` | `.github/agents/tauri-reviewer.agent.md` | 唯讀審查 Rust↔Vue IPC 一致性（Command 註冊、Event 名稱、Payload 型別、錯誤處理） |
+
+同名功能也有 skill 版本：`.github/skills/ipc-review/`。兩者都只做唯讀審查，不修改程式碼。
 
 ---
 

@@ -1,7 +1,7 @@
 # Source Tree Analysis
 
-> 由 BMad Document Project 工作流自動產生
-> 掃描層級：**Exhaustive** · 掃描日期：2026-05-08（LOC 與模組清單已於 2026-07-29 校正）· 專案版本：0.14.0
+> 初版由 BMAD Document Project 工作流產生（該 runtime 已於 2026-08 從 repo 移除，之後由人工／Copilot 維護）
+> 掃描層級：**Exhaustive** · 掃描日期：2026-05-08（LOC 與模組清單已於 2026-07-29 校正；頂層結構與 hooks 於 2026-08-31 校正）· 專案版本：0.14.0
 
 本文件以「兩個 part」為視角註解 SayIt 的原始碼結構：
 
@@ -17,11 +17,11 @@ say-it/
 ├── src/                    # Frontend part — Vue 3 + TS（雙視窗）
 ├── src-tauri/              # Backend part — Tauri v2 Rust runtime
 ├── tests/                  # 跨端測試（unit / component / e2e）
-├── scripts/                # 發版腳本
-│   └── release.sh          #   版本同步 + commit + tag + push
+├── scripts/                # 發版腳本 + hook handlers
+│   ├── release.sh          #   版本同步 + commit + tag + push
+│   └── hooks/              #   protect-config（PreToolUse）+ 選用檢查 handler
 ├── assets/                 # 共用靜態資源
-├── _bmad/                  # BMad framework（不入版本記錄）
-├── _bmad-output/           # BMad 規劃 / 實作 / 測試產出物
+├── _bmad-output/           # 規劃 / 實作 / 測試產出物（BMAD runtime 已移除，見該資料夾 README.md）
 │   ├── project-context.md  #   AI Agent 必讀規則（323 條）
 │   ├── planning-artifacts/ #   PRD / Architecture / UX-UI Spec
 │   ├── implementation-artifacts/  # Story / Tech Spec
@@ -32,14 +32,16 @@ say-it/
 │   ├── release.yml         #   tag → 多平台建構 + Apple notarize
 │   ├── claude.yml          #   已停用（遷移至原生 Copilot；workflow_dispatch-only）
 │   └── claude-code-review.yml  #   已停用（遷移至原生 Copilot code review）
-├── .claude/                # Claude Code skills + hooks 設定
+├── .github/skills/         # Copilot skills（含專案自有 ipc-review / verify / sayit-release）
+├── .github/agents/         # Copilot custom agents（tauri-reviewer.agent.md）
+├── .github/hooks/          # Copilot 原生 hook 設定（protect-config.json）
 ├── design.pen              # Pencil MCP 設計稿（UI 實作前必讀）
 ├── .github/copilot-instructions.md  # AI Agent 唯一權威指南（IPC 契約表 / Hooks / 發版）
 ├── .github/instructions/   # 路徑範圍規則（frontend / rust / tests，依 applyTo glob 自動套用）
 ├── CHANGELOG.md
 ├── README.md
 ├── package.json            # pnpm@10.28.2 / type=module
-├── pnpm-lock.yaml          # 🔴 受 protect-config.sh hook 保護
+├── pnpm-lock.yaml          # 🔴 受 protect-config PreToolUse hook 保護
 ├── pnpm-workspace.yaml
 ├── vite.config.ts          # 多入口（HUD + Dashboard）
 ├── vitest.config.ts        # jsdom 環境
@@ -177,8 +179,8 @@ src/i18n/
 
 ```
 src-tauri/
-├── Cargo.toml                    # 🟡 受 protect-config.sh 警告
-├── Cargo.lock                    # 🔴 受 protect-config.sh 阻擋
+├── Cargo.toml                    # 🟡 受 protect-config 提醒
+├── Cargo.lock                    # 🔴 受 protect-config 阻擋
 ├── tauri.conf.json               # 🟡 視窗設定 / CSP / Bundle / Updater
 ├── Entitlements.plist            # macOS 權限（accessibility, audio-input）
 ├── Info.plist                    # macOS Bundle metadata
@@ -251,14 +253,13 @@ tests/
 
 ## 五、Hooks 與保護檔案
 
-`.claude/settings.json` 設定四個 PostToolUse / PreToolUse hooks：
+`.github/hooks/protect-config.json`（Copilot 原生 hook 設定，`version: 1`）註冊**唯一一個自動 hook**：
 
-| Hook                  | 觸發             | 行為                                                          |
-| --------------------- | ---------------- | ------------------------------------------------------------- |
-| `protect-config.sh`   | PreToolUse Edit  | 🔴 `Cargo.lock` / `pnpm-lock.yaml` 禁改；🟡 `tauri.conf.json` / `Cargo.toml` 警告 |
-| `typecheck.sh`        | PostToolUse Edit | `.ts/.vue` 改動後跑 `vue-tsc --noEmit`（非阻斷）              |
-| `rustfmt.sh`          | PostToolUse Edit | `.rs` 改動後跑 `rustfmt`                                      |
-| `eslint.sh`           | PostToolUse Edit | `.ts/.vue` 改動後 `eslint --fix`（跳過 `components/ui/`）     |
+| Hook | 事件 / matcher | 行為 |
+| ---- | -------------- | ---- |
+| `scripts/hooks/protect-config.{sh,ps1}` | `PreToolUse` / `Edit\|Write` | 🔴 `Cargo.lock` / `pnpm-lock.yaml` / `package-lock.json` / `yarn.lock` 直接修改（含 freeform patch 與 rename 目的地）→ `permissionDecision: deny`；🟡 `tauri.conf.json` / `Cargo.toml` 提醒但放行；其他檔案無輸出、走預設權限流程；解析不出目標檔案 → deny + exit 2 |
+
+`scripts/hooks/` 另有三支**選用、非自動執行**的檢查 handler（`typecheck.sh` / `eslint.sh` / `rustfmt.sh`）。它們不在任何 hook 設定內，可手動或自行接到 hook 設定；全部為非修改型檢查（`eslint` 不帶 `--fix`、`rustfmt --check`），並保留工具原始 exit code。
 
 ---
 
@@ -266,6 +267,6 @@ tests/
 
 1. **「錄音 → 轉錄 → 整理 → 貼上」流程的中樞** = `useVoiceFlowStore.ts`（~2.3k 行）— 修改錄音流程必先讀此檔。
 2. **「設定」全部入口** = `useSettingsStore.ts`（~2.4k 行）+ `SettingsView.vue`（~3.8k 行）— 新增任何設定欄位需同步兩處。
-3. **「IPC 契約」唯一定義處** = `lib.rs` 的 `invoke_handler!` macro + `useTauriEvents.ts` 常數 — 新增 Command / Event 必須兩端對齊（用 `tauri-reviewer` subagent 審查）。
+3. **「IPC 契約」唯一定義處** = `lib.rs` 的 `invoke_handler!` macro + `useTauriEvents.ts` 常數 — 新增 Command / Event 必須兩端對齊（用 `ipc-review` skill 或 `tauri-reviewer` agent 審查）。
 4. **「DB Schema」單一來源** = `src/lib/database.ts` 的 migration 鏈（目前最新 **v9**）— 加欄位請追加**下一個未使用的版本號**，不要直接改舊 migration。每段 migration 的守衛是 `if (currentVersion < N)`，重複使用既有版本號會讓已升級的使用者靜默跳過，導致新舊安裝的 schema 不一致。
 5. **「LLM Provider」抽象邊界** = `src/lib/llmProvider.ts` — 新增 provider 在此擴展即可，業務層（`enhancer.ts` / `vocabularyAnalyzer.ts`）不需改。

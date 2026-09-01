@@ -320,7 +320,7 @@ SayIt 採典型 **Tauri 雙向 IPC 模式**，沒有外部 message broker，所�
 │   └─ 1. 在 src-tauri/src/plugins/ 新增模組或擴充現有 plugin
 │      2. 在 lib.rs invoke_handler! 註冊
 │      3. 在 useTauriEvents.ts 新增 event 常數（若有事件）
-│      4. 用 tauri-reviewer subagent 審查兩端對齊
+│      4. 用 ipc-review skill / tauri-reviewer agent 審查兩端對齊
 │
 ├── 需要新 LLM Provider
 │   └─ 改 src/lib/llmProvider.ts 與 modelRegistry.ts → 不需動業務層
