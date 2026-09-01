@@ -195,6 +195,7 @@ src-tauri/
     └── plugins/
         ├── mod.rs                #  ~10 行 — 模組宣告
         ├── hotkey_listener.rs    # ~2.1k 行 — 全域熱鍵（CGEventTap / Win32 Hook）
+        ├── hud_window.rs         #  ~200 行 — HUD show/hide、click-through 與 Windows DWM 透明修復
         ├── transcription.rs      # ~1.8k 行 — 轉錄（Groq Whisper / Azure Whisper / Gemini generateContent，Rust 直呼）
         ├── audio_recorder.rs     # ~1.1k 行 — cpal 錄音 + WAV 寫檔 + 波形 FFT
         ├── text_field_reader.rs  #  ~950 行 — 讀取游標文字／選取狀態（macOS AXUIElement、Windows UI Automation）
@@ -212,6 +213,7 @@ src-tauri/
 | 模組                  | 平台特化                                          | 對外契約                                                      |
 | --------------------- | ------------------------------------------------- | ------------------------------------------------------------- |
 | `hotkey_listener`     | macOS：CGEventTap；Windows：SetWindowsHookEx      | 7 個 Command + 8 個 Event（pressed/released/toggled/error...） |
+| `hud_window`          | Windows：DWM / Win32 extended styles；其他平台：Tauri window API | 1 個 Command（`set_hud_visibility`）                         |
 | `audio_recorder`      | cpal 跨平台 + macOS Arc cycle workaround          | 10 個 Command + 2 個 Event（waveform / preview-level）        |
 | `keyboard_monitor`    | macOS：CGEventTap                                 | 2 個 Command + 2 個 Event（quality / correction）             |
 | `clipboard_paste`     | macOS：CGEvent；Windows：SendInput                | 3 個 Command                                                  |
@@ -223,14 +225,14 @@ src-tauri/
 | `azure_auth`          | 跨平台 reqwest                                    | 1 個 Command（`get_azure_entra_token`，不帶 browser `Origin`）|
 | `file_transfer`       | 跨平台                                            | 2 個 Command（備份匯出 / 匯入，過大回 `FILE_TOO_LARGE`）      |
 
-### 3.2 lib.rs 的關鍵函式
+### 3.2 Backend 關鍵函式
 
-| 函式                                | 用途                                                                                           |
-| ----------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `run()`                             | Tauri Builder 主入口（含 plugin 註冊、tray、setup、shutdown）                                  |
-| `configure_macos_notch_window()`    | macOS：用 `objc::msg_send` 設定 NSWindow level=27 + collectionBehavior（瀏海覆蓋層）           |
-| `configure_windows_topmost_window()`| Windows：HWND_TOPMOST + WS_EX_TOOLWINDOW + WS_EX_NOACTIVATE                                    |
-| `find_monitor_for_cursor()`         | 純函式，11 個單元測試（含 Retina + portrait + dual-DPI fallback）                              |
+| 函式                                              | 用途                                                                                           |
+| ------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `run()`                                           | Tauri Builder 主入口（含 plugin 註冊、tray、setup、shutdown）                                  |
+| `configure_macos_notch_window()`                  | macOS：用 `objc::msg_send` 設定 NSWindow level=27 + collectionBehavior（瀏海覆蓋層）           |
+| `hud_window::configure_windows_hud_window()`      | Windows：恢復 HWND_TOPMOST + WS_EX_TOOLWINDOW + WS_EX_NOACTIVATE，最後重套 DWM blur            |
+| `find_monitor_for_cursor()`                       | 純函式，11 個單元測試（含 Retina + portrait + dual-DPI fallback）                              |
 | `calculate_centered_window_x_logical()` | logical 座標置中（繞過 tao cross-DPI bug）                                                  |
 | `request_app_restart()` + `RunEvent::Exit` | 用 `_exit(0)` 截殺 Tauri 內建 restart 後自行 spawn — 確保 graceful shutdown 順序          |
 

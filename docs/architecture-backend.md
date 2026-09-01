@@ -233,14 +233,17 @@ NSWindow 屬性透過 objc::msg_send 設定：
 
 > 此設定模仿 BoringNotch 的瀏海覆蓋層級。
 
-### 6.2 Windows（`configure_windows_topmost_window`）
+### 6.2 Windows（`plugins/hud_window.rs`）
 
 ```
-GetWindowLongPtrW(GWL_EXSTYLE) → 加入：
+set_hud_visibility(show / click-through) 後：
+GetWindowLongPtrW(GWL_EXSTYLE) → 重新加入：
   WS_EX_TOOLWINDOW   ← 不出現 Alt+Tab / taskbar，跨虛擬桌面
   WS_EX_NOACTIVATE   ← 點擊不搶焦點
 SetWindowPos(HWND_TOPMOST, ...)
   SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED
+DwmEnableBlurBehindWindow(empty region)
+  ← 必須最後執行；tao 更新視窗樣式時會丟失既有 blur 狀態
 ```
 
 ---

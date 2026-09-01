@@ -10,6 +10,9 @@ const {
   mockInvoke,
   mockEnhanceText,
   mockGetCurrentWindow,
+  mockHudShow,
+  mockHudHide,
+  mockHudSetIgnoreCursorEvents,
   mockSetPosition,
   mockWebviewWindowGetByLabel,
   mockMainWindowShow,
@@ -39,6 +42,9 @@ const {
   const mockMainWindowShow = vi.fn().mockResolvedValue(undefined);
   const mockMainWindowSetFocus = vi.fn().mockResolvedValue(undefined);
   const mockSetPosition = vi.fn().mockResolvedValue(undefined);
+  const mockHudShow = vi.fn().mockResolvedValue(undefined);
+  const mockHudHide = vi.fn().mockResolvedValue(undefined);
+  const mockHudSetIgnoreCursorEvents = vi.fn().mockResolvedValue(undefined);
   const mockWebviewWindowGetByLabel = vi.fn(async (label: string) => {
     if (label !== "main-window") return null;
     return {
@@ -76,11 +82,14 @@ const {
       .fn()
       .mockResolvedValue({ text: "AI 整理後的書面語文字", usage: null }),
     mockGetCurrentWindow: vi.fn(() => ({
-      show: vi.fn().mockResolvedValue(undefined),
-      hide: vi.fn().mockResolvedValue(undefined),
-      setIgnoreCursorEvents: vi.fn().mockResolvedValue(undefined),
+      show: mockHudShow,
+      hide: mockHudHide,
+      setIgnoreCursorEvents: mockHudSetIgnoreCursorEvents,
       setPosition: mockSetPosition,
     })),
+    mockHudShow,
+    mockHudHide,
+    mockHudSetIgnoreCursorEvents,
     mockMainWindowShow,
     mockMainWindowSetFocus,
     mockSetPosition,
@@ -426,6 +435,9 @@ describe("useVoiceFlowStore", () => {
       .mockResolvedValue(undefined);
     mockAddApiUsage.mockClear().mockResolvedValue(undefined);
     mockGetCurrentWindow.mockClear();
+    mockHudShow.mockClear().mockResolvedValue(undefined);
+    mockHudHide.mockClear().mockResolvedValue(undefined);
+    mockHudSetIgnoreCursorEvents.mockClear().mockResolvedValue(undefined);
     mockSetPosition.mockClear();
     mockWebviewWindowGetByLabel.mockClear();
     mockMainWindowShow.mockClear().mockResolvedValue(undefined);
@@ -3141,6 +3153,135 @@ describe("useVoiceFlowStore", () => {
         });
       });
       expect(mockInvoke).not.toHaveBeenCalledWith("play_stop_sound");
+    });
+  });
+
+  describe("HUD 視窗生命週期（set_hud_visibility）", () => {
+    function hudVisibilityCallList() {
+      return mockInvoke.mock.calls.filter(
+        (call) => call[0] === "set_hud_visibility",
+      );
+    }
+
+    it("[P0] showHud 應只透過 set_hud_visibility command 顯示，且維持 click-through", async () => {
+      const store = useVoiceFlowStore();
+
+      store.transitionTo("recording", "voiceFlow.recording");
+
+      await vi.waitFor(() => {
+        expect(mockInvoke).toHaveBeenCalledWith("set_hud_visibility", {
+          visible: true,
+          clickThrough: true,
+        });
+      });
+    });
+
+    it("[P0] showHud 不得再直接呼叫視窗 show / setIgnoreCursorEvents 或舊 ensure_hud_visible", async () => {
+      const store = useVoiceFlowStore();
+
+      store.transitionTo("recording", "voiceFlow.recording");
+
+      await vi.waitFor(() => {
+        expect(hudVisibilityCallList().length).toBeGreaterThan(0);
+      });
+
+      expect(mockHudShow).not.toHaveBeenCalled();
+      expect(mockHudSetIgnoreCursorEvents).not.toHaveBeenCalled();
+      expect(mockInvoke).not.toHaveBeenCalledWith(
+        "ensure_hud_visible",
+        expect.anything(),
+      );
+      expect(
+        mockInvoke.mock.calls.some((call) => call[0] === "ensure_hud_visible"),
+      ).toBe(false);
+    });
+
+    it("[P0] error 狀態應以 clickThrough=false 顯示，retry 才可點擊", async () => {
+      const store = useVoiceFlowStore();
+
+      store.transitionTo("error", "voiceFlow.error");
+
+      await vi.waitFor(() => {
+        expect(mockInvoke).toHaveBeenCalledWith("set_hud_visibility", {
+          visible: true,
+          clickThrough: false,
+        });
+      });
+      expect(mockHudSetIgnoreCursorEvents).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["transcribing", "voiceFlow.transcribing"],
+      ["enhancing", "voiceFlow.enhancing"],
+      ["editing", "voiceFlow.editing"],
+      ["success", "voiceFlow.success"],
+      ["cancelled", "voiceFlow.cancelled"],
+    ] as const)(
+      "[P1] %s 狀態應維持 click-through（clickThrough=true）",
+      async (nextStatus, message) => {
+        const store = useVoiceFlowStore();
+
+        store.transitionTo(nextStatus, message);
+
+        await vi.waitFor(() => {
+          expect(mockInvoke).toHaveBeenCalledWith("set_hud_visibility", {
+            visible: true,
+            clickThrough: true,
+          });
+        });
+        expect(
+          hudVisibilityCallList().every(
+            (call) => (call[1] as { clickThrough: boolean }).clickThrough,
+          ),
+        ).toBe(true);
+      },
+    );
+
+    it("[P0] idle 應以 set_hud_visibility(visible=false) 隱藏，不再直接呼叫 window.hide", async () => {
+      vi.useFakeTimers();
+      try {
+        const store = useVoiceFlowStore();
+
+        store.transitionTo("idle");
+        await vi.advanceTimersByTimeAsync(500);
+
+        expect(mockInvoke).toHaveBeenCalledWith("set_hud_visibility", {
+          visible: false,
+          clickThrough: true,
+        });
+        expect(mockHudHide).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("[P1] hide→show 循環 3 次後 click-through 與可見性參數仍正確", async () => {
+      vi.useFakeTimers();
+      try {
+        const store = useVoiceFlowStore();
+
+        for (let i = 0; i < 3; i++) {
+          store.transitionTo("recording", "voiceFlow.recording");
+          await vi.advanceTimersByTimeAsync(600);
+          store.transitionTo("idle");
+          await vi.advanceTimersByTimeAsync(600);
+        }
+
+        const callList = hudVisibilityCallList().map(
+          (call) => call[1] as { visible: boolean; clickThrough: boolean },
+        );
+        const showList = callList.filter((arg) => arg.visible);
+        const hideList = callList.filter((arg) => !arg.visible);
+
+        expect(showList.length).toBe(3);
+        expect(hideList.length).toBe(3);
+        expect(showList.every((arg) => arg.clickThrough === true)).toBe(true);
+        expect(mockHudShow).not.toHaveBeenCalled();
+        expect(mockHudHide).not.toHaveBeenCalled();
+        expect(mockHudSetIgnoreCursorEvents).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 });

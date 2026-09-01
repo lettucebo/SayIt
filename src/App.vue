@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted } from "vue";
+import { invoke } from "@tauri-apps/api/core";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import type { AzureAuthStateChangedPayload } from "./types/events";
 import NotchHud from "./components/NotchHud.vue";
-import { getCurrentWindow, Window } from "@tauri-apps/api/window";
+import { Window } from "@tauri-apps/api/window";
 import { useVoiceFlowStore } from "./stores/useVoiceFlowStore";
 import { useSettingsStore } from "./stores/useSettingsStore";
 import { useVocabularyStore } from "./stores/useVocabularyStore";
@@ -110,8 +111,14 @@ onMounted(async () => {
     },
   );
 
-  const appWindow = getCurrentWindow();
-  await appWindow.show();
+  try {
+    await invoke("set_hud_visibility", {
+      visible: true,
+      clickThrough: true,
+    });
+  } catch (err) {
+    console.error("[App] startup: show HUD failed:", err);
+  }
   await voiceFlowStore.initialize();
 
   // 啟動時直接顯示 main-window（dashboard），然後隱藏 overlay
@@ -125,7 +132,14 @@ onMounted(async () => {
     console.error("[App] startup: show main-window failed:", err);
   }
 
-  await appWindow.hide();
+  try {
+    await invoke("set_hud_visibility", {
+      visible: false,
+      clickThrough: true,
+    });
+  } catch (err) {
+    console.error("[App] startup: hide HUD failed:", err);
+  }
 });
 
 function handleRetry() {

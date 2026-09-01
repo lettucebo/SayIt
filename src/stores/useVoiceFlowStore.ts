@@ -331,8 +331,7 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
 
   // 顯示 HUD 一次（定位 → show → 忽略游標 → ensure），不啟動輪詢。
   // 供主流程與 learned-notification 共用，確保兩者都套用 RC1 定位與 RC2 ensure。
-  async function showHudOnce() {
-    const window = getAppWindow();
+  async function showHudOnce(clickThrough = true) {
     lastMonitorKey = "";
     // reposition 不得阻擋 show：逾時則先 show（RC1 修法後座標已正確；避免偶發卡住讓 HUD 永不出現）
     await Promise.race([
@@ -341,20 +340,23 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
         setTimeout(resolve, REPOSITION_SHOW_TIMEOUT_MS),
       ),
     ]);
-    await window.show();
-    await window.setIgnoreCursorEvents(true);
-    // RC2：診斷原生可見性 + 安全恢復（visible=false/最小化→SW_SHOWNOACTIVATE、重宣告 topmost）；不做 blanket hide/show
-    void invoke("ensure_hud_visible").catch(() => {});
+    await invoke("set_hud_visibility", {
+      visible: true,
+      clickThrough,
+    });
   }
 
-  async function showHud() {
+  async function showHud(clickThrough = true) {
     clearLearnedHideTimer();
-    await showHudOnce();
+    await showHudOnce(clickThrough);
     startMonitorPolling();
   }
 
   async function hideHud() {
-    await getAppWindow().hide();
+    await invoke("set_hud_visibility", {
+      visible: false,
+      clickThrough: true,
+    });
   }
 
   function clearDelayedMuteTimer() {
@@ -490,7 +492,8 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
     if (
       nextStatus === "recording" ||
       nextStatus === "transcribing" ||
-      nextStatus === "enhancing"
+      nextStatus === "enhancing" ||
+      nextStatus === "editing"
     ) {
       showHud().catch((err) => {
         writeErrorLog(
@@ -528,19 +531,15 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
     }
 
     if (nextStatus === "error") {
-      showHud()
-        .then(async () => {
-          await getAppWindow().setIgnoreCursorEvents(false);
-        })
-        .catch((err) => {
-          writeErrorLog(
-            `useVoiceFlowStore: showHud/enableCursor failed: ${extractErrorMessage(err)}`,
-          );
-          captureError(err, {
-            source: "voice-flow",
-            step: "showHud-enableCursor",
-          });
+      showHud(false).catch((err) => {
+        writeErrorLog(
+          `useVoiceFlowStore: showHud/enableCursor failed: ${extractErrorMessage(err)}`,
+        );
+        captureError(err, {
+          source: "voice-flow",
+          step: "showHud-enableCursor",
         });
+      });
       const errorDuration = canRetry.value
         ? ERROR_WITH_RETRY_DISPLAY_DURATION_MS
         : ERROR_DISPLAY_DURATION_MS;

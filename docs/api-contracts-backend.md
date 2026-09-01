@@ -67,12 +67,17 @@ invoke('get_hud_target_position') → Result<{
 - **用途**：HUD 多螢幕追蹤（取得游標所在螢幕的置中位置）
 - **錯誤**：若 `app.available_monitors()` 失敗或無螢幕 → `Result::Err(String)`
 
-#### `ensure_hud_visible`
+#### `set_hud_visibility`
 ```ts
-invoke('ensure_hud_visible') → void
+invoke('set_hud_visibility', {
+  visible: boolean,
+  clickThrough: boolean,
+}) → Result<void, string>
 ```
-- **Rust 位置**：`lib.rs`
-- **用途**：Windows 下於 `showHud()` 後確保 HUD 真的可見——記錄可見性快照並安全恢復（最小化還原、重新宣告 topmost）。非 Windows 為 no-op。
+- **Rust 位置**：`plugins/hud_window.rs`
+- **用途**：同步管理 HUD 的 show/hide 與 click-through，避免前端分開呼叫原生視窗操作時失去順序保證。Windows 會在顯示後記錄可見性快照、安全恢復最小化狀態、重建 topmost/toolwindow/noactivate，最後重套 DWM blur-behind；這是透明區退化為黑色方塊時的恢復機制。非 Windows 維持 Tauri 原生 show/hide 與 ignore-cursor-events 行為。
+- **隱藏語意**：`visible=false` 時直接隱藏 HUD，`clickThrough` 不會在隱藏期間另行套用；每個顯示路徑都會明確傳入需要的 click-through 狀態。
+- **錯誤**：找不到 HUD 視窗、無法排入 main thread、無法接收 main-thread 執行結果，或 Tauri show/hide/click-through 失敗時回 `Err(String)`；Windows DWM/invariant 修復失敗會記錄 log，但不阻斷語音流程。
 
 #### `get_os_theme`
 ```ts
