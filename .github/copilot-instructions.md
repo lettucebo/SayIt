@@ -201,7 +201,7 @@ CI（`.github/workflows/ci.yml`）：Ubuntu 跑 `vue-tsc --noEmit` → `eslint s
 | `database:ready` | `DATABASE_READY` | Dashboard（main-window.ts，DB migration 完成後） | HUD（App.vue / waitForDatabaseReady） |
 | `database:ready-ping` | `DATABASE_READY_PING` | HUD（請 Dashboard 重新廣播，解決競態） | Dashboard（收到後 replay `database:ready`） |
 
-> 變更 IPC（Command/Event）後，用 **`ipc-review` / `tauri-reviewer` subagent** 做 Rust↔Vue 雙端對齊審查（Command 註冊、Event 名稱、Payload 型別）。
+> 變更 IPC（Command/Event）後，用 **`ipc-review` skill 或 `tauri-reviewer` agent**（`.github/agents/tauri-reviewer.agent.md`）做 Rust↔Vue 雙端對齊審查（Command 註冊、Event 名稱、Payload 型別）。
 
 ## 多檔協作任務（細節見 `docs/development-guide.md` §4）
 
@@ -269,9 +269,23 @@ CI（`.github/workflows/ci.yml`）：Ubuntu 跑 `vue-tsc --noEmit` → `eslint s
 
 **Code Review / 互動 Agent（2026-06 已遷移至原生 GitHub Copilot）：** 原 `.github/workflows/claude.yml`（`@claude` 觸發）+ `claude-code-review.yml`（PR 自動 review）依賴 `anthropics/claude-code-action@v1`（OIDC 兌換 GitHub App token）。因本 fork 未安裝 Claude Code GitHub App 且 `CLAUDE_CODE_OAUTH_TOKEN` 為空，PR review 每次 ❌。**現已停用兩支 workflow**（`on:` 改為 `workflow_dispatch`-only + 於 repo 端 `gh workflow disable`，檔案保留供參考），改用 **原生 Copilot code review**（repo Settings → Copilot → Code review 自動審查）與原生 `@copilot`（issue/PR mention 或指派 issue）互動。⚠️ 舊「**Fork PR 硬規則**：必須保留 `if: ...head.repo.full_name == github.repository` guard、禁止移除」已隨停用**失效**（本遷移取代之）。詳見 `docs/adr-claude-code-review-fork-pr.md`（Superseded）。所有 CICD 變更僅保留在 fork（`origin`），不送 `upstream`。
 
-## Subagent
+## Subagent / Skills
 
-- **tauri-reviewer / ipc-review** — 審查 Rust↔Vue IPC 一致性（Command 註冊、Event 名稱、Payload 型別）。
+- **`tauri-reviewer`**（`.github/agents/tauri-reviewer.agent.md`）— Copilot custom agent，唯讀（`tools: ["Read", "Grep", "Glob"]`）審查 Rust↔Vue IPC 一致性（Command 註冊、Event 名稱、Payload 型別、錯誤處理）。用 `/agent` 選用。
+- **`ipc-review`**（`.github/skills/ipc-review/`）— 同主題的 skill 版本。
+- 其他專案自有 skill：`verify`（權威驗證命令）、`sayit-release`（發版流程）皆在 `.github/skills/`。
+
+## Hooks
+
+`.github/hooks/protect-config.json`（`version: 1`）是本 repo 唯一的自動 hook 設定：`PreToolUse` + matcher `Edit|Write`，呼叫 `scripts/hooks/protect-config.sh`（Bash）或 `scripts/hooks/protect-config.ps1`（PowerShell）。
+
+- 🔴 直接修改 `Cargo.lock` / `pnpm-lock.yaml` / `package-lock.json` / `yarn.lock` → 回 `permissionDecision: deny`。
+- 🟡 `tauri.conf.json` / `Cargo.toml` → 送出提醒但放行。
+- 其他檔案不輸出、走預設權限流程（刻意不回 `allow`，避免繞過使用者授權）。
+- 候選路徑同時取自「明確 path 欄位」與「patch / diff header」，因此 freeform `apply_patch`（含 `*** Move to:` 與 Windows 絕對路徑）也擋得住；掃 header 前會先排除 `old_str` / `new_str` / `file_text` 等內容欄位，所以文件裡的 diff 範例不會誤判。
+- 失效模式偏保守：候選為空、payload 為空、stdin 讀取失敗，或路徑含無法還原的 `\uXXXX` 跳脫 → deny + exit 2（fail-closed）。
+
+`scripts/hooks/{typecheck,eslint,rustfmt}.sh` 是**選用、預設不啟用**的非修改型檢查 handler（接受檔案路徑參數或 hook JSON stdin，保留原始 exit code），刻意不註冊為自動 PostToolUse hook。
 
 ## Git 工作流程（強制）
 
@@ -323,6 +337,6 @@ CI（`.github/workflows/ci.yml`）：Ubuntu 跑 `vue-tsc --noEmit` → `eslint s
 □ pnpm exec eslint src    ESLint 無錯
 □ cargo fmt --check + cargo clippy --workspace --all-targets -- -D warnings
 □ cargo test --workspace（src-tauri）
-□ 改 IPC → tauri-reviewer / ipc-review subagent 審查
+□ 改 IPC → ipc-review skill / tauri-reviewer agent 審查
 □ 改 SQL schema → 寫 v(N+1) migration，不動舊 migration
 ```

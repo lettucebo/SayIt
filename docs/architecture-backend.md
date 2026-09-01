@@ -332,7 +332,7 @@ Rust 測試內嵌於各模組的 `#[cfg(test)] mod tests`：
 | `hotkey_listener.rs`              | TriggerKey 解析、modifier 邏輯                  |
 | `clipboard_paste.rs`              | （需測試實機因依賴系統 API）                    |
 
-CI 只跑 `cargo check`（不跑 `cargo test`）— **這是個 CI tech debt**，後續應加 `cargo test --workspace`。
+CI 在 macOS 與 Windows 都會跑 `cargo clippy --workspace --all-targets -- -D warnings` 與 `cargo test --workspace`；`cargo fmt --check` 仍由本機 `verify` skill 或 PR review 把關。
 
 ---
 
@@ -341,7 +341,7 @@ CI 只跑 `cargo check`（不跑 `cargo test`）— **這是個 CI tech debt**�
 1. **❌ webview 直接 fetch Groq Whisper** → ✅ Rust `transcribe_audio` 直呼（multipart 在前端有限制）
 2. **❌ `shutdown()` 順序錯亂** → ✅ 嚴守 §RunEvent::Exit 的順序（音量 → 預覽 → 錄音 → keyboard monitor → hotkey）
 3. **❌ 在 Rust 端硬編碼 Sentry release** → ✅ 用 `option_env!("SENTRY_RELEASE")` 由 release.yml 注入
-4. **❌ 修改 `Cargo.lock`** → ✅ `protect-config.sh` hook 阻擋；只能透過 `cargo` 自動更新
+4. **❌ 修改 `Cargo.lock`** → ✅ `protect-config` PreToolUse hook 阻擋；只能透過 `cargo` 自動更新
 5. **❌ 動 `panic = "abort"`** → ✅ 影響 binary 大小與 fault tolerance，非必要不改
 6. **❌ 在 plugin 內部呼叫 `app.exit(0)`** → ✅ 統一由 frontend 發起或 tray menu 觸發
 
@@ -351,8 +351,7 @@ CI 只跑 `cargo check`（不跑 `cargo test`）— **這是個 CI tech debt**�
 
 | 項目                                                           | 影響                                  |
 | -------------------------------------------------------------- | ------------------------------------- |
-| CI 只跑 `cargo check`，沒跑 `cargo test`                        | 17+ 純函式測試沒有 CI 守門            |
-| 沒有 `cargo clippy` lint                                       | 風格 / lint 錯誤可能漏網              |
+| CI 沒跑 `cargo fmt --check`                                    | 格式問題依賴本機 `verify` skill 或 PR review |
 | cpal 0.15.3 非預設裝置 Arc cycle workaround                     | 上游修復 cpal 0.16+ 後可移除          |
 | `text_field_reader::read_selected_text` Fn-c 字元穿透           | issue #25 待修                        |
 | Windows 貼上 / 焦點切換 P0 issue                                | 待修                                  |

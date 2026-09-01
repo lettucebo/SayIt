@@ -44,8 +44,11 @@ push/PR to main           push tag v*
 2. setup-node (從 .nvmrc → 24)
 3. pnpm setup
 4. pnpm install --frozen-lockfile
-5. npx vue-tsc --noEmit       ← 型別檢查
-6. pnpm test                  ← Vitest unit + component
+5. vue-tsc --noEmit           ← 型別檢查
+6. pnpm exec eslint src       ← ESLint
+7. feedback presentation guard ← 禁止 View 手寫 feedback
+8. pnpm test                  ← Vitest unit + component
+9. vite build                 ← 打包回歸（manualChunks / 動態 import）
 ```
 
 ### 2.2 Rust job (`rust-check`, matrix)
@@ -56,19 +59,21 @@ matrix:
 
 steps:
   1. checkout
-  2. dtolnay/rust-toolchain@stable
+  2. dtolnay/rust-toolchain@stable (components: clippy)
   3. swatinem/rust-cache@v2 (workspaces: src-tauri)
-  4. cargo check (working-directory: src-tauri)
+  4. cargo clippy --workspace --all-targets -- -D warnings (working-directory: src-tauri)
+  5. cargo test --workspace (working-directory: src-tauri)
 ```
 
 ### 2.3 ⚠️ CI 缺漏
 
 | 項目                       | 影響                                              |
 | -------------------------- | ------------------------------------------------- |
-| 沒跑 `cargo test`          | 17+ 個 Rust 純函式測試沒 CI 守門                  |
-| 沒跑 `cargo clippy`        | Rust lint 規則沒 enforce                          |
-| 沒跑 ESLint                | 雖然 PostToolUse hook 自動跑，但 PR 仍可能漏掉    |
 | 沒跑 Playwright E2E        | E2E 仍是本機跑，沒整合 CI                         |
+| 沒跑 `cargo fmt --check`   | 格式問題只能靠本機 `verify` skill 或 PR review 攔下 |
+| 沒跑 `pnpm tauri build`    | 只有 `vite build`，打包／CSP 層級的回歸不會在 CI 現形 |
+
+> `cargo clippy --workspace --all-targets -- -D warnings`、`cargo test --workspace` 與 `pnpm exec eslint src` **已經**在 CI 執行（見 §2.1 / §2.2）；本機沒有任何自動 lint／format hook，需要時自行執行 `verify` skill 的命令。
 
 ---
 

@@ -80,7 +80,7 @@ stores/  ──→ lib/                                    （業務邏輯下沉
 lib/     ──→ External APIs (Groq / OpenAI / Anthropic / Gemini)
 ```
 
-> 這條規則由 `protect-config.sh` 與 PR review 共同把關。違反例子：`SettingsView.vue` 直接 `import { fetch }` 呼叫 Groq → 應改為 `useSettingsStore().validateApiKey()`。
+> 這條規則由 ESLint／型別檢查與 PR review 共同把關（`protect-config` hook 只保護 lockfile 與核心設定檔，不檢查依賴方向）。違反例子：`SettingsView.vue` 直接 `import { fetch }` 呼叫 Groq → 應改為 `useSettingsStore().validateApiKey()`。
 
 ---
 

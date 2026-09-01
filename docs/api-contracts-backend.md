@@ -10,11 +10,11 @@
 
 | 軌道                       | 數量    | 來源                                                                        |
 | -------------------------- | ------- | --------------------------------------------------------------------------- |
-| Tauri Commands             | **46**  | `lib.rs::run()` 的 `generate_handler!` macro                                |
+| Tauri Commands             | **51**  | `lib.rs::run()` 的 `generate_handler!` macro                                |
 | Rust → Frontend Events     | **13**  | Rust 端 `emit()` 的事件名（前端常數在 `useTauriEvents.ts`）                 |
-| Frontend-only Events       | **8**   | `src/composables/useTauriEvents.ts`                                         |
+| Frontend-only Events       | **9**   | `src/composables/useTauriEvents.ts`                                         |
 
-> 所有 event 名稱常數在前端**只能**從 `useTauriEvents.ts` import；Rust 端定義在各 plugin 模組頂部。新增時兩端必須對齊（用 `tauri-reviewer` subagent 審查）。
+> 所有 event 名稱常數在前端**只能**從 `useTauriEvents.ts` import；Rust 端定義在各 plugin 模組頂部。新增時兩端必須對齊（用 `ipc-review` skill 或 `tauri-reviewer` agent 審查）。
 
 ---
 
@@ -236,7 +236,28 @@ invoke('get_azure_entra_token', {
 - **為何走 Rust**：reqwest 不帶 browser `Origin` header，避免 Entra 回 `AADSTS9002326`
 - **scope 依 API 路徑選**（非 host）：v1 `/openai/v1/` chat → `ai.azure.com/.default`；deployments/Whisper 路徑 → `cognitiveservices.azure.com/.default`
 
-### 2.11 檔案傳輸（2 個 · `plugins/file_transfer.rs`）
+### 2.11 Azure 使用者登入（5 個 · `plugins/azure_user_session.rs`）
+
+```ts
+invoke('azure_user_sign_in', {
+  tenantId: string, clientId: string, operationId: string,
+}) → Result<AzureUserAccount, AzureUserAuthError>
+
+invoke('azure_user_cancel_sign_in', { operationId: string }) → void
+invoke('azure_user_sign_out', { tenantId: string, clientId: string }) → Result<void, AzureUserAuthError>
+invoke('azure_user_get_account', { tenantId: string, clientId: string }) → Result<AzureUserAccount | null, AzureUserAuthError>
+invoke('azure_user_get_token', {
+  tenantId: string, clientId: string, scopeKind: 'chat' | 'whisper',
+}) → Result<string, AzureUserAuthError>
+```
+
+- **呼叫端**：`src/lib/azureUserAuth.ts`
+- **登入模式**：PKCE public client，開系統瀏覽器並等待 loopback callback；同時只允許一個進行中的登入。
+- **取消語意**：`operationId` 避免舊登入流程取消到下一次登入。
+- **Token 邊界**：refresh token 存 OS credential store；access token 使用記憶體快取與 single-flight refresh。
+- **Scope 限制**：前端只能傳 `chat` / `whisper`，實際 audience 由 Rust 固定列舉。
+
+### 2.12 檔案傳輸（2 個 · `plugins/file_transfer.rs`）
 
 ```ts
 invoke('save_text_file', { path: string, content: string }) → Result<(), string>
@@ -292,13 +313,14 @@ invoke('read_text_file', { path: string })                  → Result<string, s
 
 ---
 
-## 四、Frontend-only Events（8 個 · 不經 Rust）
+## 四、Frontend-only Events（9 個 · 不經 Rust）
 
 | Event                          | 常量名                          | 發送方             | 接收方             |
 | ------------------------------ | ------------------------------- | ------------------ | ------------------ |
 | `voice-flow:state-changed`     | `VOICE_FLOW_STATE_CHANGED`      | useVoiceFlowStore  | **目前無接收方**（emit 保留，尚無 listener） |
 | `transcription:completed`      | `TRANSCRIPTION_COMPLETED`       | useHistoryStore（`emitToWindow("main-window", …)`） | DashboardView、HistoryView |
 | `settings:updated`             | `SETTINGS_UPDATED`              | useSettingsStore   | HUD App.vue（目前唯一 listener） |
+| `azure-auth:state-changed`     | `AZURE_AUTH_STATE_CHANGED`      | useSettingsStore（登入／登出／清除連線後） | HUD App.vue（重讀 Entra 使用者登入狀態） |
 | `vocabulary:changed`           | `VOCABULARY_CHANGED`            | useVocabularyStore | All Windows        |
 | `vocabulary:learned`           | `VOCABULARY_LEARNED`            | useVoiceFlowStore  | HUD NotchHud       |
 | `replacements:changed`         | `REPLACEMENTS_CHANGED`          | useReplacementStore（規則 CRUD 後） | HUD（App.vue，重載取代規則） |
@@ -380,5 +402,5 @@ POST https://api.groq.com/openai/v1/audio/transcriptions
 □ 文件
   ├─ 更新 .github/copilot-instructions.md IPC 契約表
   ├─ 更新 docs/api-contracts-backend.md
-  └─ 用 ipc-review / tauri-reviewer subagent 審查兩端對齊
+  └─ 用 ipc-review skill / tauri-reviewer agent 審查兩端對齊
 ```
