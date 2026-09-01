@@ -6,6 +6,7 @@ pub mod azure_user_session;
 pub mod clipboard_paste;
 pub mod file_transfer;
 pub mod hotkey_listener;
+pub mod hud_window;
 pub mod keyboard_monitor;
 pub mod logging;
 pub mod secret_store;
