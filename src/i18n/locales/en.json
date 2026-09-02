@@ -698,9 +698,7 @@
     },
     "upgradeNotice": {
       "title": "SayIt Update Summary",
-      "item1": "Groq Qwen3.8 27B Preview is now available — its free tier includes 1,000 requests and 2 million tokens per day, ten times the token quota of other Groq models. Qwen3.6 remains the default balance of speed and cost.",
-      "item2": "Free-quota tracking is more accurate — Groq LLM usage is now separated by model and includes dictionary analysis for that model, without mixing in usage from other models or providers.",
-      "item3": "Model services are easier to scan — Groq and Gemini show localized free badges, the recommendation star now marks Groq, and responsive columns prevent labels from crowding or overflowing in narrower windows.",
+      "item1": "The Windows HUD keeps its transparent, rounded shape — if window composition loses its state, the overlay no longer becomes a solid black rectangle. Each time the HUD is shown, it reapplies transparency, always-on-top, and no-focus settings; macOS behavior is unchanged.",
       "dismiss": "Got it"
     }
   },
