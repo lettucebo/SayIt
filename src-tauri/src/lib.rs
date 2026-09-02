@@ -146,6 +146,20 @@ fn get_os_theme() -> Option<String> {
     current_os_theme_is_dark().map(|dark| if dark { "dark" } else { "light" }.to_string())
 }
 
+/// 供前端判斷目前執行的是否為 debug 建置。
+///
+/// 這與「有沒有 console 視窗」同源：`main.rs` 的
+/// `#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]` 只在 release
+/// 隱藏 console，因此 debug 建置一定帶 console。前端據此跳過「首次啟動自動註冊開機
+/// 自啟動」，避免把自啟動指向帶 console 的開發執行檔（見 `useSettingsStore`）。
+///
+/// 不能只靠前端的 `import.meta.env.DEV` 判斷：`tauri build --debug` 的前端是
+/// production bundle（`DEV` 為 false），但 Rust 仍是 debug。
+#[command]
+fn is_debug_build() -> bool {
+    cfg!(debug_assertions)
+}
+
 /// HUD 視窗邏輯寬度（pixels），對應前端 CSS 470px
 const HUD_WINDOW_WIDTH_LOGICAL: f64 = 470.0;
 
@@ -502,10 +516,27 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_sql::Builder::default().build())
         .plugin(tauri_plugin_store::Builder::default().build())
-        .plugin(tauri_plugin_autostart::init(
-            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            None,
-        ))
+        .plugin({
+            // autostart 的登錄值名稱取自 productName（Windows 為 `HKCU\...\Run\SayIt`），
+            // 與 identifier 無關 —— 任何 SayIt 建置呼叫 enable() 都會覆寫同一把值。
+            // 曾因此讓診斷用 debug 建置搶走正式版的開機自啟動，導致每次開機跑到帶
+            // console 的開發執行檔。debug 建置改用獨立名稱，release 維持預設值以保持
+            // 既有使用者的登錄項不變。
+            //
+            // 結構刻意對齊 plugin 的 `init()`：`macos_launcher` 只存在於 macOS。
+            #[allow(unused_mut)]
+            let mut builder = tauri_plugin_autostart::Builder::new();
+            #[cfg(target_os = "macos")]
+            {
+                builder =
+                    builder.macos_launcher(tauri_plugin_autostart::MacosLauncher::LaunchAgent);
+            }
+            #[cfg(debug_assertions)]
+            {
+                builder = builder.app_name("SayIt (dev)");
+            }
+            builder.build()
+        })
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_dialog::init())
@@ -519,6 +550,7 @@ pub fn run() {
             get_hud_target_position,
             plugins::hud_window::set_hud_visibility,
             get_os_theme,
+            is_debug_build,
             plugins::audio_control::mute_system_audio,
             plugins::audio_control::restore_system_audio,
             plugins::clipboard_paste::capture_target_window,

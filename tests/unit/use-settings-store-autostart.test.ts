@@ -25,8 +25,10 @@ vi.mock("@tauri-apps/plugin-store", () => ({
   }),
 }));
 
+const mockInvoke = vi.fn();
+
 vi.mock("@tauri-apps/api/core", () => ({
-  invoke: vi.fn().mockResolvedValue(undefined),
+  invoke: mockInvoke,
 }));
 
 vi.mock("../../src/composables/useTauriEvents", () => ({
@@ -43,6 +45,11 @@ describe("useSettingsStore — 自啟動功能", () => {
     mockStoreGet.mockReset();
     mockStoreSet.mockReset();
     mockStoreSave.mockReset();
+    mockInvoke.mockReset();
+    // 預設模擬 release 建置：`is_debug_build` 回 false，其餘 command 回 undefined。
+    mockInvoke.mockImplementation(async (command: string) =>
+      command === "is_debug_build" ? false : undefined,
+    );
     vi.spyOn(console, "log").mockImplementation(() => {});
     vi.spyOn(console, "error").mockImplementation(() => {});
   });
@@ -176,6 +183,50 @@ describe("useSettingsStore — 自啟動功能", () => {
       expect(mockEnable).not.toHaveBeenCalled();
       expect(mockIsEnabled).toHaveBeenCalledOnce();
       expect(store.isAutoStartEnabled).toBe(true);
+    });
+
+    // autostart 登錄值名稱取自 productName、與 identifier 無關，所有建置共用同一把；
+    // debug 建置若自動註冊，會把開機自啟動指向帶 console 的開發執行檔並蓋掉正式版。
+    it("[P0] debug 建置首次啟動不應自動註冊，且不寫入 hasInitAutoStart", async () => {
+      mockStoreGet.mockImplementation(async (key: string) => {
+        if (key === "hasInitAutoStart") return null;
+        return null;
+      });
+      mockInvoke.mockImplementation(async (command: string) =>
+        command === "is_debug_build" ? true : undefined,
+      );
+      mockIsEnabled.mockResolvedValue(false);
+
+      const { useSettingsStore } = await import(
+        "../../src/stores/useSettingsStore"
+      );
+      const store = useSettingsStore();
+      await store.initializeAutoStart();
+
+      expect(mockEnable).not.toHaveBeenCalled();
+      expect(mockStoreSet).not.toHaveBeenCalledWith("hasInitAutoStart", true);
+      expect(mockIsEnabled).toHaveBeenCalledOnce();
+      expect(store.isAutoStartEnabled).toBe(false);
+    });
+
+    it("[P1] 無法判斷建置型別時應保守跳過自動註冊", async () => {
+      mockStoreGet.mockImplementation(async (key: string) => {
+        if (key === "hasInitAutoStart") return null;
+        return null;
+      });
+      mockInvoke.mockRejectedValue(new Error("command not found"));
+      mockIsEnabled.mockResolvedValue(false);
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const { useSettingsStore } = await import(
+        "../../src/stores/useSettingsStore"
+      );
+      const store = useSettingsStore();
+      await store.initializeAutoStart();
+
+      expect(mockEnable).not.toHaveBeenCalled();
+      expect(mockStoreSet).not.toHaveBeenCalledWith("hasInitAutoStart", true);
+      expect(console.warn).toHaveBeenCalled();
     });
 
     it("[P0] 初始化失敗應靜默處理", async () => {
