@@ -122,6 +122,7 @@ CI（`.github/workflows/ci.yml`）：Ubuntu 跑 `vue-tsc --noEmit` → `eslint s
 | `get_hud_target_position` | `lib.rs` | useVoiceFlowStore | `app: AppHandle` | `Result<HudTargetPosition, String>`（含 `space: "physical"\|"logical"`，Windows 回 physical 以避開 tao 跨 DPI 錯位） |
 | `set_hud_visibility` | `plugins/hud_window.rs` | App.vue、useVoiceFlowStore | `app: AppHandle, visible: bool, click_through: bool` | `Result<(), String>`（同步 command；集中 show/hide + click-through。Windows 額外恢復最小化、重宣告 topmost/toolwindow/noactivate，並在原生 style 變更後重套 DWM blur，避免透明背景退化為黑色；非 Windows 維持 Tauri 視窗行為） |
 | `get_os_theme` | `lib.rs` | theme.ts（`refreshOsTheme`） | — | `Option<String>`（`"dark"` / `"light"`；Windows 讀登錄檔為權威來源，非 Windows／讀取失敗回 `null` 讓前端 fallback 到 `window.theme()` → `matchMedia`） |
+| `is_debug_build` | `lib.rs` | useSettingsStore（`initializeAutoStart`） | — | `bool`（`cfg!(debug_assertions)`；debug 建置據此跳過「首次啟動自動註冊開機自啟動」，避免搶走正式版共用的 `Run\SayIt` 登錄值） |
 | `set_file_logging_enabled` | `plugins/logging.rs` | useSettingsStore, logger.ts | `enabled: bool` | `()` |
 | `open_log_folder` | `plugins/logging.rs` | logger.ts（SettingsView） | — | `Result<(), String>` |
 | `cleanup_old_logs` | `plugins/logging.rs` | main-window.ts | `days: u32, app: AppHandle` | `Result<Vec<String>, String>` |

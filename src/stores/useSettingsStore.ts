@@ -3218,12 +3218,43 @@ export const useSettingsStore = defineStore("settings", () => {
     }
   }
 
+  /**
+   * 目前執行的是否為 debug 建置（Rust `cfg!(debug_assertions)`）。
+   *
+   * 查詢失敗時保守回 true：寧可不自動註冊開機自啟動（使用者仍可手動開啟），
+   * 也不要誤把自啟動指向帶 console 的開發執行檔。
+   */
+  async function isDebugBuild(): Promise<boolean> {
+    try {
+      return await invoke<boolean>("is_debug_build");
+    } catch (err) {
+      console.warn(
+        "[useSettingsStore] is_debug_build failed; assuming debug build:",
+        extractErrorMessage(err),
+      );
+      return true;
+    }
+  }
+
   async function initializeAutoStart() {
     try {
       const store = await load(STORE_NAME);
       const hasInitAutoStart = await store.get<boolean>("hasInitAutoStart");
 
       if (!hasInitAutoStart) {
+        // autostart 的登錄值名稱取自 productName，與 identifier 無關，所有建置共用
+        // 同一把（Windows 為 `HKCU\...\Run\SayIt`）。debug 建置若在這裡自動註冊，
+        // 會把開機自啟動指向帶 console 的開發執行檔、蓋掉正式版。
+        // 因此 debug 只讀狀態、不自動註冊，也刻意不寫入 hasInitAutoStart，
+        // 讓正式版之後仍能正常完成首次註冊；使用者仍可從設定頁手動開關。
+        if (await isDebugBuild()) {
+          await loadAutoStartStatus();
+          console.log(
+            "[useSettingsStore] Debug build: skipped first-launch auto-start registration",
+          );
+          return;
+        }
+
         const { enable } = await import("@tauri-apps/plugin-autostart");
         await enable();
         await store.set("hasInitAutoStart", true);

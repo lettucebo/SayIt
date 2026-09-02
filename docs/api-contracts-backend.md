@@ -10,7 +10,7 @@
 
 | 軌道                       | 數量    | 來源                                                                        |
 | -------------------------- | ------- | --------------------------------------------------------------------------- |
-| Tauri Commands             | **51**  | `lib.rs::run()` 的 `generate_handler!` macro                                |
+| Tauri Commands             | **52**  | `lib.rs::run()` 的 `generate_handler!` macro                                |
 | Rust → Frontend Events     | **13**  | Rust 端 `emit()` 的事件名（前端常數在 `useTauriEvents.ts`）                 |
 | Frontend-only Events       | **9**   | `src/composables/useTauriEvents.ts`                                         |
 
@@ -26,7 +26,7 @@
 > - 下方 `invoke(...)` 範例中的參數是**前端實際要傳的鍵名**，一律 **camelCase**（Tauri 會轉成 Rust 的 snake_case）。例如 Rust 的 `api_key` / `file_path` / `restore_clipboard`，前端要寫 `apiKey` / `filePath` / `restoreClipboard`。
 > - Rust 簽章中的 `app: AppHandle`、`state: State<T>` 由 **Tauri 自動注入**，呼叫端**不要傳**。表格中的「簽名」欄列的是 Rust 端簽章（含注入參數），`invoke(...)` 範例則只列呼叫端該傳的東西。
 
-### 2.1 系統與生命週期（7 個）
+### 2.1 系統與生命週期（8 個）
 
 #### `set_file_logging_enabled`
 ```ts
@@ -85,6 +85,15 @@ invoke('get_os_theme') → 'dark' | 'light' | null
 ```
 - **Rust 位置**：`lib.rs`
 - **用途**：查詢權威的 OS 外觀。Windows 讀登錄檔（透明且隱藏的 HUD 其 WebView2 拿不到正確值），非 Windows 或讀取失敗回 `null`，前端 fallback 到 `window.theme()` → `matchMedia`。
+
+#### `is_debug_build`
+```ts
+invoke('is_debug_build') → boolean
+```
+- **Rust 位置**：`lib.rs`（`cfg!(debug_assertions)`）
+- **呼叫端**：`useSettingsStore.initializeAutoStart()`
+- **用途**：讓前端判斷是否為 debug 建置，藉此**跳過「首次啟動自動註冊開機自啟動」**。autostart 的登錄值名稱取自 productName、與 identifier 無關，所有建置共用同一把（Windows 為 `HKCU\...\Run\SayIt`）；debug 建置若自動註冊，會把開機自啟動指向帶 console 的開發執行檔並蓋掉正式版。
+- **為何不用前端判斷**：`tauri build --debug` 的前端是 production bundle（`import.meta.env.DEV` 為 false），但 Rust 仍是 debug。此 command 與 `main.rs` 決定是否隱藏 console 的條件同源。
 
 ### 2.2 熱鍵（8 個 · `plugins/hotkey_listener.rs`，`update_hotkey_config` 在 `lib.rs`）
 

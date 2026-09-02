@@ -327,3 +327,5 @@ sqlite3 %APPDATA%\com.sayit.app\app.db
 | 加 Rust Command 忘記在 `invoke_handler!` 註冊                          | Rust 編譯通過但前端 `invoke()` 會 timeout 或回 "command not found"                  |
 | Cmd+V 在 Fn 按住期間執行 → 輸入 "c" 字元                                | 已知 issue #25，避開即可                                                            |
 | 開兩個 dev session（兩個 .app） → 全域熱鍵廣播                          | v0.9.5 已導入 `tauri-plugin-single-instance` 防止                                   |
+| 開機自動啟動跑到 debug 建置、每次登入冒出 console 黑視窗                | autostart 登錄值名稱取自 productName、**與 identifier 無關**（Windows 為 `HKCU\...\Run\SayIt`），任何建置呼叫 `enable()` 都會覆寫同一把。現由 `is_debug_build` 擋掉 debug 的首次自動註冊，且 debug 改用獨立名稱 `SayIt (dev)`；若已被搶走，手動把該值改回正式版路徑 |
+| 改 identifier 做診斷建置後，行為與正式版不一致                          | 換 identifier 會得到**獨立的** store／SQLite／single-instance 鎖，等同全新安裝（會被視為「首次啟動」），且能與正式版同時執行；診斷完記得清掉 `%APPDATA%\<identifier>` 與殘留的自啟動登錄值 |
