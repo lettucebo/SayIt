@@ -127,7 +127,7 @@ jobs:
             dmg_glob: "*.dmg"
             upload_sourcemaps: "false"
           - platform: windows-latest
-            args: ""
+            args: --config src-tauri/tauri.release.windows.conf.json
             rust_target: ""
             stable_name: SayIt-windows-x64.exe
             dmg_glob: ""
@@ -174,6 +174,80 @@ jobs:
         with:
           workspaces: "./src-tauri -> target"
 
+      - name: Setup Artifact Signing CLI
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_ARTIFACT_SIGNING_ACCOUNT: ${{ vars.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
+          AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE: ${{ vars.AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $toolVersion = "0.11.0"
+          $expectedHash = "ddc6f6ef68631bf367ad051d7d37109e58d46095406e1fbba60d553b10f94393"
+          $toolDirectory = Join-Path $env:RUNNER_TEMP "artifact-signing-cli"
+          $toolPath = Join-Path $toolDirectory "artifact-signing-cli.exe"
+
+          foreach ($requiredVariable in @(
+            "AZURE_CLIENT_ID",
+            "AZURE_CLIENT_SECRET",
+            "AZURE_TENANT_ID",
+            "AZURE_ARTIFACT_SIGNING_ACCOUNT",
+            "AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE"
+          )) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($requiredVariable))) {
+              throw "$requiredVariable must be configured before a Windows release can be signed"
+            }
+          }
+
+          New-Item -ItemType Directory -Force -Path $toolDirectory | Out-Null
+          Invoke-WebRequest `
+            -Uri "https://github.com/Levminer/artifact-signing-cli/releases/download/$toolVersion/artifact-signing-cli.exe" `
+            -OutFile $toolPath
+
+          $actualHash = (Get-FileHash -Path $toolPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualHash -ne $expectedHash) {
+            throw "artifact-signing-cli checksum mismatch: expected $expectedHash, got $actualHash"
+          }
+
+          $azureCli = Get-Command az -CommandType Application |
+            Where-Object { $_.Source -like "*.cmd" } |
+            Select-Object -First 1
+          if (-not $azureCli) {
+            throw "Azure CLI az.cmd was not found"
+          }
+          if (-not (Test-Path -LiteralPath $azureCli.Source)) {
+            throw "Azure CLI executable was not found: $($azureCli.Source)"
+          }
+
+          $minimumSdkVersion = [version]"10.0.26100.0"
+          $signtool = Get-ChildItem `
+            -Path "C:\Program Files (x86)\Windows Kits\10\bin" `
+            -Recurse `
+            -Filter "signtool.exe" |
+            Where-Object { $_.FullName -like "*\x64\signtool.exe" } |
+            ForEach-Object {
+              try {
+                $sdkVersion = [version]$_.Directory.Parent.Name
+                if ($sdkVersion -ge $minimumSdkVersion) {
+                  [PSCustomObject]@{ Path = $_.FullName; Version = $sdkVersion }
+                }
+              } catch {
+                Write-Verbose "Skipping signtool with unparseable SDK version: $($_.FullName)"
+              }
+            } |
+            Sort-Object Version -Descending |
+            Select-Object -First 1
+          if (-not $signtool) {
+            throw "signtool.exe version $minimumSdkVersion or later was not found"
+          }
+
+          $toolDirectory | Add-Content -Path $env:GITHUB_PATH -Encoding utf8NoBOM
+          "SIGNTOOL_PATH=$($signtool.Path)" | Add-Content -Path $env:GITHUB_ENV -Encoding utf8NoBOM
+          "AZURE_CLI_PATH=$($azureCli.Source)" | Add-Content -Path $env:GITHUB_ENV -Encoding utf8NoBOM
+
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
@@ -190,6 +264,11 @@ jobs:
           SENTRY_RELEASE: ${{ env.SENTRY_RELEASE }}
           VITE_SENTRY_RELEASE: ${{ env.VITE_SENTRY_RELEASE }}
           VITE_SENTRY_SOURCEMAPS_ENABLED: ${{ matrix.upload_sourcemaps }}
+          AZURE_CLIENT_ID: ${{ runner.os == 'Windows' && secrets.AZURE_CLIENT_ID || '' }}
+          AZURE_CLIENT_SECRET: ${{ runner.os == 'Windows' && secrets.AZURE_CLIENT_SECRET || '' }}
+          AZURE_TENANT_ID: ${{ runner.os == 'Windows' && secrets.AZURE_TENANT_ID || '' }}
+          AZURE_ARTIFACT_SIGNING_ACCOUNT: ${{ runner.os == 'Windows' && vars.AZURE_ARTIFACT_SIGNING_ACCOUNT || '' }}
+          AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE: ${{ runner.os == 'Windows' && vars.AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE || '' }}
         with:
           # 指定既有 release，三個平台才會上傳到同一個（也才會正確合併 latest.json）。
           # 不可改回 tagName + releaseDraft——那會讓每個 job 各自建 release。
