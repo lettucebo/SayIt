@@ -64,6 +64,7 @@ describe("EXPORTABLE_SETTING_KEYS 完整性", () => {
       "azureProjectName",
       "maiCandidateLocales",
       "maiTranscribeStyle",
+      "maiTranscriptionModelId",
       "azureChatModelFamily",
       "azureChatModelFamilySource",
       "debugLogEnabled",
@@ -469,6 +470,29 @@ describe("sanitizeSettingsPayload", () => {
     expect(stripSensitiveKeys({ azureSpeechApiKey: "secret" })).not.toHaveProperty(
       "azureSpeechApiKey",
     );
+  });
+
+  it("[P0] MAI 轉錄模型：allowlist 內保留、其餘丟棄", () => {
+    for (const modelId of ["mai-transcribe-1.5", "mai-transcribe-2"]) {
+      expect(
+        sanitizeSettingsPayload({ maiTranscriptionModelId: modelId })
+          .maiTranscriptionModelId,
+      ).toBe(modelId);
+    }
+    // 大小寫變體與未知版本都不是合法的正規 ID（wire 大小寫由 Rust 決定）
+    for (const invalid of [
+      "MAI-Transcribe-2",
+      "mai-transcribe-1",
+      "mai-transcribe-3",
+      "",
+      42,
+    ]) {
+      expect(
+        sanitizeSettingsPayload({
+          maiTranscriptionModelId: invalid as unknown as string,
+        }),
+      ).not.toHaveProperty("maiTranscriptionModelId");
+    }
   });
 });
 

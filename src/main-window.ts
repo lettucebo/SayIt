@@ -94,6 +94,19 @@ async function bootstrap() {
     captureError(err, { source: "replacement-created-at-migration" });
   }
 
+  // MAI 轉錄模型預設值的一次性遷移。同樣只在 Dashboard 執行：HUD 也會載入設定，
+  // 若兩邊都寫，較慢的視窗會把使用者剛在 UI 選好的模型覆寫回推導值。
+  // 失敗不可阻擋 mount；下次啟動會再試一次。
+  try {
+    await settingsStore.migrateMaiTranscriptionModelDefault();
+  } catch (err) {
+    console.error(
+      "[main-window] MAI transcription model migration failed:",
+      extractErrorMessage(err),
+    );
+    captureError(err, { source: "mai-transcription-model-migration" });
+  }
+
   app.mount("#app");
   await router.isReady();
 

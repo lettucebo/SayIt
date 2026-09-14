@@ -75,6 +75,8 @@ import {
   type QuotaPeriod,
   type GeminiTranscriptionModelId,
   type MaiTranscribeStyle,
+  type MaiTranscriptionModelId,
+  MAI_TRANSCRIPTION_MODEL_LIST,
   GEMINI_TRANSCRIPTION_MODEL_LIST,
   findGeminiTranscriptionModelConfig,
 } from "../lib/modelRegistry";
@@ -1288,6 +1290,17 @@ async function handleMaiInputLocaleChange(value: string) {
     await settingsStore.saveMaiCandidateLocales(
       value === "auto" ? [] : [value as MaiCandidateLocale],
     );
+  } catch (err) {
+    maiOptionsFeedback.show("error", extractErrorMessage(err));
+  }
+}
+
+async function handleMaiTranscriptionModelChange(
+  modelId: MaiTranscriptionModelId,
+) {
+  try {
+    await settingsStore.saveMaiTranscriptionModelId(modelId);
+    maiOptionsFeedback.show("success", t("settings.model.whisperUpdated"));
   } catch (err) {
     maiOptionsFeedback.show("error", extractErrorMessage(err));
   }
@@ -3104,6 +3117,31 @@ onBeforeUnmount(() => {
             <p class="text-xs text-muted-foreground">{{ $t("settings.azure.maiHint") }}</p>
             <p class="text-xs text-muted-foreground">{{ $t("settings.azure.maiRegionHint") }}</p>
             <InlineFeedback :feedback="maiOptionsFeedback.state.value" class="block" />
+
+            <div class="space-y-2">
+              <Label for="mai-transcription-model">{{ $t("settings.azure.maiModelLabel") }}</Label>
+              <p class="text-xs text-muted-foreground">{{ $t("settings.azure.maiModelHint") }}</p>
+              <Select
+                :model-value="settingsStore.maiTranscriptionModelId"
+                @update:model-value="(value: unknown) => handleMaiTranscriptionModelChange(value as MaiTranscriptionModelId)"
+              >
+                <SelectTrigger id="mai-transcription-model" class="w-full" data-testid="mai-transcription-model">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem
+                    v-for="model in MAI_TRANSCRIPTION_MODEL_LIST"
+                    :key="model.id"
+                    :value="model.id"
+                  >
+                    {{ model.displayName }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <p class="text-xs text-muted-foreground">
+                {{ $t(`settings.azure.maiModelDescription.${settingsStore.maiTranscriptionModelId === "mai-transcribe-2" ? "v2" : "v15"}`) }}
+              </p>
+            </div>
 
             <div class="space-y-2">
               <Label for="mai-input-locale">{{ $t("settings.azure.maiCandidateLocalesLabel") }}</Label>

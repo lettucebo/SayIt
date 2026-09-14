@@ -223,8 +223,55 @@ describe("useSettingsStore — exportSettings / importSettings", () => {
       expect(store.azureChatModelFamilySource).toBe("manual");
     });
 
-    it("[P0] 匯入後 emit SETTINGS_UPDATED", async () => {
+    // 舊備份（本功能推出前匯出）不含 maiTranscriptionModelId。匯入迴圈只寫備份
+    // 「有」的鍵，若不補償，目標機器啟動時寫下的 v2 會被留著，原本用 1.5 的
+    // 使用者還原備份後會被靜默換模型。
+    it("[P0] 舊 MAI 備份缺模型鍵 → 明確補寫 1.5（不得沿用本機 v2）", async () => {
+      h.mockStoreData.set("maiTranscriptionModelId", "mai-transcribe-2");
       const store = useSettingsStore();
+      await store.loadSettings();
+
+      await store.importSettings({
+        whisperProviderId: "mai",
+        azureEnabled: true,
+      });
+
+      expect(h.mockStoreData.get("maiTranscriptionModelId")).toBe(
+        "mai-transcribe-1.5",
+      );
+      expect(store.maiTranscriptionModelId).toBe("mai-transcribe-1.5");
+    });
+
+    it("[P0] 新備份帶合法模型值 → 原樣還原，不被補償邏輯蓋掉", async () => {
+      h.mockStoreData.set("maiTranscriptionModelId", "mai-transcribe-1.5");
+      const store = useSettingsStore();
+      await store.loadSettings();
+
+      await store.importSettings({
+        whisperProviderId: "mai",
+        azureEnabled: true,
+        maiTranscriptionModelId: "mai-transcribe-2",
+      });
+
+      expect(h.mockStoreData.get("maiTranscriptionModelId")).toBe(
+        "mai-transcribe-2",
+      );
+      expect(store.maiTranscriptionModelId).toBe("mai-transcribe-2");
+    });
+
+    it("[P0] 舊備份但未使用 MAI → 不動本機既有模型選擇", async () => {
+      h.mockStoreData.set("maiTranscriptionModelId", "mai-transcribe-2");
+      const store = useSettingsStore();
+      await store.loadSettings();
+
+      await store.importSettings({ whisperProviderId: "groq" });
+
+      expect(h.mockStoreData.get("maiTranscriptionModelId")).toBe(
+        "mai-transcribe-2",
+      );
+    });
+
+    it("[P0] 匯入後 emit SETTINGS_UPDATED", async () => {      const store = useSettingsStore();
       // 正式流程在 mount 前就 await loadSettings()；未載入完成時匯入會被守門擋下
       await store.loadSettings();
       await store.importSettings({ muteOnRecording: true });
