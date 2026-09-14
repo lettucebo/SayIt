@@ -336,5 +336,50 @@ describe("useSettingsStore — prompt mode 遷移", () => {
         );
       }
     });
+
+    // 回歸鎖（Council ISSUE-C）：loadSettings() 會在 Azure 停用時把
+    // whisperProviderId 正規化成 "groq" 並寫回 store。migrate 若重新從 store
+    // 讀 provider，就會讀到 "groq"、把既有 MAI 使用者誤判成新使用者升級到 v2。
+    // 這裡用「會反映寫入」的 store mock，否則 bug 無法重現。
+    it("[P0] migrate：Azure 停用的既有 MAI 使用者仍須維持 1.5", async () => {
+      const data = new Map<string, unknown>(
+        Object.entries({ whisperProviderId: "mai", azureEnabled: false }),
+      );
+      mockStoreGet.mockImplementation((key: string) =>
+        Promise.resolve(data.has(key) ? data.get(key) : null),
+      );
+      mockStoreSet.mockImplementation((key: string, value: unknown) => {
+        data.set(key, value);
+        return Promise.resolve();
+      });
+
+      const store = await createStore();
+      await store.loadSettings();
+      // 前提成立：provider 已被正規化寫回成 groq
+      expect(data.get("whisperProviderId")).toBe("groq");
+
+      await store.migrateMaiTranscriptionModelDefault();
+
+      expect(data.get("maiTranscriptionModelId")).toBe("mai-transcribe-1.5");
+      expect(store.maiTranscriptionModelId).toBe("mai-transcribe-1.5");
+    });
+
+    // 回歸鎖（ISSUE-D）：loadSettings 失敗時 ref 還是建構時的預設 v2，
+    // 把它持久化會把既有 MAI 使用者誤升級。
+    it("[P0] migrate：settings 未成功載入時不得寫入", async () => {
+      mockStoreGet.mockRejectedValue(new Error("store corrupted"));
+      const store = await createStore();
+      await store.loadSettings().catch(() => undefined);
+      expect(store.settingsLoadFailed).toBe(true);
+      mockStoreSet.mockClear();
+      mockStoreGet.mockImplementation(() => Promise.resolve(null));
+
+      await store.migrateMaiTranscriptionModelDefault();
+
+      expect(mockStoreSet).not.toHaveBeenCalledWith(
+        "maiTranscriptionModelId",
+        expect.anything(),
+      );
+    });
   });
 });

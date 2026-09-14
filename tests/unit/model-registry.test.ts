@@ -13,6 +13,11 @@ import {
   getEffectiveGeminiTranscriptionModelId,
   getEffectiveGeminiTranscriptionRpd,
   getEffectiveMaiTranscribeStyle,
+  MAI_TRANSCRIPTION_MODEL_LIST,
+  DEFAULT_MAI_TRANSCRIPTION_MODEL_ID,
+  LEGACY_MAI_TRANSCRIPTION_MODEL_ID,
+  isMaiTranscriptionModelId,
+  resolveInitialMaiTranscriptionModelId,
   TRANSCRIPTION_PROVIDER_ID_VALUES,
   TRANSCRIPTION_PROVIDER_GROUP,
   TRANSCRIPTION_PROVIDER_GROUP_VALUES,
@@ -408,6 +413,95 @@ describe("modelRegistry — 模型遷移", () => {
       expect(getEffectiveLlmModelId("totally-made-up-model")).toBe(
         DEFAULT_LLM_MODEL_ID,
       );
+    });
+  });
+
+  // 這些是真正的實作（settingsStore.test.ts 把此模組整包 mock 掉，
+  // 那裡跑的是 mock 的複製品，無法證明本體正確）。
+  describe("MAI 轉錄模型 registry", () => {
+    it("[P0] 模型 ID 必須是小寫 kebab 且以 mai- 開頭", () => {
+      // 用量統計以 SQL `model LIKE 'mai-%'` 分桶；不符者會被誤算進 Groq 免費額度
+      for (const model of MAI_TRANSCRIPTION_MODEL_LIST) {
+        expect(model.id).toBe(model.id.toLowerCase());
+        expect(model.id.startsWith("mai-")).toBe(true);
+      }
+    });
+
+    it("[P0] 預設與 legacy 常數都在清單內，且恰有一個 isDefault", () => {
+      const ids = MAI_TRANSCRIPTION_MODEL_LIST.map((m) => m.id);
+      expect(ids).toContain(DEFAULT_MAI_TRANSCRIPTION_MODEL_ID);
+      expect(ids).toContain(LEGACY_MAI_TRANSCRIPTION_MODEL_ID);
+      expect(DEFAULT_MAI_TRANSCRIPTION_MODEL_ID).not.toBe(
+        LEGACY_MAI_TRANSCRIPTION_MODEL_ID,
+      );
+      expect(
+        MAI_TRANSCRIPTION_MODEL_LIST.filter((m) => m.isDefault),
+      ).toHaveLength(1);
+    });
+
+    it("[P0] isMaiTranscriptionModelId 只接受正規 ID", () => {
+      expect(isMaiTranscriptionModelId("mai-transcribe-1.5")).toBe(true);
+      expect(isMaiTranscriptionModelId("mai-transcribe-2")).toBe(true);
+      // 大小寫變體是 wire 名稱，不是正規 ID
+      for (const invalid of [
+        "MAI-Transcribe-2",
+        "mai-transcribe-1",
+        "mai-transcribe-3",
+        "whisper-large-v3",
+        "",
+        null,
+        undefined,
+        42,
+      ]) {
+        expect(isMaiTranscriptionModelId(invalid)).toBe(false);
+      }
+    });
+
+    it("[P0] 已存合法值一律原樣沿用，不看 provider", () => {
+      for (const provider of ["mai", "groq", "gemini", "azure", null]) {
+        expect(
+          resolveInitialMaiTranscriptionModelId("mai-transcribe-2", provider),
+        ).toBe("mai-transcribe-2");
+        expect(
+          resolveInitialMaiTranscriptionModelId("mai-transcribe-1.5", provider),
+        ).toBe("mai-transcribe-1.5");
+      }
+    });
+
+    it("[P0] 無值時：既有 MAI 使用者 → 1.5，其餘 → v2", () => {
+      expect(resolveInitialMaiTranscriptionModelId(undefined, "mai")).toBe(
+        LEGACY_MAI_TRANSCRIPTION_MODEL_ID,
+      );
+      for (const provider of ["groq", "gemini", "azure", null, undefined]) {
+        expect(resolveInitialMaiTranscriptionModelId(undefined, provider)).toBe(
+          DEFAULT_MAI_TRANSCRIPTION_MODEL_ID,
+        );
+      }
+    });
+
+    it("[P0] 無法辨識的已存值視同無值：走 provider 推導", () => {
+      // 刻意與「鍵不存在」同規則：真正要緊的是 provider 已是 mai 的情況，
+      // 此時退回 1.5 才不會改變既有使用者的 wire 行為。
+      expect(
+        resolveInitialMaiTranscriptionModelId("mai-transcribe-99", "mai"),
+      ).toBe(LEGACY_MAI_TRANSCRIPTION_MODEL_ID);
+      expect(
+        resolveInitialMaiTranscriptionModelId("mai-transcribe-99", "groq"),
+      ).toBe(DEFAULT_MAI_TRANSCRIPTION_MODEL_ID);
+    });
+
+    it("[P0] 為純函式：同輸入同輸出，兩個視窗不會算出不同結果", () => {
+      const inputs: [unknown, string | null][] = [
+        [undefined, "mai"],
+        [undefined, "groq"],
+        ["mai-transcribe-2", "mai"],
+        ["bogus", "mai"],
+      ];
+      for (const [saved, provider] of inputs) {
+        expect(resolveInitialMaiTranscriptionModelId(saved, provider)).toBe(
+          resolveInitialMaiTranscriptionModelId(saved, provider),
+        );
+      }
     });
   });
 });

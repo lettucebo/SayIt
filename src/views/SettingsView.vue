@@ -26,7 +26,6 @@ import {
   parseBackup,
   getBackupPayload,
   isSupportedDictionaryBlock,
-  sanitizeSettingsPayload,
   type BackupFile,
 } from "../lib/settingsTransfer";
 import { buildExportFile, parseImportContent } from "../lib/vocabularyTransfer";
@@ -2106,8 +2105,12 @@ async function applyBackupImport() {
     if (willImportDictionary && !isSupportedDictionaryBlock(payload.dictionary)) {
       throw new Error("UNSUPPORTED_VERSION");
     }
-    const cleanSettings = willImportSettings
-      ? sanitizeSettingsPayload(payload.settings as Record<string, unknown>)
+    // 刻意傳入**未清洗**的原始設定：importSettings 內部本來就會呼叫
+    // sanitizeSettingsPayload，若在這裡先清洗，「舊備份沒有這個鍵」與
+    // 「備份帶了非法值」會變得無法區分（非法值會被清掉、看起來像沒有），
+    // 使相容性補償邏輯誤判而覆寫使用者既有的選擇。
+    const settingsToImport = willImportSettings
+      ? (payload.settings as Record<string, unknown>)
       : null;
 
     const deviceBeforeImport = settingsStore.selectedAudioInputDeviceName;
@@ -2119,8 +2122,8 @@ async function applyBackupImport() {
       skipped: number;
     } | null = null;
 
-    if (cleanSettings) {
-      await settingsStore.importSettings(cleanSettings);
+    if (settingsToImport) {
+      await settingsStore.importSettings(settingsToImport);
       resyncLocalInputsFromStore();
       settingsApplied = true;
       // 取代規則隨設定一起還原（舊備份沒有此區塊 → 維持現有規則不動）

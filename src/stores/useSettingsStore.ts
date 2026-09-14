@@ -2057,11 +2057,18 @@ export const useSettingsStore = defineStore("settings", () => {
         "azureSpeechApiKey",
         "maiCandidateLocales",
         "maiTranscribeStyle",
-        "maiTranscriptionModelId",
       ];
       for (const k of keys) {
         await store.delete(k);
       }
+      // 刻意「寫入預設值」而非刪除：此鍵**不存在**代表「使用者從未做過選擇」，
+      // 是啟動遷移用來分辨新舊使用者的唯一依據。若清除連線只刪鍵、記憶體卻留著
+      // 預設 v2，之後只要再切回 MAI，任何重新推導都會得到 1.5，造成 Dashboard
+      // 顯示 v2 但 HUD 實際送 1.5，下次啟動更會把非預期的 1.5 寫死。
+      await store.set(
+        "maiTranscriptionModelId",
+        DEFAULT_MAI_TRANSCRIPTION_MODEL_ID,
+      );
 
       // 把仍指向 azure 的 provider 切回 groq，否則轉錄/整理會卡在「未設定」
       if (selectedLlmProviderId.value === "azure") {
@@ -2476,20 +2483,21 @@ export const useSettingsStore = defineStore("settings", () => {
    * 選擇（使用者降版後再升回來），抹掉它等於丟失使用者設定。
    */
   async function migrateMaiTranscriptionModelDefault() {
+    // 與其他寫入者一致的守門：loadSettings() 失敗時 maiTranscriptionModelId
+    // 仍是建構時的預設值（v2），把它持久化會把既有 MAI 使用者誤升級。
+    if (!isLoaded) return;
     const store = await load(STORE_NAME);
     const saved = await store.get<string>("maiTranscriptionModelId");
     if (saved !== null && saved !== undefined) return;
 
-    const savedWhisperProviderId = getEffectiveTranscriptionProviderId(
-      await store.get<string>("whisperProviderId"),
-    );
-    const resolved = resolveInitialMaiTranscriptionModelId(
-      undefined,
-      savedWhisperProviderId,
-    );
+    // 用 loadSettings() 已經推導好的記憶體值，**不可**在這裡重新從 store 推導：
+    // loadSettings() 會在 Azure 停用時把 whisperProviderId 正規化成 "groq" 並
+    // 寫回 store（見該函式內的 provider 正規化），此時再讀 store 就看不到使用者
+    // 原本存的 "mai"，會把既有 MAI 使用者誤判成新使用者而升級到 v2。
+    // loadSettings() 的推導用的是正規化「之前」的值，因此才是正確依據。
+    const resolved = maiTranscriptionModelId.value;
     await store.set("maiTranscriptionModelId", resolved);
     await store.save();
-    maiTranscriptionModelId.value = resolved;
     console.log(
       `[useSettingsStore] MAI transcription model initialized: ${resolved}`,
     );
@@ -3241,11 +3249,17 @@ export const useSettingsStore = defineStore("settings", () => {
           await store.get<string>("whisperProviderId"),
         ),
       };
-      // 依賴上面已讀出的 whisperProvider：同一份判定規則，與 loadSettings 一致。
-      const nextMaiTranscriptionModelId = resolveInitialMaiTranscriptionModelId(
-        await store.get<string>("maiTranscriptionModelId"),
-        nextAzure.whisperProvider,
+      // refresh 不是「初次啟動」：鍵不存在時**不可**重跑新舊使用者推導，否則
+      // 每次切換 provider 都會讓模型在 1.5／v2 之間跳動。只採信已持久化的合法值，
+      // 否則維持目前記憶體值（初次推導已在 loadSettings() 完成）。
+      const savedMaiTranscriptionModelId = await store.get<string>(
+        "maiTranscriptionModelId",
       );
+      const nextMaiTranscriptionModelId = isMaiTranscriptionModelId(
+        savedMaiTranscriptionModelId,
+      )
+        ? savedMaiTranscriptionModelId
+        : maiTranscriptionModelId.value;
       azureEnabled.value = nextAzure.enabled;
       azureResourceName.value = nextAzure.resourceName;
       azureWhisperResourceName.value = nextAzure.whisperResourceName;
