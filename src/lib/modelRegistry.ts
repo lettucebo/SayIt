@@ -293,7 +293,6 @@ export function resolveAzureFamilyFromDeployment(
 // ── LLM 模型（文字整理用）────────────────────────────────
 
 export type LlmModelId =
-  | "qwen/qwen3.6-27b"
   | "qwen/qwen3.8-27b"
   | "openai/gpt-oss-120b"
   | "openai/gpt-oss-20b"
@@ -533,7 +532,7 @@ export interface WhisperModelConfig {
 
 // ── 預設值 ────────────────────────────────────────────────
 
-export const DEFAULT_LLM_MODEL_ID: LlmModelId = "qwen/qwen3.6-27b";
+export const DEFAULT_LLM_MODEL_ID: LlmModelId = "qwen/qwen3.8-27b";
 export const DEFAULT_WHISPER_MODEL_ID: WhisperModelId = "whisper-large-v3";
 
 // ── 已下架模型 ID 映射（舊 → 新，用於自動遷移）──────────
@@ -553,6 +552,9 @@ export const DECOMMISSIONED_MODEL_MAP: Record<string, string> = {
   "meta-llama/llama-4-maverick-17b-128e-instruct": "qwen/qwen3.6-27b",
   "llama-3.1-8b-instant": "openai/gpt-oss-20b",
   "gpt-oss-120b": "openai/gpt-oss-120b",
+  // Groq — qwen3.6 為 preview 模型，已無預警下架（實測 chat/completions 回 404）。
+  // 上面數個舊 entry 仍指向它，靠 getEffectiveLlmModelId 的迴圈解析續跳到 3.8。
+  "qwen/qwen3.6-27b": "qwen/qwen3.8-27b",
   // Gemini — 2.5 世代汰換
   "gemini-2.5-flash": "gemini-3.5-flash",
   "gemini-2.5-flash-lite": "gemini-3.1-flash-lite",
@@ -567,20 +569,6 @@ export const DECOMMISSIONED_MODEL_MAP: Record<string, string> = {
 export const LLM_MODEL_LIST: LlmModelConfig[] = [
   // ── Groq（免費）──
   {
-    // Preview 模型：Groq 可無預警下架，顯示名稱標明讓使用者知情
-    id: "qwen/qwen3.6-27b",
-    providerId: "groq",
-    displayName: "Qwen3.6 27B (Preview)",
-    badgeKey: "settings.modelBadge.balanced",
-    descriptionKey: "settings.model.llmDescription.qwen36",
-    speedTps: 500,
-    inputCostPerMillion: 0.6,
-    outputCostPerMillion: 3.0,
-    freeQuotaRpd: 1_000,
-    freeQuotaTpd: 200_000,
-    isDefault: true,
-  },
-  {
     id: "qwen/qwen3.8-27b",
     providerId: "groq",
     displayName: "Qwen3.8 27B (Preview)",
@@ -591,7 +579,7 @@ export const LLM_MODEL_LIST: LlmModelConfig[] = [
     outputCostPerMillion: 4.0,
     freeQuotaRpd: 1_000,
     freeQuotaTpd: 2_000_000,
-    isDefault: false,
+    isDefault: true,
   },
   {
     id: "openai/gpt-oss-120b",

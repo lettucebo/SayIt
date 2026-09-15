@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { DEFAULT_LLM_MODEL_ID } from "../../src/lib/modelRegistry";
 
 const mockFetch = vi.fn();
 vi.mock("@tauri-apps/plugin-http", () => ({
@@ -131,7 +132,8 @@ describe("enhancer.ts", () => {
       expect(callArgs[1].headers.Authorization).toBe(`Bearer ${TEST_API_KEY}`);
 
       const body = JSON.parse(callArgs[1].body);
-      expect(body.model).toBe("qwen/qwen3.6-27b");
+      // 綁 registry 而非字面值：模型下架時預設會換，這裡不該跟著壞
+      expect(body.model).toBe(DEFAULT_LLM_MODEL_ID);
       expect(body.temperature).toBe(0.1);
       expect(body.max_tokens).toBe(8192);
       expect(body.messages).toHaveLength(2);

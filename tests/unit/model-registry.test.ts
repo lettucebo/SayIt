@@ -321,6 +321,23 @@ describe("modelRegistry — 轉錄 provider", () => {
 
 describe("modelRegistry — 模型遷移", () => {
   describe("DECOMMISSIONED_MODEL_MAP 不變量", () => {
+    // 根因守衛：qwen3.6 曾同時是 DEFAULT_LLM_MODEL_ID 與 registry 成員，
+    // 卻已被 Groq 下架，導致新安裝與所有遷移過來的使用者都撞 404。
+    // 「預設模型不得出現在下架表」可在下次下架時直接把問題擋在 CI。
+    it("[P0] 預設模型必須存活，且不得是已下架 ID", () => {
+      expect(findLlmModelConfig(DEFAULT_LLM_MODEL_ID)).toBeDefined();
+      expect(DEFAULT_LLM_MODEL_ID in DECOMMISSIONED_MODEL_MAP).toBe(false);
+    });
+
+    it("[P0] registry 內不得有任何已下架 ID", () => {
+      for (const model of LLM_MODEL_LIST) {
+        expect(
+          model.id in DECOMMISSIONED_MODEL_MAP,
+          `${model.id} 同時存在於 LLM_MODEL_LIST 與 DECOMMISSIONED_MODEL_MAP`,
+        ).toBe(false);
+      }
+    });
+
     it("[P0] 每個 map value 是存活模型或另一個 map key（結構不變量，抓 typo）", () => {
       for (const [key, value] of Object.entries(DECOMMISSIONED_MODEL_MAP)) {
         const isLiveModel = findLlmModelConfig(value) !== undefined;
@@ -368,7 +385,7 @@ describe("modelRegistry — 模型遷移", () => {
         outputCostPerMillion: 4,
         freeQuotaRpd: 1_000,
         freeQuotaTpd: 2_000_000,
-        isDefault: false,
+        isDefault: true,
       });
     });
   });
@@ -384,8 +401,15 @@ describe("modelRegistry — 模型遷移", () => {
     });
 
     it("[P0] 已下架的舊預設 llama-3.3-70b 遷移到新預設", () => {
+      // 該 entry 仍指向 qwen3.6，由迴圈解析續跳到現役的 3.8
       expect(getEffectiveLlmModelId("llama-3.3-70b-versatile")).toBe(
-        "qwen/qwen3.6-27b",
+        "qwen/qwen3.8-27b",
+      );
+    });
+
+    it("[P0] 2026-09 下架的 qwen3.6 遷移到 qwen3.8", () => {
+      expect(getEffectiveLlmModelId("qwen/qwen3.6-27b")).toBe(
+        "qwen/qwen3.8-27b",
       );
     });
 
