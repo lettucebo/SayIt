@@ -57,22 +57,22 @@ describe("apiPricing.ts", () => {
     });
 
     it("[P0] 1000 tokens 應按 output 價格上限計算", () => {
-      // 預設模型 Qwen3.8 27B: max(input=0.8, output=4.0) = 4.0/M
-      // 1000 * 0.000004 = 0.004
+      // 預設模型 GPT OSS 120B: max(input=0.15, output=0.6) = 0.6/M
+      // 1000 * 0.0000006 = 0.0006
       const cost = calculateChatCostCeiling(1000);
-      expect(cost).toBeCloseTo(0.004, 6);
+      expect(cost).toBeCloseTo(0.0006, 6);
     });
 
-    it("[P0] 1M tokens 應回傳 $4.00", () => {
-      // 預設模型 Qwen3.8 27B: 1M * 4.0/M = 4.0
+    it("[P0] 1M tokens 應回傳 $0.60", () => {
+      // 預設模型 GPT OSS 120B: 1M * 0.6/M = 0.6
       const cost = calculateChatCostCeiling(1_000_000);
-      expect(cost).toBeCloseTo(4.0, 4);
+      expect(cost).toBeCloseTo(0.6, 4);
     });
 
     it("[P1] 150 tokens 應正確計算", () => {
-      // 預設模型 Qwen3.8 27B: 150 * 0.000004 = 0.0006
+      // 預設模型 GPT OSS 120B: 150 * 0.0000006 = 0.00009
       const cost = calculateChatCostCeiling(150);
-      expect(cost).toBeCloseTo(0.0006, 6);
+      expect(cost).toBeCloseTo(0.00009, 6);
     });
 
     it("[P1] 未知 model id 的 fallback 上限 ≥ registry 內任何模型（保證不低估）", () => {

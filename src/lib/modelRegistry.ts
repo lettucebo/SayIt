@@ -532,7 +532,7 @@ export interface WhisperModelConfig {
 
 // ── 預設值 ────────────────────────────────────────────────
 
-export const DEFAULT_LLM_MODEL_ID: LlmModelId = "qwen/qwen3.8-27b";
+export const DEFAULT_LLM_MODEL_ID: LlmModelId = "openai/gpt-oss-120b";
 export const DEFAULT_WHISPER_MODEL_ID: WhisperModelId = "whisper-large-v3";
 
 // ── 已下架模型 ID 映射（舊 → 新，用於自動遷移）──────────
@@ -552,9 +552,12 @@ export const DECOMMISSIONED_MODEL_MAP: Record<string, string> = {
   "meta-llama/llama-4-maverick-17b-128e-instruct": "qwen/qwen3.6-27b",
   "llama-3.1-8b-instant": "openai/gpt-oss-20b",
   "gpt-oss-120b": "openai/gpt-oss-120b",
-  // Groq — qwen3.6 為 preview 模型，已無預警下架（實測 chat/completions 回 404）。
-  // 上面數個舊 entry 仍指向它，靠 getEffectiveLlmModelId 的迴圈解析續跳到 3.8。
-  "qwen/qwen3.6-27b": "qwen/qwen3.8-27b",
+  // Groq — qwen3.6 為 preview 模型，已無預警下架（實測 chat/completions 回 404），
+  // 且從未出現在官方棄用頁——preview 模型本就不走正式棄用流程。
+  // 遷移目標刻意選 production 的 gpt-oss-120b 而非同族的 qwen3.8：後者同為
+  // preview，指過去只是把同一顆未爆彈往後延。上面數個舊 entry 仍指向 qwen3.6，
+  // 靠 getEffectiveLlmModelId 的迴圈解析續跳到這裡。
+  "qwen/qwen3.6-27b": "openai/gpt-oss-120b",
   // Gemini — 2.5 世代汰換
   "gemini-2.5-flash": "gemini-3.5-flash",
   "gemini-2.5-flash-lite": "gemini-3.1-flash-lite",
@@ -579,15 +582,16 @@ export const LLM_MODEL_LIST: LlmModelConfig[] = [
     outputCostPerMillion: 4.0,
     freeQuotaRpd: 1_000,
     freeQuotaTpd: 2_000_000,
-    isDefault: true,
+    isDefault: false,
   },
   {
     id: "openai/gpt-oss-120b",
     providerId: "groq",
     displayName: "GPT OSS 120B",
-    // badge 是「正式版」而非「成本高」：本模型 $0.15/$0.60 是全 registry 第二便宜
-    // （僅次於 20B），且 Groq 三個模型都有免費額度，成本不是這裡的區分軸。
-    // 真正的差異是預設的 qwen 為 preview（可能無預警下架），本模型是正式版。
+    // 預設選 production 而非同族更新的 qwen：Groq 官方明言 preview 模型
+    // 「may be discontinued at short notice」，qwen3.6 正是這樣消失的
+    // （連棄用頁都沒列）。Groq 歷次棄用公告也都以本模型為建議遷移目標。
+    // 成本上本模型 $0.15/$0.60 亦是全 registry 第二便宜（僅次於 20B）。
     badgeKey: "settings.modelBadge.stableProduction",
     descriptionKey: "settings.model.llmDescription.oss120b",
     speedTps: 500,
@@ -595,7 +599,7 @@ export const LLM_MODEL_LIST: LlmModelConfig[] = [
     outputCostPerMillion: 0.6,
     freeQuotaRpd: 1_000,
     freeQuotaTpd: 200_000,
-    isDefault: false,
+    isDefault: true,
   },
   {
     id: "openai/gpt-oss-20b",

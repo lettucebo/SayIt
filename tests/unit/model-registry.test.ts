@@ -338,6 +338,19 @@ describe("modelRegistry — 模型遷移", () => {
       }
     });
 
+    // Groq 官方棄用政策：preview 模型「may be discontinued at short notice」，
+    // 且不走正式棄用流程（qwen3.6 消失時連棄用頁都沒列）。任何 provider 的
+    // 預設都不該是 preview，否則下一次無預警下架又會讓所有人撞 404。
+    it("[P0] 各 provider 的預設模型不得是 preview", () => {
+      for (const model of LLM_MODEL_LIST) {
+        if (!model.isDefault) continue;
+        expect(
+          model.displayName.includes("(Preview)"),
+          `${model.id} 是 ${model.providerId} 的預設，但標示為 Preview`,
+        ).toBe(false);
+      }
+    });
+
     it("[P0] 每個 map value 是存活模型或另一個 map key（結構不變量，抓 typo）", () => {
       for (const [key, value] of Object.entries(DECOMMISSIONED_MODEL_MAP)) {
         const isLiveModel = findLlmModelConfig(value) !== undefined;
@@ -385,7 +398,7 @@ describe("modelRegistry — 模型遷移", () => {
         outputCostPerMillion: 4,
         freeQuotaRpd: 1_000,
         freeQuotaTpd: 2_000_000,
-        isDefault: true,
+        isDefault: false,
       });
     });
   });
@@ -401,15 +414,15 @@ describe("modelRegistry — 模型遷移", () => {
     });
 
     it("[P0] 已下架的舊預設 llama-3.3-70b 遷移到新預設", () => {
-      // 該 entry 仍指向 qwen3.6，由迴圈解析續跳到現役的 3.8
+      // 該 entry 仍指向 qwen3.6，由迴圈解析續跳到現役的 gpt-oss-120b
       expect(getEffectiveLlmModelId("llama-3.3-70b-versatile")).toBe(
-        "qwen/qwen3.8-27b",
+        "openai/gpt-oss-120b",
       );
     });
 
-    it("[P0] 2026-09 下架的 qwen3.6 遷移到 qwen3.8", () => {
+    it("[P0] 2026-09 下架的 qwen3.6 遷移到 production 模型", () => {
       expect(getEffectiveLlmModelId("qwen/qwen3.6-27b")).toBe(
-        "qwen/qwen3.8-27b",
+        "openai/gpt-oss-120b",
       );
     });
 
