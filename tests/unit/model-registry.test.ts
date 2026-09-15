@@ -341,11 +341,16 @@ describe("modelRegistry — 模型遷移", () => {
     // Groq 官方棄用政策：preview 模型「may be discontinued at short notice」，
     // 且不走正式棄用流程（qwen3.6 消失時連棄用頁都沒列）。任何 provider 的
     // 預設都不該是 preview，否則下一次無預警下架又會讓所有人撞 404。
+    // 同時比對 id 與 displayName 且不分大小寫：只認 "(Preview)" 這個字面
+    // 會在命名稍有出入時靜默放行（如 gemini-3.1-pro-preview 只有 id 帶標記）。
     it("[P0] 各 provider 的預設模型不得是 preview", () => {
       for (const model of LLM_MODEL_LIST) {
         if (!model.isDefault) continue;
+        const marked =
+          model.id.toLowerCase().includes("preview") ||
+          model.displayName.toLowerCase().includes("preview");
         expect(
-          model.displayName.includes("(Preview)"),
+          marked,
           `${model.id} 是 ${model.providerId} 的預設，但標示為 Preview`,
         ).toBe(false);
       }

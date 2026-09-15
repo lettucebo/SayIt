@@ -62,7 +62,7 @@ function makeSettings(overrides: Record<string, unknown> = {}) {
     whisperProviderId: "groq",
     selectedLlmProviderId: "groq",
     selectedWhisperModelId: "whisper-large-v3",
-    selectedLlmModelId: "qwen/qwen3.6-27b",
+    selectedLlmModelId: "openai/gpt-oss-120b",
     // Gemini 轉錄額度：0 = 未覆寫（改用模型內建預設）
     geminiTranscriptionModelId: "gemini-3.5-flash-lite",
     geminiFreeQuotaRequests: 0,
