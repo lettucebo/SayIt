@@ -19,11 +19,6 @@ on:
         description: "產生假的漂移報告以驗證開 issue 的路徑（不檢查真實模型）"
         type: boolean
         default: false
-    inputs:
-      simulate_drift:
-        description: "產生假的漂移報告以驗證開 issue 的路徑（不檢查真實模型）"
-        type: boolean
-        default: false
 
 # 同時只跑一個，避免手動觸發與排程重疊時開出重複 issue
 concurrency:
@@ -69,18 +64,22 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPORT_PATH: ${{ runner.temp }}/drift-report.md
-          TITLE: "模型可用性：registry 內有已下架的模型"
+          # 模擬報告用獨立 label：兩者共用的話，一次模擬就會把尚未處理的真實
+          # 告警內容覆寫成「沒有任何模型真的失效，直接關閉即可」，等於把實際
+          # 故障清單抹掉還誤導維護者去關閉它。
+          LABEL: ${{ inputs.simulate_drift && 'model-availability-simulation' || 'model-availability' }}
+          TITLE: ${{ inputs.simulate_drift && '模型可用性：告警管線驗證（模擬）' || '模型可用性：registry 內有已下架的模型' }}
         run: |
           set -euo pipefail
-          existing=$(gh issue list --label model-availability --state open \
+          existing=$(gh issue list --label "$LABEL" --state open \
             --json number --jq '.[0].number // empty')
 
           if [ -z "$existing" ]; then
-            gh label create model-availability \
+            gh label create "$LABEL" \
               --description "Scheduled model availability check" \
               --color B60205 2>/dev/null || true
             gh issue create --title "$TITLE" \
-              --label model-availability --body-file "$REPORT_PATH"
+              --label "$LABEL" --body-file "$REPORT_PATH"
             exit 0
           fi
 

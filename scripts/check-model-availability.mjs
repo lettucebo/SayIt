@@ -73,6 +73,16 @@ async function fetchLiveIds(provider, key) {
     // 否則會把整份 registry 報成失效。
     throw new Error(`${provider.label} models API returned an empty list`);
   }
+  // 逐筆驗證形狀，不能只看長度：回應若是 `{"data":[{}]}`（HTTP 200 但欄位缺失），
+  // 清單長度是 1 卻裝著 undefined，會通過上面的守衛然後把每個 registry 模型
+  // 都判成「不在清單中」——正是這個三態退出碼要避免的假下架警報。
+  // 刻意整批失敗而非過濾掉壞資料：能回出畸形項目的回應，剩下的部分也不可信。
+  const invalid = ids.filter((id) => typeof id !== "string" || id.trim() === "");
+  if (invalid.length > 0) {
+    throw new Error(
+      `${provider.label} models API returned ${invalid.length} entry/entries without a usable id`,
+    );
+  }
   return new Set(ids);
 }
 
