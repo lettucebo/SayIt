@@ -1,0 +1,92 @@
+name: Model Availability
+
+# 為什麼需要這支 workflow：
+# 2026-09 Groq 無預警下架了當時的預設模型 qwen/qwen3.6-27b，所有全新安裝與從舊版
+# 遷移的使用者在 AI 整理階段直接撞 404。語音轉錄本身仍正常，只是少了書面語整理，
+# 因此沒有任何錯誤回報，直到有人自己發現。
+#
+# 官方棄用頁擋不住這種事：preview 模型「may be discontinued at short notice」且不走
+# 正式棄用流程——qwen3.6 被拉掉時該頁完全沒列它。只有實際的模型清單 API 是權威來源。
+
+on:
+  schedule:
+    # 每天 01:15 UTC（台北 09:15）。刻意避開整點，整點是 GitHub 排程的尖峰、
+    # 延遲最嚴重。每天一次即可：模型下架不是分鐘級事件，而過於頻繁只會浪費額度。
+    - cron: "15 1 * * *"
+  workflow_dispatch:
+    inputs:
+      simulate_drift:
+        description: "產生假的漂移報告以驗證開 issue 的路徑（不檢查真實模型）"
+        type: boolean
+        default: false
+
+# 同時只跑一個，避免手動觸發與排程重疊時開出重複 issue
+concurrency:
+  group: model-availability
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      # 不裝 dependencies：檢查腳本只用 Node 內建能力，registry 也沒有任何 import。
+      # 少一次 pnpm install 讓這支排程 job 既快又不會被 lockfile 問題卡住。
+      # 不帶 --experimental-strip-types：Node 22.18+ 起型別剝離已預設開啟，
+      # 明確傳旗標反而會在未來版本移除該旗標時壞掉。
+      - name: Check model availability
+        id: check
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          MODEL_DRIFT_REPORT_PATH: ${{ runner.temp }}/drift-report.md
+          SIMULATE_DRIFT: ${{ inputs.simulate_drift && '1' || '0' }}
+        run: |
+          set +e
+          node scripts/check-model-availability.mjs
+          code=$?
+          set -e
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          # 0 = 無漂移、1 = 有漂移（下一步開 issue）、其他 = 檢查本身失敗。
+          # 失敗要讓 job 紅燈，但不可開 issue：Groq 短暫故障不等於模型下架。
+          if [ "$code" -gt 1 ]; then exit "$code"; fi
+
+      - name: Report drift
+        if: steps.check.outputs.exit_code == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPORT_PATH: ${{ runner.temp }}/drift-report.md
+          TITLE: "模型可用性：registry 內有已下架的模型"
+        run: |
+          set -euo pipefail
+          existing=$(gh issue list --label model-availability --state open \
+            --json number --jq '.[0].number // empty')
+
+          if [ -z "$existing" ]; then
+            gh label create model-availability \
+              --description "Scheduled model availability check" \
+              --color B60205 2>/dev/null || true
+            gh issue create --title "$TITLE" \
+              --label model-availability --body-file "$REPORT_PATH"
+            exit 0
+          fi
+
+          # 已有開啟中的 issue：只有在內容變了才留言。每天貼一次相同報告會讓
+          # 通知變成雜訊，維護者最後就不看了。
+          gh issue view "$existing" --json body --jq .body > /tmp/previous-body.md
+          if diff -q /tmp/previous-body.md "$REPORT_PATH" >/dev/null 2>&1; then
+            echo "issue #$existing already reports this exact drift; nothing to do"
+            exit 0
+          fi
+
+          gh issue edit "$existing" --body-file "$REPORT_PATH"
+          gh issue comment "$existing" \
+            --body "偵測結果有變動，已更新 issue 內容（可能是又有模型被下架，或部分已修正）。"
