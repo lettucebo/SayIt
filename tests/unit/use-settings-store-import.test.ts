@@ -223,8 +223,75 @@ describe("useSettingsStore — exportSettings / importSettings", () => {
       expect(store.azureChatModelFamilySource).toBe("manual");
     });
 
-    it("[P0] 匯入後 emit SETTINGS_UPDATED", async () => {
+    // 舊備份（本功能推出前匯出）不含 maiTranscriptionModelId。匯入迴圈只寫備份
+    // 「有」的鍵，若不補償，目標機器啟動時寫下的 v2 會被留著，原本用 1.5 的
+    // 使用者還原備份後會被靜默換模型。
+    it("[P0] 舊 MAI 備份缺模型鍵 → 明確補寫 1.5（不得沿用本機 v2）", async () => {
+      h.mockStoreData.set("maiTranscriptionModelId", "mai-transcribe-2");
       const store = useSettingsStore();
+      await store.loadSettings();
+
+      await store.importSettings({
+        whisperProviderId: "mai",
+        azureEnabled: true,
+      });
+
+      expect(h.mockStoreData.get("maiTranscriptionModelId")).toBe(
+        "mai-transcribe-1.5",
+      );
+      expect(store.maiTranscriptionModelId).toBe("mai-transcribe-1.5");
+    });
+
+    it("[P0] 新備份帶合法模型值 → 原樣還原，不被補償邏輯蓋掉", async () => {
+      h.mockStoreData.set("maiTranscriptionModelId", "mai-transcribe-1.5");
+      const store = useSettingsStore();
+      await store.loadSettings();
+
+      await store.importSettings({
+        whisperProviderId: "mai",
+        azureEnabled: true,
+        maiTranscriptionModelId: "mai-transcribe-2",
+      });
+
+      expect(h.mockStoreData.get("maiTranscriptionModelId")).toBe(
+        "mai-transcribe-2",
+      );
+      expect(store.maiTranscriptionModelId).toBe("mai-transcribe-2");
+    });
+
+    it("[P0] 舊備份但未使用 MAI → 不動本機既有模型選擇", async () => {
+      h.mockStoreData.set("maiTranscriptionModelId", "mai-transcribe-2");
+      const store = useSettingsStore();
+      await store.loadSettings();
+
+      await store.importSettings({ whisperProviderId: "groq" });
+
+      expect(h.mockStoreData.get("maiTranscriptionModelId")).toBe(
+        "mai-transcribe-2",
+      );
+    });
+
+    // 回歸鎖（Duck Blocking B）：importSettings 收到的必須是**未清洗**的原始備份。
+    // 若呼叫端先 sanitize，非法值會被清掉、看起來像「舊備份沒有這個鍵」，
+    // 補償邏輯就會把使用者既有的 v2 誤覆寫成 1.5。
+    it("[P0] 備份帶非法模型值 → 視為「有帶但無效」，不得補寫 1.5", async () => {
+      h.mockStoreData.set("maiTranscriptionModelId", "mai-transcribe-2");
+      const store = useSettingsStore();
+      await store.loadSettings();
+
+      await store.importSettings({
+        whisperProviderId: "mai",
+        azureEnabled: true,
+        maiTranscriptionModelId: "mai-transcribe-99",
+      } as unknown as SettingsPayload);
+
+      expect(h.mockStoreData.get("maiTranscriptionModelId")).toBe(
+        "mai-transcribe-2",
+      );
+      expect(store.maiTranscriptionModelId).toBe("mai-transcribe-2");
+    });
+
+    it("[P0] 匯入後 emit SETTINGS_UPDATED", async () => {      const store = useSettingsStore();
       // 正式流程在 mount 前就 await loadSettings()；未載入完成時匯入會被守門擋下
       await store.loadSettings();
       await store.importSettings({ muteOnRecording: true });
@@ -249,6 +316,40 @@ describe("useSettingsStore — exportSettings / importSettings", () => {
       await store.loadSettings();
       await store.importSettings({ autoStartEnabled: true });
       expect(h.mockStoreData.has("autoStartEnabled")).toBe(false);
+    });
+  });
+
+  // 回歸鎖（Duck Blocking A）：清除連線若「刪鍵」但記憶體留著預設 v2，
+  // 「鍵不存在＝從未選過」這個不變量就被破壞——之後任何重新推導只要 provider
+  // 是 mai 就會得到 1.5，造成 Dashboard 顯示 v2 但 HUD 實際送 1.5。
+  describe("deleteAzureConnection 與模型選擇的一致性", () => {
+    it("[P0] 清除連線後鍵必須仍存在，且值與記憶體一致", async () => {
+      h.mockStoreData.set("maiTranscriptionModelId", "mai-transcribe-1.5");
+      h.mockStoreData.set("whisperProviderId", "mai");
+      h.mockStoreData.set("azureEnabled", true);
+      const store = useSettingsStore();
+      await store.loadSettings();
+
+      await store.deleteAzureConnection();
+
+      expect(h.mockStoreData.get("maiTranscriptionModelId")).toBe(
+        "mai-transcribe-2",
+      );
+      expect(store.maiTranscriptionModelId).toBe("mai-transcribe-2");
+    });
+
+    it("[P0] 清除連線後切回 MAI，重新整理不得把模型翻成 1.5", async () => {
+      h.mockStoreData.set("azureEnabled", true);
+      const store = useSettingsStore();
+      await store.loadSettings();
+      await store.deleteAzureConnection();
+
+      // 使用者重新啟用 Azure 並切回 MAI
+      h.mockStoreData.set("azureEnabled", true);
+      h.mockStoreData.set("whisperProviderId", "mai");
+      await store.refreshCrossWindowSettings();
+
+      expect(store.maiTranscriptionModelId).toBe("mai-transcribe-2");
     });
   });
 });

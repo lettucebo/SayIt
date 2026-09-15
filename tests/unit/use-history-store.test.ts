@@ -508,6 +508,37 @@ describe("useHistoryStore", () => {
       expect(sql).toContain("SUM(recording_duration_ms)");
     });
 
+    // 上面的用量測試直接 mock provider_bucket，SQL 的 CASE 其實沒被執行。
+    // 這裡改鎖住真正的耦合點：分桶樣式必須和 modelRegistry 的正規 ID 對得上。
+    it("[P0] MAI 分桶樣式必須涵蓋所有 MAI 模型 ID", async () => {
+      mockDbSelect.mockResolvedValueOnce([
+        {
+          total_count: 0,
+          total_characters: 0,
+          total_recording_duration_ms: 0,
+        },
+      ]);
+      mockDbSelect.mockResolvedValueOnce([]);
+      mockDbSelect.mockResolvedValueOnce([]);
+      const { useHistoryStore } = await import(
+        "../../src/stores/useHistoryStore"
+      );
+      const { MAI_TRANSCRIPTION_MODEL_LIST } = await import(
+        "../../src/lib/modelRegistry"
+      );
+      const store = useHistoryStore();
+
+      await store.fetchDashboardStats();
+
+      const quotaSql = mockDbSelect.mock.calls[1][0] as string;
+      expect(quotaSql).toContain("WHEN model LIKE 'mai-%' THEN 'mai'");
+      // 送進 api_usage 的是正規 ID；任何不以 mai- 開頭的新 ID 都會被誤歸到
+      // whisper 桶，把 MAI 的請求數算進 Groq 的免費額度條。
+      for (const model of MAI_TRANSCRIPTION_MODEL_LIST) {
+        expect(model.id.startsWith("mai-")).toBe(true);
+      }
+    });
+
     it("[P0] 應正確計算節省時間和整合每日額度用量", async () => {
       // 節省時間 = 600 / 40 * 60000 - 120000 = 780000ms
       mockDbSelect.mockResolvedValueOnce([

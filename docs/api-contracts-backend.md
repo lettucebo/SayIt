@@ -184,7 +184,7 @@ invoke('get_foreground_app_name') → string | null
 invoke('transcribe_audio', {
   apiKey: string,
   vocabularyTermList?: string[] | null,
-  modelId?: string,        // Whisper 預設 'whisper-large-v3'；Gemini / MAI 走獨立模型
+  modelId?: string,        // Whisper 預設 'whisper-large-v3'；Gemini / MAI 走獨立 allowlist
   language?: string | null, // null／省略 = 不送 language 欄位，由 provider 自動偵測
   provider?: 'groq' | 'azure' | 'gemini' | 'mai',  // 預設 groq；未知值 fail-closed 報錯
   endpoint?: string | null,        // Azure OpenAI 或 MAI 的 Azure AI Speech endpoint
@@ -192,9 +192,20 @@ invoke('transcribe_audio', {
   apiVersion?: string | null,      // Azure
   authMode?: 'key' | 'bearer' | null,  // Azure wire 驗證方式
   candidateLocales?: string[] | null, // MAI Fast：至多一個 BCP-47 語言提示（空 = 多語自動）
-  transcribeStyle?: 'default' | 'verbatim' | null, // MAI：default 不送欄位
+  transcribeStyle?: 'default' | 'verbatim' | null, // MAI：語意跨模型一致，wire 形狀由 Rust 決定
 }) → Result<TranscriptionResult, TranscriptionError>
 ```
+
+> **MAI 的 `modelId`**：allowlist 為 `'mai-transcribe-1.5' | 'mai-transcribe-2'`（Rust `MAI_TRANSCRIPTION_MODELS`
+> 與前端 `MAI_TRANSCRIPTION_MODEL_LIST` 必須一致）。allowlist 外的值一律退回 `mai-transcribe-1.5`，
+> 也就是本功能推出前唯一送出過的 wire 行為。正規 ID 一律小寫 kebab（用量統計以 SQL `model LIKE 'mai-%'`
+> 分桶）；送給服務端的大小寫由 Rust `MaiModel::wire_name()` 決定（v2 為 `MAI-Transcribe-2`）。
+>
+> **`transcribeStyle` 的 wire 形狀依模型而異**，前端不需要知道：
+> - `mai-transcribe-1.5` → `enhancedMode.transcribeStyle`，僅 `verbatim` 時送出（服務端預設即可讀）
+> - `mai-transcribe-2` → `enhancedMode.modelOptions.transcribeStyle`，**兩種風格都明確送出**
+>   （`clean` / `verbatim`）。v2 的服務端預設是 `verbatim`，與 1.5 相反；不明送會讓使用者選了
+>   「可讀性最佳化」卻拿到含填充詞的逐字稿。
 
 #### `retranscribe_from_file`
 ```ts

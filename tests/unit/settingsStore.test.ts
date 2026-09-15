@@ -109,7 +109,19 @@ vi.mock("../../src/lib/modelRegistry", () => ({
   getEffectiveAzureChatModelFamilySource: (source: unknown) =>
     source === "auto" ? "auto" : "manual",
   GEMINI_TRANSCRIPTION_MODEL: "gemini-3.5-flash-lite",
-  MAI_TRANSCRIPTION_MODEL_ID: "mai-transcribe-1.5",
+  DEFAULT_MAI_TRANSCRIPTION_MODEL_ID: "mai-transcribe-2",
+  LEGACY_MAI_TRANSCRIPTION_MODEL_ID: "mai-transcribe-1.5",
+  isMaiTranscriptionModelId: (id: unknown) =>
+    id === "mai-transcribe-1.5" || id === "mai-transcribe-2",
+  resolveInitialMaiTranscriptionModelId: (
+    saved: unknown,
+    savedWhisperProviderId: string | null | undefined,
+  ) =>
+    saved === "mai-transcribe-1.5" || saved === "mai-transcribe-2"
+      ? saved
+      : savedWhisperProviderId === "mai"
+        ? "mai-transcribe-1.5"
+        : "mai-transcribe-2",
   DEFAULT_FOUNDRY_TRANSCRIPTION_PROVIDER: "mai",
   toTranscriptionProviderGroup: (id: string) =>
     id === "azure" || id === "mai" ? "foundry" : id,
@@ -238,5 +250,136 @@ describe("useSettingsStore — prompt mode 遷移", () => {
     await store.loadSettings();
 
     expect(store.getAiPrompt()).toBe(customPrompt);
+  });
+
+  describe("MAI 轉錄模型預設值", () => {
+    it("[P0] 全新安裝（無模型鍵、未用 MAI）→ 推導為 mai-transcribe-2", async () => {
+      setupStoreGetMock({});
+      const store = await createStore();
+      await store.loadSettings();
+
+      expect(store.maiTranscriptionModelId).toBe("mai-transcribe-2");
+    });
+
+    it("[P0] 既有 MAI 使用者（無模型鍵、whisperProviderId=mai）→ 維持 1.5", async () => {
+      setupStoreGetMock({ whisperProviderId: "mai", azureEnabled: true });
+      const store = await createStore();
+      await store.loadSettings();
+
+      expect(store.maiTranscriptionModelId).toBe("mai-transcribe-1.5");
+    });
+
+    it("[P0] 已存合法值 → 原樣沿用，不被 provider 規則翻掉", async () => {
+      setupStoreGetMock({
+        whisperProviderId: "mai",
+        azureEnabled: true,
+        maiTranscriptionModelId: "mai-transcribe-2",
+      });
+      const store = await createStore();
+      await store.loadSettings();
+
+      expect(store.maiTranscriptionModelId).toBe("mai-transcribe-2");
+    });
+
+    it("[P0] 已存無法辨識的值 → 記憶體退回，且不覆寫 store", async () => {
+      setupStoreGetMock({ maiTranscriptionModelId: "mai-transcribe-99" });
+      const store = await createStore();
+      await store.loadSettings();
+
+      expect(store.maiTranscriptionModelId).toBe("mai-transcribe-2");
+      // 未來版本寫下的選擇不可被抹掉
+      expect(mockStoreSet).not.toHaveBeenCalledWith(
+        "maiTranscriptionModelId",
+        expect.anything(),
+      );
+    });
+
+    // 回歸鎖：HUD 與 Dashboard 會並行 loadSettings()，載入時寫入會讓較慢的
+    // 視窗把使用者剛選好的模型覆寫回推導值。
+    it("[P0] loadSettings() 不得寫入 maiTranscriptionModelId", async () => {
+      setupStoreGetMock({});
+      const store = await createStore();
+      await store.loadSettings();
+
+      expect(mockStoreSet).not.toHaveBeenCalledWith(
+        "maiTranscriptionModelId",
+        expect.anything(),
+      );
+    });
+
+    it("[P0] migrate：鍵不存在時寫入推導值", async () => {
+      setupStoreGetMock({ whisperProviderId: "mai", azureEnabled: true });
+      const store = await createStore();
+      await store.loadSettings();
+      mockStoreSet.mockClear();
+
+      await store.migrateMaiTranscriptionModelDefault();
+
+      expect(mockStoreSet).toHaveBeenCalledWith(
+        "maiTranscriptionModelId",
+        "mai-transcribe-1.5",
+      );
+    });
+
+    it("[P0] migrate：鍵已存在時不寫入（含無法辨識的值）", async () => {
+      for (const saved of ["mai-transcribe-2", "mai-transcribe-99"]) {
+        setupStoreGetMock({ maiTranscriptionModelId: saved });
+        const store = await createStore();
+        await store.loadSettings();
+        mockStoreSet.mockClear();
+
+        await store.migrateMaiTranscriptionModelDefault();
+
+        expect(mockStoreSet).not.toHaveBeenCalledWith(
+          "maiTranscriptionModelId",
+          expect.anything(),
+        );
+      }
+    });
+
+    // 回歸鎖（Council ISSUE-C）：loadSettings() 會在 Azure 停用時把
+    // whisperProviderId 正規化成 "groq" 並寫回 store。migrate 若重新從 store
+    // 讀 provider，就會讀到 "groq"、把既有 MAI 使用者誤判成新使用者升級到 v2。
+    // 這裡用「會反映寫入」的 store mock，否則 bug 無法重現。
+    it("[P0] migrate：Azure 停用的既有 MAI 使用者仍須維持 1.5", async () => {
+      const data = new Map<string, unknown>(
+        Object.entries({ whisperProviderId: "mai", azureEnabled: false }),
+      );
+      mockStoreGet.mockImplementation((key: string) =>
+        Promise.resolve(data.has(key) ? data.get(key) : null),
+      );
+      mockStoreSet.mockImplementation((key: string, value: unknown) => {
+        data.set(key, value);
+        return Promise.resolve();
+      });
+
+      const store = await createStore();
+      await store.loadSettings();
+      // 前提成立：provider 已被正規化寫回成 groq
+      expect(data.get("whisperProviderId")).toBe("groq");
+
+      await store.migrateMaiTranscriptionModelDefault();
+
+      expect(data.get("maiTranscriptionModelId")).toBe("mai-transcribe-1.5");
+      expect(store.maiTranscriptionModelId).toBe("mai-transcribe-1.5");
+    });
+
+    // 回歸鎖（ISSUE-D）：loadSettings 失敗時 ref 還是建構時的預設 v2，
+    // 把它持久化會把既有 MAI 使用者誤升級。
+    it("[P0] migrate：settings 未成功載入時不得寫入", async () => {
+      mockStoreGet.mockRejectedValue(new Error("store corrupted"));
+      const store = await createStore();
+      await store.loadSettings().catch(() => undefined);
+      expect(store.settingsLoadFailed).toBe(true);
+      mockStoreSet.mockClear();
+      mockStoreGet.mockImplementation(() => Promise.resolve(null));
+
+      await store.migrateMaiTranscriptionModelDefault();
+
+      expect(mockStoreSet).not.toHaveBeenCalledWith(
+        "maiTranscriptionModelId",
+        expect.anything(),
+      );
+    });
   });
 });

@@ -87,7 +87,11 @@ import {
   DEFAULT_AZURE_CHAT_MODEL_FAMILY_ID,
   getEffectiveAzureChatModelFamilySource,
   GEMINI_TRANSCRIPTION_MODEL,
-  MAI_TRANSCRIPTION_MODEL_ID,
+  type MaiTranscriptionModelId,
+  DEFAULT_MAI_TRANSCRIPTION_MODEL_ID,
+  LEGACY_MAI_TRANSCRIPTION_MODEL_ID,
+  isMaiTranscriptionModelId,
+  resolveInitialMaiTranscriptionModelId,
   getEffectiveAzureChatModelFamilyId,
   isAzureChatModelFamilyId,
   getEffectiveTranscriptionProviderId,
@@ -388,6 +392,9 @@ export const useSettingsStore = defineStore("settings", () => {
     );
   const maiCandidateLocales = ref<MaiCandidateLocale[]>([]);
   const maiTranscribeStyle = ref<MaiTranscribeStyle>("default");
+  const maiTranscriptionModelId = ref<MaiTranscriptionModelId>(
+    DEFAULT_MAI_TRANSCRIPTION_MODEL_ID,
+  );
   /** Gemini 轉錄模型（Flash-Lite 免費額度高、Flash 品質優先） */
   const geminiTranscriptionModelId = ref<GeminiTranscriptionModelId>(
     GEMINI_TRANSCRIPTION_MODEL,
@@ -481,6 +488,7 @@ export const useSettingsStore = defineStore("settings", () => {
       speechApiKey: azureSpeechApiKey.value,
       maiCandidateLocales: [...maiCandidateLocales.value],
       maiTranscribeStyle: maiTranscribeStyle.value,
+      maiTranscriptionModelId: maiTranscriptionModelId.value,
       omitTemperature: azureOmitTemperature.value,
     };
   }
@@ -714,7 +722,7 @@ export const useSettingsStore = defineStore("settings", () => {
     | {
         apiKey: string;
         provider: "mai";
-        modelId: typeof MAI_TRANSCRIPTION_MODEL_ID;
+        modelId: MaiTranscriptionModelId;
         endpoint?: string;
         deployment?: undefined;
         apiVersion?: undefined;
@@ -750,7 +758,7 @@ export const useSettingsStore = defineStore("settings", () => {
     if (provider === "mai") {
       const base = {
         provider: "mai" as const,
-        modelId: MAI_TRANSCRIPTION_MODEL_ID,
+        modelId: snap.maiTranscriptionModelId,
         endpoint: snap.speechEndpoint || undefined,
         candidateLocales: snap.maiCandidateLocales,
         transcribeStyle: snap.maiTranscribeStyle,
@@ -1073,6 +1081,14 @@ export const useSettingsStore = defineStore("settings", () => {
       if (isFoundryTranscriptionProvider(savedWhisperProviderId)) {
         lastFoundryProvider.value = savedWhisperProviderId;
       }
+      // 只推導、不寫入：HUD 與 Dashboard 會各自獨立呼叫 loadSettings()，
+      // 在這裡做 read-modify-write 會讓較慢的視窗把使用者剛選好的模型覆寫回去
+      // （main-window.ts 先廣播 database:ready 才載入設定，兩端必然重疊）。
+      // 持久化統一由 Dashboard 的 migrateMaiTranscriptionModelDefault() 負責。
+      maiTranscriptionModelId.value = resolveInitialMaiTranscriptionModelId(
+        await store.get<string>("maiTranscriptionModelId"),
+        savedWhisperProviderId,
+      );
       whisperProviderId.value =
         !azureEnabled.value &&
         (savedWhisperProviderId === "azure" || savedWhisperProviderId === "mai")
@@ -2045,6 +2061,14 @@ export const useSettingsStore = defineStore("settings", () => {
       for (const k of keys) {
         await store.delete(k);
       }
+      // 刻意「寫入預設值」而非刪除：此鍵**不存在**代表「使用者從未做過選擇」，
+      // 是啟動遷移用來分辨新舊使用者的唯一依據。若清除連線只刪鍵、記憶體卻留著
+      // 預設 v2，之後只要再切回 MAI，任何重新推導都會得到 1.5，造成 Dashboard
+      // 顯示 v2 但 HUD 實際送 1.5，下次啟動更會把非預期的 1.5 寫死。
+      await store.set(
+        "maiTranscriptionModelId",
+        DEFAULT_MAI_TRANSCRIPTION_MODEL_ID,
+      );
 
       // 把仍指向 azure 的 provider 切回 groq，否則轉錄/整理會卡在「未設定」
       if (selectedLlmProviderId.value === "azure") {
@@ -2092,6 +2116,7 @@ export const useSettingsStore = defineStore("settings", () => {
       azureSpeechApiKey.value = "";
       maiCandidateLocales.value = [];
       maiTranscribeStyle.value = "default";
+      maiTranscriptionModelId.value = DEFAULT_MAI_TRANSCRIPTION_MODEL_ID;
       clearAzureTokenCache();
       azureUserAccount.value = null;
       azureUserReauthRequired.value = false;
@@ -2420,6 +2445,62 @@ export const useSettingsStore = defineStore("settings", () => {
       );
       throw err;
     }
+  }
+
+  async function saveMaiTranscriptionModelId(modelId: MaiTranscriptionModelId) {
+    try {
+      if (!isMaiTranscriptionModelId(modelId)) {
+        throw new Error("INVALID_MAI_TRANSCRIPTION_MODEL");
+      }
+      const store = await load(STORE_NAME);
+      await store.set("maiTranscriptionModelId", modelId);
+      await store.save();
+      maiTranscriptionModelId.value = modelId;
+      await emitEvent(SETTINGS_UPDATED, {
+        key: "maiTranscriptionModel",
+        value: modelId,
+      });
+    } catch (err) {
+      console.error(
+        "[useSettingsStore] saveMaiTranscriptionModelId failed:",
+        extractErrorMessage(err),
+      );
+      throw err;
+    }
+  }
+
+  /**
+   * 把「首次啟動時推導出的 MAI 模型」寫入 store，凍結這個決定。
+   *
+   * **只能由 Dashboard（main-window.ts）呼叫**，理由同 replacement createdAt 遷移：
+   * HUD 不執行遷移，才不會有跨視窗 read-modify-write 互相覆蓋。
+   *
+   * 必須持久化而非每次推導：判定規則的輸入是 whisperProviderId，若永遠只推導，
+   * 一個原本用 Groq（推導為 v2）的使用者之後切到 MAI，下次啟動就會被重新推導成
+   * 1.5，造成跨啟動來回跳動。
+   *
+   * 只在「鍵不存在」時寫入。已存在但無法辨識的值不覆寫——那可能是較新版本寫下的
+   * 選擇（使用者降版後再升回來），抹掉它等於丟失使用者設定。
+   */
+  async function migrateMaiTranscriptionModelDefault() {
+    // 與其他寫入者一致的守門：loadSettings() 失敗時 maiTranscriptionModelId
+    // 仍是建構時的預設值（v2），把它持久化會把既有 MAI 使用者誤升級。
+    if (!isLoaded) return;
+    const store = await load(STORE_NAME);
+    const saved = await store.get<string>("maiTranscriptionModelId");
+    if (saved !== null && saved !== undefined) return;
+
+    // 用 loadSettings() 已經推導好的記憶體值，**不可**在這裡重新從 store 推導：
+    // loadSettings() 會在 Azure 停用時把 whisperProviderId 正規化成 "groq" 並
+    // 寫回 store（見該函式內的 provider 正規化），此時再讀 store 就看不到使用者
+    // 原本存的 "mai"，會把既有 MAI 使用者誤判成新使用者而升級到 v2。
+    // loadSettings() 的推導用的是正規化「之前」的值，因此才是正確依據。
+    const resolved = maiTranscriptionModelId.value;
+    await store.set("maiTranscriptionModelId", resolved);
+    await store.save();
+    console.log(
+      `[useSettingsStore] MAI transcription model initialized: ${resolved}`,
+    );
   }
 
   // gh-45/#25：Azure/Foundry 的 model 是不透明部署名，無法從名稱判斷是否推理模型。
@@ -3168,6 +3249,17 @@ export const useSettingsStore = defineStore("settings", () => {
           await store.get<string>("whisperProviderId"),
         ),
       };
+      // refresh 不是「初次啟動」：鍵不存在時**不可**重跑新舊使用者推導，否則
+      // 每次切換 provider 都會讓模型在 1.5／v2 之間跳動。只採信已持久化的合法值，
+      // 否則維持目前記憶體值（初次推導已在 loadSettings() 完成）。
+      const savedMaiTranscriptionModelId = await store.get<string>(
+        "maiTranscriptionModelId",
+      );
+      const nextMaiTranscriptionModelId = isMaiTranscriptionModelId(
+        savedMaiTranscriptionModelId,
+      )
+        ? savedMaiTranscriptionModelId
+        : maiTranscriptionModelId.value;
       azureEnabled.value = nextAzure.enabled;
       azureResourceName.value = nextAzure.resourceName;
       azureWhisperResourceName.value = nextAzure.whisperResourceName;
@@ -3190,6 +3282,7 @@ export const useSettingsStore = defineStore("settings", () => {
       azureSpeechApiKey.value = nextAzure.speechApiKey;
       maiCandidateLocales.value = nextAzure.maiCandidateLocales;
       maiTranscribeStyle.value = nextAzure.maiTranscribeStyle;
+      maiTranscriptionModelId.value = nextMaiTranscriptionModelId;
       whisperProviderId.value =
         !nextAzure.enabled &&
         (nextAzure.whisperProvider === "azure" ||
@@ -3444,6 +3537,23 @@ export const useSettingsStore = defineStore("settings", () => {
       // 標記，也不能採信備份中與無效 family 搭配的來源欄位。
       await store.set("azureChatModelFamilySource", "manual");
     }
+    // 舊備份（本功能推出前匯出）不含 maiTranscriptionModelId。匯入迴圈只寫備份
+    // 「有」的鍵，因此目標機器啟動時寫下的 v2 會被原封不動留著——原本用 1.5 的
+    // 使用者還原備份後會被靜默換模型。改用備份自己的 provider 明確補寫 1.5。
+    // 判斷用「原始備份」而非清洗後的結果：清洗會丟掉非法值，兩者混在一起就
+    // 無法區分「舊備份沒有這個鍵」與「新備份帶了壞掉的值」。
+    if (
+      migratedSettings["whisperProviderId"] === "mai" &&
+      !Object.prototype.hasOwnProperty.call(
+        settings,
+        "maiTranscriptionModelId",
+      )
+    ) {
+      await store.set(
+        "maiTranscriptionModelId",
+        LEGACY_MAI_TRANSCRIPTION_MODEL_ID,
+      );
+    }
     if (
       migratedSettings["azureEnabled"] === false &&
       (migratedSettings["whisperProviderId"] === "azure" ||
@@ -3592,6 +3702,7 @@ export const useSettingsStore = defineStore("settings", () => {
     saveGeminiFreeQuota,
     maiCandidateLocales,
     maiTranscribeStyle,
+    maiTranscriptionModelId,
     saveAzureConnection,
     deleteAzureConnection,
     listAzureChatDeployments,
@@ -3602,6 +3713,8 @@ export const useSettingsStore = defineStore("settings", () => {
     saveAzureTranscriptionResources,
     saveMaiCandidateLocales,
     saveMaiTranscribeStyle,
+    saveMaiTranscriptionModelId,
+    migrateMaiTranscriptionModelDefault,
     saveAzureOmitTemperature,
     saveWhisperProvider,
     saveTranscriptionProviderGroup,

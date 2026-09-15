@@ -49,6 +49,7 @@ export type SettingsKey =
   | "azureTranscriptionResources"
   | "maiCandidateLocales"
   | "maiTranscribeStyle"
+  | "maiTranscriptionModel"
   | "azureOmitTemperature"
   | "whisperProvider"
   | "theme"

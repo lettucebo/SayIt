@@ -40,11 +40,41 @@ const MAX_GEMINI_INLINE_AUDIO_SIZE: usize = 14 * 1024 * 1024;
 const MAX_GEMINI_REQUEST_BODY_SIZE: usize = 20_000_000;
 
 // ── Azure AI Speech MAI-Transcribe ──
-const MAI_TRANSCRIPTION_MODEL: &str = "mai-transcribe-1.5";
+/// MAI-Transcribe 可選模型的正規 ID（前端 `MAI_TRANSCRIPTION_MODEL_LIST` 須一致）。
+/// 一律小寫 kebab：SQLite 用量分桶以 `model LIKE 'mai-%'` 判斷 provider，
+/// 送出用的服務端大小寫另由 `MaiModel::wire_name()` 決定。
+const MAI_TRANSCRIPTION_MODELS: [&str; 2] = ["mai-transcribe-1.5", "mai-transcribe-2"];
 const MAI_TRANSCRIPTION_API_VERSION: &str = "2025-10-15";
 const MAI_MAX_CANDIDATE_LOCALES: usize = 1;
 const MAI_CANDIDATE_LOCALES: [&str; 5] = ["zh-TW", "zh-CN", "en-US", "ja-JP", "ko-KR"];
 const MAI_MAX_PHRASE_LIST_TERMS: usize = 500;
+
+/// 已解析的 MAI-Transcribe 模型。兩代的 request definition 形狀不同，
+/// 因此必須是列舉而非字串——漏掉分支會在編譯期被抓出來。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MaiModel {
+    V1_5,
+    V2,
+}
+
+impl MaiModel {
+    /// 送給服務端的 `enhancedMode.model` 值。
+    /// V1_5 維持既有小寫字串（已知可用，不動）；V2 採官方文件記載的大小寫。
+    fn wire_name(self) -> &'static str {
+        match self {
+            Self::V1_5 => "mai-transcribe-1.5",
+            Self::V2 => "MAI-Transcribe-2",
+        }
+    }
+
+    /// 錯誤訊息用的顯示名稱。
+    fn display_name(self) -> &'static str {
+        match self {
+            Self::V1_5 => "MAI-Transcribe-1.5",
+            Self::V2 => "MAI-Transcribe-2",
+        }
+    }
+}
 
 // ========== State ==========
 
@@ -655,6 +685,7 @@ fn build_mai_transcribe_config(
 }
 
 fn build_mai_definition(
+    model: MaiModel,
     candidate_locales: &[String],
     vocabulary_terms: Option<&[String]>,
     use_verbatim_style: bool,
@@ -694,13 +725,32 @@ fn build_mai_definition(
     enhanced_mode.insert("enabled".to_string(), serde_json::Value::Bool(true));
     enhanced_mode.insert(
         "model".to_string(),
-        serde_json::Value::String(MAI_TRANSCRIPTION_MODEL.to_string()),
+        serde_json::Value::String(model.wire_name().to_string()),
     );
-    if use_verbatim_style {
-        enhanced_mode.insert(
-            "transcribeStyle".to_string(),
-            serde_json::Value::String("verbatim".to_string()),
-        );
+    match model {
+        // 1.5：服務端預設即為可讀性最佳化，只有 verbatim 需要明寫（維持既有行為，勿改動）。
+        MaiModel::V1_5 => {
+            if use_verbatim_style {
+                enhanced_mode.insert(
+                    "transcribeStyle".to_string(),
+                    serde_json::Value::String("verbatim".to_string()),
+                );
+            }
+        }
+        // v2：欄位移到 `modelOptions`，且服務端預設是 `verbatim`——與 1.5 相反。
+        // 因此兩種風格都必須明寫，否則使用者選「可讀性最佳化」會拿到含填充詞的逐字稿，
+        // 汙染後續 LLM 書面語整理的輸入。
+        MaiModel::V2 => {
+            let style = if use_verbatim_style {
+                "verbatim"
+            } else {
+                "clean"
+            };
+            enhanced_mode.insert(
+                "modelOptions".to_string(),
+                serde_json::json!({ "transcribeStyle": style }),
+            );
+        }
     }
     definition.insert(
         "enhancedMode".to_string(),
@@ -734,7 +784,7 @@ fn parse_mai_response(response: MaiTranscriptionResponse) -> String {
         .join(" ")
 }
 
-fn format_mai_error(status: u16, body: &str) -> String {
+fn format_mai_error(model: MaiModel, status: u16, body: &str) -> String {
     let parsed = serde_json::from_str::<AzureSpeechErrorEnvelope>(body).ok();
     let code = parsed
         .as_ref()
@@ -758,26 +808,31 @@ fn format_mai_error(status: u16, body: &str) -> String {
         .unwrap_or(body)
         .trim();
 
+    let model_name = model.display_name();
     let detail = match code {
-        "NoLanguageIdentified" => "No language was identified in the audio.",
-        "AudioLengthLimitExceeded" => "The audio exceeds the Azure AI Speech length limit.",
-        "InvalidLocale" => "One or more MAI candidate locales are invalid.",
-        "Unauthorized" => "Azure AI Speech authentication failed.",
+        "NoLanguageIdentified" => "No language was identified in the audio.".to_string(),
+        "AudioLengthLimitExceeded" => {
+            "The audio exceeds the Azure AI Speech length limit.".to_string()
+        }
+        "InvalidLocale" => "One or more MAI candidate locales are invalid.".to_string(),
+        "Unauthorized" => "Azure AI Speech authentication failed.".to_string(),
         "Forbidden" => {
-            "Azure AI Speech access was denied. Assign the Cognitive Services Speech User role to this resource."
+            "Azure AI Speech access was denied. Assign the Cognitive Services Speech User role to this resource.".to_string()
         }
         "NotFound" => {
-            "The Azure AI Speech endpoint, region, model, or API version was not found."
+            "The Azure AI Speech endpoint, region, model, or API version was not found.".to_string()
         }
         "InvalidRequest" if message.contains("Enhanced mode with model is currently not supported") => {
-            "This Azure AI Speech resource region does not currently support MAI-Transcribe-1.5. Use a Speech resource in a supported MAI region: East US, North Europe, Southeast Asia, or West US."
+            format!(
+                "This Azure AI Speech resource region does not currently support {model_name}. Use a Speech resource in a supported MAI region: Central India, East US, North Europe, Southeast Asia, or West US."
+            )
         }
         "InvalidRequest" if message.contains("requires at most one locale") => {
-            "MAI-Transcribe-1.5 Fast Transcription accepts at most one language locale."
+            format!("{model_name} Fast Transcription accepts at most one language locale.")
         }
-        _ => message,
+        _ => message.to_string(),
     };
-    format!("MAI-Transcribe API error ({status}, {code}): {detail}")
+    format!("{model_name} API error ({status}, {code}): {detail}")
 }
 
 // ========== Shared Transcription Logic ==========
@@ -949,6 +1004,7 @@ enum TranscriptionTarget {
         use_bearer: bool,
         candidate_locales: Vec<String>,
         use_verbatim_style: bool,
+        model: MaiModel,
     },
 }
 
@@ -960,6 +1016,18 @@ fn resolve_gemini_model(model: &str) -> &'static str {
         .find(|m| **m == model)
         .copied()
         .unwrap_or(DEFAULT_GEMINI_TRANSCRIPTION_MODEL)
+}
+
+/// 由前端傳入的 model 解析出 MAI 模型。
+///
+/// allowlist 外（未設定、舊版前端、壞掉的匯入、誤傳 Whisper 模型 ID）一律退回 1.5：
+/// 那是本專案長期以來唯一送出的 wire 行為，退回它不會意外改變轉錄風格語意。
+/// 產品層級「新使用者預設 v2」的決定屬於前端設定，不在此處。
+fn resolve_mai_model(model: &str) -> MaiModel {
+    match MAI_TRANSCRIPTION_MODELS.iter().find(|m| **m == model) {
+        Some(&"mai-transcribe-2") => MaiModel::V2,
+        _ => MaiModel::V1_5,
+    }
 }
 
 /// 由 provider 解析出送出目標。Gemini 用 allowlist 過的模型（不沿用 WhisperModelId）。
@@ -987,6 +1055,7 @@ fn resolve_transcription_target(provider: &ResolvedProvider, model: &str) -> Tra
             use_bearer: config.use_bearer,
             candidate_locales: config.candidate_locales.clone(),
             use_verbatim_style: config.use_verbatim_style,
+            model: resolve_mai_model(model),
         },
     }
 }
@@ -1121,6 +1190,7 @@ async fn attempt_mai_request(
     use_bearer: bool,
     candidate_locales: &[String],
     use_verbatim_style: bool,
+    model: MaiModel,
 ) -> Result<AttemptOutcome, AttemptFailure> {
     let no_retry = |error: TranscriptionError| AttemptFailure {
         error,
@@ -1131,6 +1201,7 @@ async fn attempt_mai_request(
         .mime_str("audio/wav")
         .map_err(|error| no_retry(TranscriptionError::RequestFailed(error.to_string())))?;
     let definition = serde_json::to_string(&build_mai_definition(
+        model,
         candidate_locales,
         vocabulary_terms,
         use_verbatim_style,
@@ -1173,7 +1244,7 @@ async fn attempt_mai_request(
             .await
             .unwrap_or_else(|_| "Failed to read error body".to_string());
         return Err(AttemptFailure {
-            error: TranscriptionError::ApiError(status, format_mai_error(status, &body)),
+            error: TranscriptionError::ApiError(status, format_mai_error(model, status, &body)),
             kind: classify_response_status(status, retry_after_secs),
         });
     }
@@ -1318,21 +1389,16 @@ async fn send_transcription_request(
     let model = model_id.unwrap_or_else(|| DEFAULT_WHISPER_MODEL_ID.to_string());
     let target = resolve_transcription_target(&provider, &model);
 
+    // requested 與 effective 分開記錄：TS / Rust 兩份 allowlist 若日後漂移，
+    // 只記其中一個會讓「UI 顯示 A、實際跑 B」在日誌上完全看不出來。
+    let (provider_label, effective_model) = match &target {
+        TranscriptionTarget::Gemini { .. } => ("Gemini", resolve_gemini_model(&model).to_string()),
+        TranscriptionTarget::Mai { model, .. } => ("MAI-Transcribe", model.wire_name().to_string()),
+        TranscriptionTarget::Whisper { .. } => ("Whisper", model.clone()),
+    };
     log::info!(
-        "[transcription] Sending {} bytes WAV via {} (model={})",
+        "[transcription] Sending {} bytes WAV via {provider_label} (requested={model}, effective={effective_model})",
         wav_data.len(),
-        if is_gemini {
-            "Gemini"
-        } else if matches!(provider, ResolvedProvider::Mai(_)) {
-            "MAI-Transcribe"
-        } else {
-            "Whisper"
-        },
-        if is_gemini {
-            resolve_gemini_model(&model)
-        } else {
-            model.as_str()
-        }
     );
 
     // Gemini：body 預先建一次（避免重試重做 base64），並二次驗證實際 JSON body 大小。
@@ -1397,6 +1463,7 @@ async fn send_transcription_request(
                 use_bearer,
                 candidate_locales,
                 use_verbatim_style,
+                model,
             } => {
                 let data = if attempt < MAX_TRANSCRIPTION_ATTEMPTS {
                     wav_data.as_ref().expect("wav_data taken early").clone()
@@ -1412,6 +1479,7 @@ async fn send_transcription_request(
                     *use_bearer,
                     candidate_locales,
                     *use_verbatim_style,
+                    *model,
                 )
                 .await
             }
@@ -1719,6 +1787,7 @@ pub async fn test_whisper_connection(
             use_bearer,
             candidate_locales,
             use_verbatim_style,
+            model,
         } => attempt_mai_request(
             wav_data,
             &transcription_state,
@@ -1728,6 +1797,7 @@ pub async fn test_whisper_connection(
             use_bearer,
             &candidate_locales,
             use_verbatim_style,
+            model,
         )
         .await
         .map(|_| ())
@@ -2386,13 +2456,13 @@ mod tests {
 
     #[test]
     fn test_mai_definition_omits_default_fields() {
-        let definition = build_mai_definition(&[], None, false);
+        let definition = build_mai_definition(MaiModel::V1_5, &[], None, false);
         assert_eq!(
             definition,
             serde_json::json!({
                 "enhancedMode": {
                     "enabled": true,
-                    "model": MAI_TRANSCRIPTION_MODEL,
+                    "model": "mai-transcribe-1.5",
                 }
             })
         );
@@ -2401,6 +2471,7 @@ mod tests {
     #[test]
     fn test_mai_definition_includes_candidates_phrase_list_and_verbatim() {
         let definition = build_mai_definition(
+            MaiModel::V1_5,
             &["zh-TW".to_string()],
             Some(&["SayIt".to_string(), "Contoso".to_string()]),
             true,
@@ -2414,6 +2485,99 @@ mod tests {
             definition["enhancedMode"]["transcribeStyle"],
             serde_json::json!("verbatim")
         );
+    }
+
+    /// 回歸鎖：v2 的服務端預設是 verbatim（與 1.5 相反），因此「可讀性最佳化」
+    /// 必須明確送出 `clean`。漏送會讓使用者拿到含填充詞的逐字稿。
+    #[test]
+    fn test_mai_v2_default_style_sends_clean_explicitly() {
+        let definition = build_mai_definition(MaiModel::V2, &[], None, false);
+        assert_eq!(
+            definition,
+            serde_json::json!({
+                "enhancedMode": {
+                    "enabled": true,
+                    "model": "MAI-Transcribe-2",
+                    "modelOptions": { "transcribeStyle": "clean" },
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn test_mai_v2_verbatim_uses_model_options_not_flat_field() {
+        let definition = build_mai_definition(
+            MaiModel::V2,
+            &["ja-JP".to_string()],
+            Some(&["SayIt".to_string()]),
+            true,
+        );
+        assert_eq!(
+            definition["enhancedMode"]["modelOptions"]["transcribeStyle"],
+            serde_json::json!("verbatim")
+        );
+        // v2 不接受 1.5 的扁平欄位位置——送錯地方等同沒送。
+        assert!(definition["enhancedMode"].get("transcribeStyle").is_none());
+        assert_eq!(definition["locales"], serde_json::json!(["ja-JP"]));
+        assert_eq!(
+            definition["phraseList"]["phrases"],
+            serde_json::json!(["SayIt"])
+        );
+    }
+
+    /// 1.5 不得意外沾到 v2 的 `modelOptions` 形狀（既有可用路徑零回歸）。
+    #[test]
+    fn test_mai_v1_5_never_emits_model_options() {
+        for verbatim in [false, true] {
+            let definition = build_mai_definition(MaiModel::V1_5, &[], None, verbatim);
+            assert!(definition["enhancedMode"].get("modelOptions").is_none());
+            assert_eq!(
+                definition["enhancedMode"]["model"],
+                serde_json::json!("mai-transcribe-1.5")
+            );
+        }
+    }
+
+    #[test]
+    fn test_resolve_mai_model_falls_back_to_v1_5() {
+        assert_eq!(resolve_mai_model("mai-transcribe-2"), MaiModel::V2);
+        assert_eq!(resolve_mai_model("mai-transcribe-1.5"), MaiModel::V1_5);
+        // 未知值、空字串、誤傳的 Whisper / 大小寫變體一律退回既有 wire 行為
+        for unknown in [
+            "",
+            "mai-transcribe-1",
+            "mai-transcribe-3",
+            "MAI-Transcribe-2",
+            "whisper-large-v3",
+        ] {
+            assert_eq!(
+                resolve_mai_model(unknown),
+                MaiModel::V1_5,
+                "unexpected model for {unknown}"
+            );
+        }
+    }
+
+    /// 只測 builder 不夠：resolver 若漏接 model，builder 測試仍會全綠。
+    #[test]
+    fn test_resolve_transcription_target_routes_mai_model() {
+        let config = build_mai_transcribe_config(
+            Some("https://speech.cognitiveservices.azure.com".to_string()),
+            None,
+            None,
+            None,
+        )
+        .expect("valid speech endpoint");
+        let provider = ResolvedProvider::Mai(config);
+
+        match resolve_transcription_target(&provider, "mai-transcribe-2") {
+            TranscriptionTarget::Mai { model, .. } => assert_eq!(model, MaiModel::V2),
+            _ => panic!("expected MAI target"),
+        }
+        match resolve_transcription_target(&provider, "bogus-model") {
+            TranscriptionTarget::Mai { model, .. } => assert_eq!(model, MaiModel::V1_5),
+            _ => panic!("expected MAI target"),
+        }
     }
 
     #[test]
@@ -2432,6 +2596,7 @@ mod tests {
     #[test]
     fn test_mai_error_prefers_inner_error_code() {
         let error = format_mai_error(
+            MaiModel::V1_5,
             400,
             r#"{"code":"InvalidRequest","message":"outer","innerError":{"code":"InvalidLocale","message":"inner"}}"#,
         );
@@ -2441,19 +2606,38 @@ mod tests {
 
     #[test]
     fn test_mai_forbidden_error_requires_speech_user_role() {
-        let error = format_mai_error(403, r#"{"code":"Forbidden","message":"access denied"}"#);
+        let error = format_mai_error(
+            MaiModel::V1_5,
+            403,
+            r#"{"code":"Forbidden","message":"access denied"}"#,
+        );
         assert!(error.contains("Cognitive Services Speech User"));
     }
 
     #[test]
     fn test_mai_region_unsupported_error_is_actionable() {
-        let error = format_mai_error(
-            400,
-            r#"{"code":"InvalidRequest","message":"Enhanced mode with model is currently not supported yet."}"#,
-        );
-        assert!(error.contains("does not currently support MAI-Transcribe-1.5"));
-        for region in ["East US", "North Europe", "Southeast Asia", "West US"] {
-            assert!(error.contains(region), "missing supported region: {region}");
+        for (model, expected_name) in [
+            (MaiModel::V1_5, "MAI-Transcribe-1.5"),
+            (MaiModel::V2, "MAI-Transcribe-2"),
+        ] {
+            let error = format_mai_error(
+                model,
+                400,
+                r#"{"code":"InvalidRequest","message":"Enhanced mode with model is currently not supported yet."}"#,
+            );
+            assert!(
+                error.contains(&format!("does not currently support {expected_name}")),
+                "missing model name for {expected_name}"
+            );
+            for region in [
+                "Central India",
+                "East US",
+                "North Europe",
+                "Southeast Asia",
+                "West US",
+            ] {
+                assert!(error.contains(region), "missing supported region: {region}");
+            }
         }
     }
 

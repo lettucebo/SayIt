@@ -26,7 +26,6 @@ import {
   parseBackup,
   getBackupPayload,
   isSupportedDictionaryBlock,
-  sanitizeSettingsPayload,
   type BackupFile,
 } from "../lib/settingsTransfer";
 import { buildExportFile, parseImportContent } from "../lib/vocabularyTransfer";
@@ -75,6 +74,8 @@ import {
   type QuotaPeriod,
   type GeminiTranscriptionModelId,
   type MaiTranscribeStyle,
+  type MaiTranscriptionModelId,
+  MAI_TRANSCRIPTION_MODEL_LIST,
   GEMINI_TRANSCRIPTION_MODEL_LIST,
   findGeminiTranscriptionModelConfig,
 } from "../lib/modelRegistry";
@@ -1293,6 +1294,17 @@ async function handleMaiInputLocaleChange(value: string) {
   }
 }
 
+async function handleMaiTranscriptionModelChange(
+  modelId: MaiTranscriptionModelId,
+) {
+  try {
+    await settingsStore.saveMaiTranscriptionModelId(modelId);
+    maiOptionsFeedback.show("success", t("settings.model.whisperUpdated"));
+  } catch (err) {
+    maiOptionsFeedback.show("error", extractErrorMessage(err));
+  }
+}
+
 async function handleMaiTranscribeStyleChange(style: MaiTranscribeStyle) {
   try {
     await settingsStore.saveMaiTranscribeStyle(style);
@@ -2093,8 +2105,12 @@ async function applyBackupImport() {
     if (willImportDictionary && !isSupportedDictionaryBlock(payload.dictionary)) {
       throw new Error("UNSUPPORTED_VERSION");
     }
-    const cleanSettings = willImportSettings
-      ? sanitizeSettingsPayload(payload.settings as Record<string, unknown>)
+    // 刻意傳入**未清洗**的原始設定：importSettings 內部本來就會呼叫
+    // sanitizeSettingsPayload，若在這裡先清洗，「舊備份沒有這個鍵」與
+    // 「備份帶了非法值」會變得無法區分（非法值會被清掉、看起來像沒有），
+    // 使相容性補償邏輯誤判而覆寫使用者既有的選擇。
+    const settingsToImport = willImportSettings
+      ? (payload.settings as Record<string, unknown>)
       : null;
 
     const deviceBeforeImport = settingsStore.selectedAudioInputDeviceName;
@@ -2106,8 +2122,8 @@ async function applyBackupImport() {
       skipped: number;
     } | null = null;
 
-    if (cleanSettings) {
-      await settingsStore.importSettings(cleanSettings);
+    if (settingsToImport) {
+      await settingsStore.importSettings(settingsToImport);
       resyncLocalInputsFromStore();
       settingsApplied = true;
       // 取代規則隨設定一起還原（舊備份沒有此區塊 → 維持現有規則不動）
@@ -3104,6 +3120,31 @@ onBeforeUnmount(() => {
             <p class="text-xs text-muted-foreground">{{ $t("settings.azure.maiHint") }}</p>
             <p class="text-xs text-muted-foreground">{{ $t("settings.azure.maiRegionHint") }}</p>
             <InlineFeedback :feedback="maiOptionsFeedback.state.value" class="block" />
+
+            <div class="space-y-2">
+              <Label for="mai-transcription-model">{{ $t("settings.azure.maiModelLabel") }}</Label>
+              <p class="text-xs text-muted-foreground">{{ $t("settings.azure.maiModelHint") }}</p>
+              <Select
+                :model-value="settingsStore.maiTranscriptionModelId"
+                @update:model-value="(value: unknown) => handleMaiTranscriptionModelChange(value as MaiTranscriptionModelId)"
+              >
+                <SelectTrigger id="mai-transcription-model" class="w-full" data-testid="mai-transcription-model">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem
+                    v-for="model in MAI_TRANSCRIPTION_MODEL_LIST"
+                    :key="model.id"
+                    :value="model.id"
+                  >
+                    {{ model.displayName }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <p class="text-xs text-muted-foreground">
+                {{ $t(`settings.azure.maiModelDescription.${settingsStore.maiTranscriptionModelId === "mai-transcribe-2" ? "v2" : "v15"}`) }}
+              </p>
+            </div>
 
             <div class="space-y-2">
               <Label for="mai-input-locale">{{ $t("settings.azure.maiCandidateLocalesLabel") }}</Label>

@@ -20,6 +20,7 @@ import {
   getEffectiveMaiTranscribeStyle,
   isAzureChatModelFamilyId,
   isAzureChatModelFamilySource,
+  isMaiTranscriptionModelId,
   isTranscriptionProviderId,
   QUOTA_PERIOD_VALUES,
 } from "./modelRegistry";
@@ -100,6 +101,7 @@ export const EXPORTABLE_SETTING_KEYS = [
   "azureSpeechApiKey",
   "maiCandidateLocales",
   "maiTranscribeStyle",
+  "maiTranscriptionModelId",
 ] as const;
 
 export type ExportableSettingKey = (typeof EXPORTABLE_SETTING_KEYS)[number];
@@ -337,6 +339,7 @@ const SETTING_VALUE_TYPES = {
   azureSpeechApiKey: "string",
   maiCandidateLocales: "stringArray",
   maiTranscribeStyle: "string",
+  maiTranscriptionModelId: "string",
   autoStartEnabled: "boolean",
 } satisfies Record<ExportableSettingKey | ImportOnlySettingKey, ExpectedType>;
 
@@ -471,6 +474,9 @@ export function sanitizeSettingsPayload(
       (typeof value !== "string" ||
         value !== getEffectiveMaiTranscribeStyle(value))
     ) {
+      continue;
+    }
+    if (key === "maiTranscriptionModelId" && !isMaiTranscriptionModelId(value)) {
       continue;
     }
     result[key] = value;

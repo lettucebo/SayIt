@@ -413,10 +413,77 @@ export const DEFAULT_QUOTA_PERIOD: QuotaPeriod = "daily";
 
 export const DEFAULT_TRANSCRIPTION_PROVIDER_ID: TranscriptionProviderId = "groq";
 
-/** Azure AI Speech LLM Speech API 的 MAI-Transcribe 模型 ID。 */
-export const MAI_TRANSCRIPTION_MODEL_ID = "mai-transcribe-1.5" as const;
+/**
+ * Azure AI Speech LLM Speech API 的 MAI-Transcribe 可選模型
+ * （Rust `MAI_TRANSCRIPTION_MODELS` 有相同 allowlist，兩端必須一致）。
+ *
+ * ID 一律小寫 kebab：用量統計以 SQL `model LIKE 'mai-%'` 分桶（useHistoryStore），
+ * 送給服務端的大小寫由 Rust `MaiModel::wire_name()` 決定，不在此處表示。
+ */
+export type MaiTranscriptionModelId = "mai-transcribe-1.5" | "mai-transcribe-2";
 
-/** MAI 的預設輸出已最佳化可讀性；`verbatim` 才會傳到服務端。 */
+export interface MaiTranscriptionModelConfig {
+  id: MaiTranscriptionModelId;
+  displayName: string;
+  descriptionKey: string;
+  isDefault: boolean;
+}
+
+export const MAI_TRANSCRIPTION_MODEL_LIST: MaiTranscriptionModelConfig[] = [
+  {
+    id: "mai-transcribe-2",
+    displayName: "MAI-Transcribe 2",
+    descriptionKey: "settings.azure.maiModelDescription.v2",
+    isDefault: true,
+  },
+  {
+    id: "mai-transcribe-1.5",
+    displayName: "MAI-Transcribe 1.5",
+    descriptionKey: "settings.azure.maiModelDescription.v15",
+    isDefault: false,
+  },
+];
+
+/** 新安裝的預設模型。既有 MAI 使用者維持 1.5，見 useSettingsStore 的遷移規則。 */
+export const DEFAULT_MAI_TRANSCRIPTION_MODEL_ID: MaiTranscriptionModelId =
+  "mai-transcribe-2";
+
+/**
+ * 本功能推出前唯一送出過的模型。升級既有 MAI 使用者與還原舊備份時用它，
+ * 確保轉錄風格與升級前一致。
+ */
+export const LEGACY_MAI_TRANSCRIPTION_MODEL_ID: MaiTranscriptionModelId =
+  "mai-transcribe-1.5";
+
+export function isMaiTranscriptionModelId(
+  value: unknown,
+): value is MaiTranscriptionModelId {
+  return (
+    typeof value === "string" &&
+    MAI_TRANSCRIPTION_MODEL_LIST.some((model) => model.id === value)
+  );
+}
+
+/**
+ * 決定啟動時要使用的 MAI 模型。
+ *
+ * 純函式，HUD 與 Dashboard 共用：兩個視窗會各自獨立呼叫 `loadSettings()`，
+ * 必須算出相同結果，否則會出現「Dashboard 顯示 A、HUD 實際送 B」。
+ * 真正的寫入只由 Dashboard 執行（見 migrateMaiTranscriptionModelDefault）。
+ */
+export function resolveInitialMaiTranscriptionModelId(
+  savedModelId: unknown,
+  savedWhisperProviderId: string | null | undefined,
+): MaiTranscriptionModelId {
+  if (isMaiTranscriptionModelId(savedModelId)) return savedModelId;
+  // 尚未做過選擇：已在使用 MAI 的人維持既有行為，其餘（全新安裝 / 從未用過
+  // MAI 的既有使用者）拿到較新的 v2。
+  return savedWhisperProviderId === "mai"
+    ? LEGACY_MAI_TRANSCRIPTION_MODEL_ID
+    : DEFAULT_MAI_TRANSCRIPTION_MODEL_ID;
+}
+
+/** MAI 的「可讀性最佳化」在 1.5 是省略欄位、在 v2 是明送 `clean`；差異由 Rust 吸收。 */
 export type MaiTranscribeStyle = "default" | "verbatim";
 
 export function getEffectiveMaiTranscribeStyle(
