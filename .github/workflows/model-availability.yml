@@ -19,6 +19,11 @@ on:
         description: "產生假的漂移報告以驗證開 issue 的路徑（不檢查真實模型）"
         type: boolean
         default: false
+    inputs:
+      simulate_drift:
+        description: "產生假的漂移報告以驗證開 issue 的路徑（不檢查真實模型）"
+        type: boolean
+        default: false
 
 # 同時只跑一個，避免手動觸發與排程重疊時開出重複 issue
 concurrency:
@@ -81,8 +86,13 @@ jobs:
 
           # 已有開啟中的 issue：只有在內容變了才留言。每天貼一次相同報告會讓
           # 通知變成雜訊，維護者最後就不看了。
-          gh issue view "$existing" --json body --jq .body > /tmp/previous-body.md
-          if diff -q /tmp/previous-body.md "$REPORT_PATH" >/dev/null 2>&1; then
+          #
+          # 比較前先正規化：jq 輸出會在尾端補一個換行，而報告檔沒有，直接 diff
+          # 會每次都判定「有變動」——實測就是這樣多留了一則沒意義的言。
+          # $(...) 會剝掉尾端換行，tr 再吃掉 GitHub 可能加上的 CR。
+          previous=$(gh issue view "$existing" --json body --jq .body | tr -d '\r')
+          current=$(tr -d '\r' < "$REPORT_PATH")
+          if [ "$previous" = "$current" ]; then
             echo "issue #$existing already reports this exact drift; nothing to do"
             exit 0
           fi
