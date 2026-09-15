@@ -293,7 +293,6 @@ export function resolveAzureFamilyFromDeployment(
 // ── LLM 模型（文字整理用）────────────────────────────────
 
 export type LlmModelId =
-  | "qwen/qwen3.6-27b"
   | "qwen/qwen3.8-27b"
   | "openai/gpt-oss-120b"
   | "openai/gpt-oss-20b"
@@ -600,7 +599,7 @@ export interface WhisperModelConfig {
 
 // ── 預設值 ────────────────────────────────────────────────
 
-export const DEFAULT_LLM_MODEL_ID: LlmModelId = "qwen/qwen3.6-27b";
+export const DEFAULT_LLM_MODEL_ID: LlmModelId = "qwen/qwen3.8-27b";
 export const DEFAULT_WHISPER_MODEL_ID: WhisperModelId = "whisper-large-v3";
 
 // ── 已下架模型 ID 映射（舊 → 新，用於自動遷移）──────────
@@ -620,6 +619,11 @@ export const DECOMMISSIONED_MODEL_MAP: Record<string, string> = {
   "meta-llama/llama-4-maverick-17b-128e-instruct": "qwen/qwen3.6-27b",
   "llama-3.1-8b-instant": "openai/gpt-oss-20b",
   "gpt-oss-120b": "openai/gpt-oss-120b",
+  // Groq — qwen3.6 為 preview 模型，已無預警下架（實測 chat/completions 回 404），
+  // 且從未出現在官方棄用頁——preview 模型本就不走正式棄用流程。
+  // 遷移到同族的 qwen3.8（現任預設），維持使用者既有的輸出風格與 token 額度。
+  // 上面數個舊 entry 仍指向 qwen3.6，靠 getEffectiveLlmModelId 的迴圈解析續跳到這裡。
+  "qwen/qwen3.6-27b": "qwen/qwen3.8-27b",
   // Gemini — 2.5 世代汰換
   "gemini-2.5-flash": "gemini-3.5-flash",
   "gemini-2.5-flash-lite": "gemini-3.1-flash-lite",
@@ -634,20 +638,13 @@ export const DECOMMISSIONED_MODEL_MAP: Record<string, string> = {
 export const LLM_MODEL_LIST: LlmModelConfig[] = [
   // ── Groq（免費）──
   {
-    // Preview 模型：Groq 可無預警下架，顯示名稱標明讓使用者知情
-    id: "qwen/qwen3.6-27b",
-    providerId: "groq",
-    displayName: "Qwen3.6 27B (Preview)",
-    badgeKey: "settings.modelBadge.balanced",
-    descriptionKey: "settings.model.llmDescription.qwen36",
-    speedTps: 500,
-    inputCostPerMillion: 0.6,
-    outputCostPerMillion: 3.0,
-    freeQuotaRpd: 1_000,
-    freeQuotaTpd: 200_000,
-    isDefault: true,
-  },
-  {
+    // 預設模型。刻意選 preview 的 qwen 而非 production 的 gpt-oss-120b：
+    // 免費層 token 額度 2M/日是後者的 10 倍，而聽寫工具每次整理都要送出
+    // 逐字稿＋prompt，TPD 通常比 RPD 先觸頂。
+    // 代價是 Groq 明言 preview 模型「may be discontinued at short notice」
+    // （qwen3.6 正是這樣消失的，連棄用頁都沒列）。因此本模型一旦下架，
+    // 必須同步更新此處與 DECOMMISSIONED_MODEL_MAP，否則所有未主動選擇
+    // 模型的使用者都會在整理階段撞 404。
     id: "qwen/qwen3.8-27b",
     providerId: "groq",
     displayName: "Qwen3.8 27B (Preview)",
@@ -658,7 +655,7 @@ export const LLM_MODEL_LIST: LlmModelConfig[] = [
     outputCostPerMillion: 4.0,
     freeQuotaRpd: 1_000,
     freeQuotaTpd: 2_000_000,
-    isDefault: false,
+    isDefault: true,
   },
   {
     id: "openai/gpt-oss-120b",
@@ -666,7 +663,8 @@ export const LLM_MODEL_LIST: LlmModelConfig[] = [
     displayName: "GPT OSS 120B",
     // badge 是「正式版」而非「成本高」：本模型 $0.15/$0.60 是全 registry 第二便宜
     // （僅次於 20B），且 Groq 三個模型都有免費額度，成本不是這裡的區分軸。
-    // 真正的差異是預設的 qwen 為 preview（可能無預警下架），本模型是正式版。
+    // 真正的差異是預設的 qwen 為 preview（可能無預警下架），本模型是正式版，
+    // 亦是 Groq 歷次棄用公告一貫的建議遷移目標。
     badgeKey: "settings.modelBadge.stableProduction",
     descriptionKey: "settings.model.llmDescription.oss120b",
     speedTps: 500,

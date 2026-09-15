@@ -386,7 +386,7 @@ describe("llmProvider.ts", () => {
     });
 
     it("[P0] getProviderIdForModel 根據 modelId 回傳 providerId", () => {
-      expect(getProviderIdForModel("qwen/qwen3.6-27b")).toBe("groq");
+      expect(getProviderIdForModel("openai/gpt-oss-120b")).toBe("groq");
       expect(getProviderIdForModel("gpt-5.6-luna")).toBe("openai");
       expect(getProviderIdForModel("claude-haiku-4-5-20251001")).toBe("anthropic");
       expect(getProviderIdForModel("gemini-3.5-flash")).toBe("gemini");
