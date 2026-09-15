@@ -701,7 +701,8 @@
     },
     "upgradeNotice": {
       "title": "SayIt Update Summary",
-      "item1": "The Windows HUD keeps its transparent, rounded shape — if window composition loses its state, the overlay no longer becomes a solid black rectangle. Each time the HUD is shown, it reapplies transparency, always-on-top, and no-focus settings; macOS behavior is unchanged.",
+      "item1": "Pick your MAI-Transcribe model — Settings now lets you switch between 1.5 and 2. Version 2 covers 60 languages and holds up better in noisy rooms, and the readable style strips fillers like \"um\" and \"uh\" before the text reaches AI cleanup. If you already use MAI you stay on 1.5, so your transcripts behave exactly as before.",
+      "item2": "AI cleanup works again — Groq withdrew Qwen3.6 27B, the previous default, which made the cleanup step fail and paste the raw transcript instead. The default is now Qwen3.8 27B, with ten times the daily token allowance.",
       "dismiss": "Got it"
     }
   },
