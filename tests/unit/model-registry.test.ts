@@ -338,23 +338,10 @@ describe("modelRegistry — 模型遷移", () => {
       }
     });
 
-    // Groq 官方棄用政策：preview 模型「may be discontinued at short notice」，
-    // 且不走正式棄用流程（qwen3.6 消失時連棄用頁都沒列）。任何 provider 的
-    // 預設都不該是 preview，否則下一次無預警下架又會讓所有人撞 404。
-    // 同時比對 id 與 displayName 且不分大小寫：只認 "(Preview)" 這個字面
-    // 會在命名稍有出入時靜默放行（如 gemini-3.1-pro-preview 只有 id 帶標記）。
-    it("[P0] 各 provider 的預設模型不得是 preview", () => {
-      for (const model of LLM_MODEL_LIST) {
-        if (!model.isDefault) continue;
-        const marked =
-          model.id.toLowerCase().includes("preview") ||
-          model.displayName.toLowerCase().includes("preview");
-        expect(
-          marked,
-          `${model.id} 是 ${model.providerId} 的預設，但標示為 Preview`,
-        ).toBe(false);
-      }
-    });
+    // 刻意不斷言「預設不得為 preview」：現行預設 qwen3.8 即為 preview，
+    // 是為了 2M/日的 token 額度（production 的 gpt-oss-120b 只有 200K）
+    // 而接受的取捨。上面兩條守衛仍能擋住真正的失效——把模型加進下架表
+    // 卻忘了換預設——那正是 qwen3.6 事件的形狀。
 
     it("[P0] 每個 map value 是存活模型或另一個 map key（結構不變量，抓 typo）", () => {
       for (const [key, value] of Object.entries(DECOMMISSIONED_MODEL_MAP)) {
@@ -403,7 +390,7 @@ describe("modelRegistry — 模型遷移", () => {
         outputCostPerMillion: 4,
         freeQuotaRpd: 1_000,
         freeQuotaTpd: 2_000_000,
-        isDefault: false,
+        isDefault: true,
       });
     });
   });
@@ -419,15 +406,15 @@ describe("modelRegistry — 模型遷移", () => {
     });
 
     it("[P0] 已下架的舊預設 llama-3.3-70b 遷移到新預設", () => {
-      // 該 entry 仍指向 qwen3.6，由迴圈解析續跳到現役的 gpt-oss-120b
+      // 該 entry 仍指向 qwen3.6，由迴圈解析續跳到現役的 qwen3.8
       expect(getEffectiveLlmModelId("llama-3.3-70b-versatile")).toBe(
-        "openai/gpt-oss-120b",
+        "qwen/qwen3.8-27b",
       );
     });
 
-    it("[P0] 2026-09 下架的 qwen3.6 遷移到 production 模型", () => {
+    it("[P0] 2026-09 下架的 qwen3.6 遷移到 qwen3.8", () => {
       expect(getEffectiveLlmModelId("qwen/qwen3.6-27b")).toBe(
-        "openai/gpt-oss-120b",
+        "qwen/qwen3.8-27b",
       );
     });
 
