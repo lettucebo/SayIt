@@ -30,15 +30,24 @@ const EXIT_ERROR = 2;
 /** GitHub Actions 的 job summary。非 Actions 環境下為 undefined，寫入會被跳過。 */
 const SUMMARY_PATH = process.env.GITHUB_STEP_SUMMARY;
 
+/**
+ * Job summary 是診斷用的附屬品，不該有能力改變檢查結果。
+ * 寫入失敗只警告不拋出：若讓它冒泡，一次 runner 的 I/O 異常就會把
+ * exit 0／1 變成 2，真實漂移的 issue 反而開不出來——診斷弄壞了被診斷的東西。
+ */
 async function appendSummary(lines) {
   if (!SUMMARY_PATH) {
     console.log("GITHUB_STEP_SUMMARY not set; skipping job summary");
     return;
   }
-  const { appendFile } = await import("node:fs/promises");
   const text = `${lines.join("\n")}\n`;
-  await appendFile(SUMMARY_PATH, text, "utf8");
-  console.log(`wrote ${text.length} chars to job summary`);
+  try {
+    const { appendFile } = await import("node:fs/promises");
+    await appendFile(SUMMARY_PATH, text, "utf8");
+    console.log(`wrote ${text.length} chars to job summary`);
+  } catch (error) {
+    console.warn(`could not write job summary: ${error.message}`);
+  }
 }
 
 /**
@@ -306,6 +315,6 @@ main()
       `\`\`\`\n${error.message}\n\`\`\``,
       "",
       "**未完成比對，這不代表任何模型有問題。** 常見原因是缺少 provider 金鑰，或 provider API 暫時無法存取。",
-    ]).catch(() => {});
+    ]);
     process.exit(EXIT_ERROR);
   });
