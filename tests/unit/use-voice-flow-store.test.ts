@@ -390,6 +390,18 @@ function createMockInvokeHandler(options?: {
 describe("useVoiceFlowStore", () => {
   let performanceNowCounter = 0;
 
+  // 每個測試結束後清掉 store 的計時器。store 的 error / success / cancelled 轉場會排
+  // 1~6 秒的 autoHideTimer，觸發後又會排 400ms 的 collapseHideTimer 去呼叫 hideHud()。
+  // 測試若不清，這些回呼會在「後面的測試正在跑」時才於真實時鐘上觸發，而 mockInvoke
+  // 是全檔共用的，那次遲到的 set_hud_visibility 就被算進別的測試。
+  //
+  // 實測：插入探針等待 1.6 秒，未清理時收到 5 次外來呼叫；「hide→show 循環 3 次」
+  // 斷言剛好 3 次 hide，機器一慢就變 4 次，即 CI 偶發的 `expected 4 to be 3`。
+  // store 本來就有 cleanup() 會清掉全部計時器，這裡只是把它接上測試生命週期。
+  afterEach(() => {
+    useVoiceFlowStore().cleanup();
+  });
+
   beforeEach(() => {
     performanceNowCounter = 0;
     vi.spyOn(performance, "now").mockImplementation(() => {
@@ -3067,6 +3079,14 @@ describe("useVoiceFlowStore", () => {
       await vi.waitFor(() => {
         expect(mockInvoke).toHaveBeenCalledWith("play_stop_sound");
       });
+
+      // 等到終態才結束：handleStopRecording 是 fire-and-forget，測試若在
+      // play_stop_sound / paste_text 一出現就返回，後段會在 afterEach 之後才跑到
+      // transitionTo("success")，屆時排下的 autoHideTimer 已無人可清，
+      // 1.4 秒後便以 hideHud() 的形式落進別的測試。
+      await vi.waitFor(() => {
+        expect(store.status).toBe("success");
+      });
     });
 
     it("play_start_sound 失敗不應影響錄音流程", async () => {
@@ -3153,6 +3173,14 @@ describe("useVoiceFlowStore", () => {
         });
       });
       expect(mockInvoke).not.toHaveBeenCalledWith("play_stop_sound");
+
+      // 等到終態才結束：handleStopRecording 是 fire-and-forget，測試若在
+      // play_stop_sound / paste_text 一出現就返回，後段會在 afterEach 之後才跑到
+      // transitionTo("success")，屆時排下的 autoHideTimer 已無人可清，
+      // 1.4 秒後便以 hideHud() 的形式落進別的測試。
+      await vi.waitFor(() => {
+        expect(store.status).toBe("success");
+      });
     });
   });
 
