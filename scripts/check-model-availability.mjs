@@ -31,9 +31,14 @@ const EXIT_ERROR = 2;
 const SUMMARY_PATH = process.env.GITHUB_STEP_SUMMARY;
 
 async function appendSummary(lines) {
-  if (!SUMMARY_PATH) return;
+  if (!SUMMARY_PATH) {
+    console.log("GITHUB_STEP_SUMMARY not set; skipping job summary");
+    return;
+  }
   const { appendFile } = await import("node:fs/promises");
-  await appendFile(SUMMARY_PATH, `${lines.join("\n")}\n`, "utf8");
+  const text = `${lines.join("\n")}\n`;
+  await appendFile(SUMMARY_PATH, text, "utf8");
+  console.log(`wrote ${text.length} chars to job summary`);
 }
 
 /**
