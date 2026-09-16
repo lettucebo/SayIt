@@ -1,0 +1,312 @@
+name: Build Smoke Test
+
+# 發版前的原生建置煙霧測試。
+#
+# 為什麼需要：release.yml 只能透過 `push tags v*` 或帶必填 tag 的 workflow_dispatch
+# 觸發，而**兩者都會建立或修改 release**。所以「三平台能不能建置成功」這件事，
+# 平常沒有無副作用的驗證方式——CI 只跑前端與 cargo check/clippy，不做 bundle。
+# 過去升級 GitHub Actions 版本時，唯一能確認 tauri-action 仍可完成原生建置的方法
+# 是真的發一版。這支 workflow 讓那件事可以隨時手動驗證，且不產生任何 release。
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# 🔒 安全不變式：這支 workflow 永遠不得發佈任何東西
+#
+# 依 tauri-action v0（commit 84b9d35）的 src/index.ts：
+#   L193 getOrCreateRelease   → 在 `if (tagName && !releaseId)` 內
+#   L212 uploadReleaseAssets  → 在 `if (releaseId)` 內
+#   L224 uploadVersionJSON    → 同上
+#   L242 `} else { console.log('No releaseId or tagName provided, skipping all uploads...') }`
+#
+# 因此三道防線，修改本檔時三者都必須維持：
+#   1. 不提供 `releaseId`，也不提供 `tagName` → 走 build-only 分支
+#   2. 不提供 `GITHUB_TOKEN` → create-release.ts:44 / upload-release-assets.ts:18 /
+#      upload-version-json.ts:43 會在建立 Octokit 前就 throw
+#   3. `permissions: contents: read` → 即使前兩道被破壞，token 也無權寫 release
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 🔒 安全不變式二：不得在不可信的程式碼上執行
+#
+# `beforeBuildCommand: pnpm build` 意味著**被 checkout 的程式碼會被執行**，而這個
+# job 的環境裡有正式的 updater 簽章私鑰。因此這支 workflow 刻意**不提供 ref input**：
+# checkout 一律使用 `github.ref`，也就是 dispatch 時選定的那個 ref——而該 ref 同時
+# 也是這支 workflow 定義的來源，兩者一致，沒有「可信定義 + 不可信內容」的落差。
+#
+# 若加回 ref input，就會出現這個落差：維護者可以用可信的 workflow 去建置例如
+# `refs/pull/N/head` 的 fork 程式碼，而那份程式碼能讀到 TAURI_SIGNING_PRIVATE_KEY。
+# 私鑰外洩不等於取得 GitHub 寫入權，但會破壞更新套件的簽章信任邊界，而
+# `contents: read` 完全擋不住這件事。
+#
+# 代價：無法煙霧測試舊的 tag（舊 tag 的樹裡沒有這支 workflow）。這個取捨是刻意的。
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  workflow_dispatch:
+
+# 見上方安全不變式第 3 點。不要改成 write。
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    strategy:
+      # 一個平台失敗時，仍要看到其他平台的結果——否則每次只能修一個問題。
+      fail-fast: false
+      # 與 release.yml 的 build job 相同的三個組合。
+      #
+      # required_globs / signed_globs 點名「發版真的需要」的產物，而不是只確認
+      # 「有東西被產出」——原因見下方 Assert 步驟的說明。
+      matrix:
+        include:
+          - label: macOS arm64
+            platform: macos-latest
+            args: --target aarch64-apple-darwin
+            rust_target: aarch64-apple-darwin
+            sourcemaps: "true"
+            required_globs: |
+              src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+              src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app.tar.gz
+            signed_globs: |
+              src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app.tar.gz
+          - label: macOS x64
+            platform: macos-latest
+            args: --target x86_64-apple-darwin
+            rust_target: x86_64-apple-darwin
+            sourcemaps: "false"
+            required_globs: |
+              src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
+              src-tauri/target/x86_64-apple-darwin/release/bundle/macos/*.app.tar.gz
+            signed_globs: |
+              src-tauri/target/x86_64-apple-darwin/release/bundle/macos/*.app.tar.gz
+          - label: Windows x64
+            platform: windows-latest
+            args: ""
+            rust_target: ""
+            sourcemaps: "false"
+            required_globs: |
+              src-tauri/target/release/bundle/nsis/*-setup.exe
+            signed_globs: |
+              src-tauri/target/release/bundle/nsis/*-setup.exe
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # 刻意不接受 ref input，見檔頭安全不變式二。
+          fetch-depth: 0
+
+      # 以下四步的順序與版本刻意與 release.yml 的 build job 一致；
+      # 不一致就失去代表性，改動 release.yml 時請同步這裡。
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: ".nvmrc"
+
+      - uses: pnpm/action-setup@v6
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      # tauri.conf.json 的 beforeBuildCommand 是 `pnpm build`，所以這一步會經由
+      # tauri CLI 再次呼叫 pnpm，連帶驗證上面兩個 setup action 提供的環境。
+      # createUpdaterArtifacts 為 true，故也會走到 updater 簽章。
+      - name: Build with tauri-action
+        id: tauri
+        uses: tauri-apps/tauri-action@v0
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          SENTRY_DSN: ${{ vars.SENTRY_DSN }}
+          VITE_SENTRY_DSN: ${{ vars.VITE_SENTRY_DSN }}
+          SENTRY_ENVIRONMENT: production
+          VITE_SENTRY_ENVIRONMENT: production
+          SENTRY_RELEASE: sayit@smoke-test
+          VITE_SENTRY_RELEASE: sayit@smoke-test
+          # 與 release.yml 相同：只有 arm64 會產生 sourcemap。這個旗標控制的是
+          # vite.config.ts:36 的 build.sourcemap，不是上傳；煙霧測試不上傳 Sentry，
+          # 但仍要走過同一條產生路徑，否則就少驗了 arm64 實際會執行的建置分支。
+          VITE_SENTRY_SOURCEMAPS_ENABLED: ${{ matrix.sourcemaps }}
+        with:
+          # 見檔頭安全不變式第 1 點：兩者都必須保持不提供。
+          args: ${{ matrix.args }}
+
+      # ⚠️ 不能只看上一步是否成功，有兩個獨立的漏網路徑：
+      #
+      # (a) tauri-action 在 build-only 模式下、若完全沒有產出 artifact，只會 log 並
+      #     return（src/index.ts:123-131），**不視為錯誤**。
+      # (b) 更隱蔽：artifactPaths 是 tauri-action 以 `artifacts.filter(p => existsSync(p.path))`
+      #     （src/build.ts）過濾後的結果，也就是「找到什麼就列什麼」。少了必要產物
+      #     並不會讓清單變空，只會讓它變短——所以「清單非空且每個檔案都存在」這種
+      #     檢查會全綠通過，即使發版所需的 installer 根本沒被產出。
+      #
+      # 因此這裡改為逐項點名 release.yml 真正依賴的產物：
+      #   release.yml:241  find ... -path "*/bundle/dmg/*.dmg"   （macOS 穩定命名資產）
+      #   release.yml:253  Get-ChildItem ... -Filter "*-setup.exe"（Windows 穩定命名資產）
+      # 缺任一者，發版都會失敗。
+      - name: Assert artifacts and updater signatures
+        id: assert
+        shell: bash
+        env:
+          ARTIFACT_PATHS: ${{ steps.tauri.outputs.artifactPaths }}
+          APP_VERSION: ${{ steps.tauri.outputs.appVersion }}
+          REQUIRED_GLOBS: ${{ matrix.required_globs }}
+          SIGNED_GLOBS: ${{ matrix.signed_globs }}
+        run: |
+          set -euo pipefail
+
+          echo "appVersion=${APP_VERSION}"
+
+          # (1) 擋掉「完全沒產出卻 exit 0」
+          if [ -z "${ARTIFACT_PATHS}" ]; then
+            echo "::error::tauri-action reported no artifactPaths at all"
+            exit 1
+          fi
+          node -e '
+            const v = JSON.parse(process.env.ARTIFACT_PATHS);
+            if (!Array.isArray(v) || v.length === 0) {
+              console.error("::error::tauri-action produced no artifacts (it still exits 0 in build-only mode)");
+              process.exit(1);
+            }
+            const fs = require("fs");
+            const missing = v.filter((p) => !fs.existsSync(p));
+            if (missing.length) {
+              console.error("::error::artifactPaths lists files that do not exist: " + missing.join(", "));
+              process.exit(1);
+            }
+            v.forEach((p) => console.log("reported artifact: " + p));
+          '
+
+          # 迴圈以 here-string 餵入而非 pipeline，否則 while 會在 subshell 執行、
+          # FAILED 的指派會在迴圈結束後消失，整段檢查就變成永遠通過。
+          FAILED=0
+
+          # (2) 必要產物逐項點名
+          while IFS= read -r pattern; do
+            [ -z "${pattern}" ] && continue
+            matches=$(compgen -G "${pattern}" || true)
+            if [ -z "${matches}" ]; then
+              echo "::error::required artifact missing: ${pattern}"
+              FAILED=1
+            else
+              while IFS= read -r f; do
+                [ -n "${f}" ] && echo "  required OK: ${f}"
+              done <<< "${matches}"
+            fi
+          done <<< "${REQUIRED_GLOBS}"
+
+          # (3) updater 產物必須有「配對且非空」的簽章。
+          #     只數整個 target tree 有幾個 .sig 不夠：那無法分辨簽章是否對應到真正
+          #     要發佈的那個檔案，一個殘留的無關 .sig 就能讓檢查通過。
+          SIG_TOTAL=0
+          while IFS= read -r pattern; do
+            [ -z "${pattern}" ] && continue
+            matches=$(compgen -G "${pattern}" || true)
+            if [ -z "${matches}" ]; then
+              echo "::error::no updater artifact matched: ${pattern}"
+              FAILED=1
+              continue
+            fi
+            while IFS= read -r f; do
+              [ -z "${f}" ] && continue
+              if [ -f "${f}.sig" ] && [ -s "${f}.sig" ]; then
+                echo "  signed OK: ${f}.sig"
+                SIG_TOTAL=$((SIG_TOTAL + 1))
+              else
+                echo "::error::missing or empty updater signature for ${f}"
+                FAILED=1
+              fi
+            done <<< "${matches}"
+          done <<< "${SIGNED_GLOBS}"
+
+          [ "${FAILED}" -eq 0 ] || exit 1
+
+          ARTIFACT_COUNT=$(node -e 'console.log(JSON.parse(process.env.ARTIFACT_PATHS).length)')
+          echo "artifact count: ${ARTIFACT_COUNT}, paired updater signatures: ${SIG_TOTAL}"
+          {
+            echo "artifact_count=${ARTIFACT_COUNT}"
+            echo "sig_count=${SIG_TOTAL}"
+          } >> "$GITHUB_OUTPUT"
+
+      # Tripwire，不是證明。這三個 output 只在「建立或解析 release」的路徑才會被設定
+      # （src/index.ts:206-208），所以非空代表確實走了發佈路徑；但反過來不成立——
+      # 若有人未來加回 releaseId，上傳會照做而這些 output 仍然是空的。
+      # 「不會發佈」的保證來自檔頭那三道防線，這一步只是它們失效時的警報。
+      - name: Assert the publish path was not taken
+        shell: bash
+        env:
+          OUT_RELEASE_ID: ${{ steps.tauri.outputs.releaseId }}
+          OUT_RELEASE_URL: ${{ steps.tauri.outputs.releaseHtmlUrl }}
+          OUT_UPLOAD_URL: ${{ steps.tauri.outputs.releaseUploadUrl }}
+        run: |
+          set -euo pipefail
+          FAILED=0
+          for pair in "releaseId=${OUT_RELEASE_ID}" "releaseHtmlUrl=${OUT_RELEASE_URL}" "releaseUploadUrl=${OUT_UPLOAD_URL}"; do
+            name="${pair%%=*}"
+            value="${pair#*=}"
+            if [ -n "${value}" ]; then
+              echo "::error::tauri-action set ${name}='${value}' -- it took the publish path, which this workflow must never do"
+              FAILED=1
+            else
+              echo "  ${name}: (empty, as expected)"
+            fi
+          done
+          exit "${FAILED}"
+
+      # 摘要只是診斷輸出，絕不能反過來影響被診斷的結果：獨立成一步、always()
+      # 執行以便失敗時也看得到，並且 continue-on-error 確保它自己壞掉時不改變 job 結論。
+      - name: Report to job summary
+        if: always()
+        continue-on-error: true
+        shell: bash
+        env:
+          LABEL: ${{ matrix.label }}
+          JOB_STATUS: ${{ job.status }}
+          APP_VERSION: ${{ steps.tauri.outputs.appVersion }}
+          ARTIFACT_COUNT: ${{ steps.assert.outputs.artifact_count }}
+          SIG_COUNT: ${{ steps.assert.outputs.sig_count }}
+          ARTIFACT_PATHS: ${{ steps.tauri.outputs.artifactPaths }}
+        run: |
+          case "${JOB_STATUS}" in
+            success) ICON="✅" ;;
+            cancelled) ICON="⚪" ;;
+            *) ICON="❌" ;;
+          esac
+
+          {
+            echo "### ${ICON} ${LABEL}"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Status | \`${JOB_STATUS}\` |"
+            echo "| App version | \`${APP_VERSION:-n/a}\` |"
+            # 未設定時顯示 n/a 而非 0：建置失敗時斷言步驟根本沒跑完，
+            # 「0 個產物」與「沒驗到」是兩回事，不該長得一樣。
+            echo "| Artifacts | ${ARTIFACT_COUNT:-n/a} |"
+            echo "| Paired updater signatures | ${SIG_COUNT:-n/a} |"
+            echo ""
+            if [ -n "${ARTIFACT_PATHS:-}" ] && [ "${ARTIFACT_PATHS}" != "[]" ]; then
+              echo "<details><summary>Artifacts</summary>"
+              echo ""
+              node -e '
+                const path=require("path");
+                JSON.parse(process.env.ARTIFACT_PATHS).forEach(p=>console.log("- `"+path.basename(p)+"`"));
+              '
+              echo ""
+              echo "</details>"
+            else
+              echo "_No artifact list was reported._"
+            fi
+            echo ""
+            echo "> Configured for build only — no \`releaseId\`/\`tagName\`, no \`GITHUB_TOKEN\`, \`contents: read\`."
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
