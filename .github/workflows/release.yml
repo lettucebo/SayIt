@@ -27,7 +27,9 @@ jobs:
     outputs:
       release_id: ${{ steps.create.outputs.release_id }}
     steps:
-      - uses: actions/checkout@v4
+      # v4 跑在 Node 20 上，GitHub 已宣告棄用並強制改跑 Node 24，每次發版都出警告。
+      # v5 起原生就是 node24。
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 0
@@ -135,7 +137,7 @@ jobs:
 
     runs-on: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 0
@@ -158,11 +160,19 @@ jobs:
           echo "VITE_SENTRY_RELEASE=sayit@$RELEASE_VERSION" >> "$GITHUB_ENV"
           # Release body 由 create-release job 從 CHANGELOG 產生，這裡不重複。
 
-      - uses: actions/setup-node@v4
+      # setup-node 自 v5 起會自動偵測套件管理器並啟用快取。本 job 的 pnpm 是在
+      # 下一步才安裝的，若它在此時就去呼叫 pnpm 會失敗；v6 起自動快取只在
+      # 「從 package.json 判定為 npm」時啟用，而本 repo 的 packageManager 是 pnpm，
+      # 因此不會觸發。已在 macOS 與 Windows 上實測確認（見 PR 內的驗證紀錄）。
+      #
+      # ⚠️ 若日後要加 setup-node 的 pnpm 快取（`cache: pnpm`），必須先把
+      # pnpm/action-setup 移到本步驟之前——明確指定 cache 會繞過上述 npm-only
+      # 判斷，在 pnpm 尚未安裝時就執行快取還原。
+      - uses: actions/setup-node@v7
         with:
           node-version-file: ".nvmrc"
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
