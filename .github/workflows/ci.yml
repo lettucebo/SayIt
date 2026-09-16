@@ -15,8 +15,13 @@ jobs:
       - uses: actions/checkout@v7
 
       # setup-node 自 v5 起會自動偵測套件管理器並啟用快取。本 job 的 pnpm 是在
-      # 下一步才安裝的，若它在此時就去呼叫 pnpm 會失敗；v6 已把自動快取限縮回
-      # 僅 npm，而本 repo 沒有 package-lock.json，因此不會觸發。
+      # 下一步才安裝的，若它在此時就去呼叫 pnpm 會失敗。v6 起自動快取只在
+      # 「從 package.json 判定為 npm」時啟用，而本 repo 的 packageManager 是
+      # pnpm，因此不會觸發。
+      #
+      # ⚠️ 若日後要加 setup-node 的 pnpm 快取（`cache: pnpm`），必須先把
+      # pnpm/action-setup 移到本步驟之前——明確指定 cache 會繞過上述 npm-only
+      # 判斷，在 pnpm 尚未安裝時就執行快取還原。
       - uses: actions/setup-node@v7
         with:
           node-version-file: ".nvmrc"
