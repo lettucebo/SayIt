@@ -27,6 +27,15 @@ const EXIT_OK = 0;
 const EXIT_DRIFT = 1;
 const EXIT_ERROR = 2;
 
+/** GitHub Actions 的 job summary。非 Actions 環境下為 undefined，寫入會被跳過。 */
+const SUMMARY_PATH = process.env.GITHUB_STEP_SUMMARY;
+
+async function appendSummary(lines) {
+  if (!SUMMARY_PATH) return;
+  const { appendFile } = await import("node:fs/promises");
+  await appendFile(SUMMARY_PATH, `${lines.join("\n")}\n`, "utf8");
+}
+
 /**
  * 各 provider 的實際模型清單來源。
  * 新增 provider 時在此擴充即可；缺對應金鑰的 provider 會被跳過而非失敗，
@@ -95,93 +104,108 @@ function describeDrift(provider, registry, liveIds) {
   return { registryIds, missing, defaultId, defaultMissing };
 }
 
-async function main() {
-  const registry = await loadRegistry();
-  const reportLines = [];
-  let drifted = false;
-  let checked = 0;
 
-  // 告警管線只有在真的出事時才會跑到，等到那時才發現 issue 開不出來就太晚了。
-  // 這條路徑僅由手動觸發帶入，排程不會設定此變數。
-  if (process.env.SIMULATE_DRIFT === "1") {
-    const fake = "example/model-that-does-not-exist";
-    console.log("SIMULATE_DRIFT=1: emitting a synthetic report");
-    reportLines.push(
-      "### 這是模擬報告",
-      "",
-      "由 `workflow_dispatch` 的 `simulate_drift` 選項手動觸發，用來驗證告警管線本身。",
-      "**沒有任何模型真的失效**，看到這則 issue 直接關閉即可。",
-      "",
-      `| registry 內的模型 | 狀態 |`,
-      "| --- | --- |",
-      `| \`${fake}\` | ❌ 不在上線清單（模擬） |`,
+/** 檢查單一 provider；未設定金鑰時標記為跳過而非失敗。 */
+async function checkProvider(provider, registry) {
+  const key = process.env[provider.envKey];
+  if (!key) {
+    console.log(`skip ${provider.label}: ${provider.envKey} not set`);
+    return { provider, skipped: true };
+  }
+  const liveIds = await fetchLiveIds(provider, key);
+  const detail = describeDrift(provider, registry, liveIds);
+  console.log(
+    `${provider.label}: ${detail.registryIds.length} in registry, ${liveIds.size} live, ${detail.missing.length} missing`,
+  );
+  return { provider, liveIds, skipped: false, ...detail };
+}
+
+/**
+ * Job summary：無論結果如何都要輸出，這樣每次執行都能一眼看到目前的模型狀態，
+ * 而不是只有出事時才有東西可看。有漂移才開 issue，但「一切正常」同樣是有用的資訊。
+ */
+function renderSummary(results, simulated) {
+  const lines = ["## 模型可用性", ""];
+  if (simulated) {
+    lines.push(
+      "> ⚠️ **模擬模式**（`simulate_drift`）：以下為驗證告警管線用的假資料，未檢查真實模型。",
       "",
     );
-    drifted = true;
-    checked = 1;
   }
 
-  for (const provider of PROVIDERS) {
-    if (drifted && process.env.SIMULATE_DRIFT === "1") break;
-    const key = process.env[provider.envKey];
-    if (!key) {
-      console.log(
-        `skip ${provider.label}: ${provider.envKey} not set`,
+  lines.push("| Provider | registry | 上線 | 狀態 |", "| --- | --- | --- | --- |");
+  for (const r of results) {
+    if (r.skipped) {
+      lines.push(
+        `| ${r.provider.label} | — | — | ⏭️ 略過（未設定 \`${r.provider.envKey}\`） |`,
       );
       continue;
     }
-
-    const liveIds = await fetchLiveIds(provider, key);
-    checked += 1;
-    const { registryIds, missing, defaultId, defaultMissing } = describeDrift(
-      provider,
-      registry,
-      liveIds,
+    const status =
+      r.missing.length === 0
+        ? "✅ 全部可用"
+        : `❌ ${r.missing.length} 個已下架`;
+    lines.push(
+      `| ${r.provider.label} | ${r.registryIds.length} | ${r.liveIds.size} | ${status} |`,
     );
+  }
+  lines.push("");
 
-    console.log(
-      `${provider.label}: ${registryIds.length} in registry, ${liveIds.size} live, ${missing.length} missing`,
-    );
+  for (const r of results) {
+    if (r.skipped) continue;
+    lines.push(`### ${r.provider.label}`, "");
+    lines.push("| registry 內的模型 | 狀態 |", "| --- | --- |");
+    for (const id of r.registryIds) {
+      const mark = id === r.defaultId ? " ⭐ 預設" : "";
+      const ok = r.liveIds.has(id) ? "✅ 可用" : "❌ 不在上線清單";
+      lines.push(`| \`${id}\`${mark} | ${ok} |`);
+    }
+    lines.push("");
 
-    if (missing.length === 0) continue;
-    drifted = true;
-
-    reportLines.push(`### ${provider.label}`, "");
-    if (defaultMissing) {
-      reportLines.push(
-        `> **預設模型 \`${defaultId}\` 已不在上線清單。** 全新安裝與所有遷移到它的使用者都會在整理階段收到 404。`,
+    // provider 有但 registry 未收錄的模型：多半是 TTS／分類器等不適用的模型，
+    // 收合起來避免蓋過上面真正要看的狀態，但保留著以便評估新模型。
+    const extra = [...r.liveIds].filter((id) => !r.registryIds.includes(id)).sort();
+    if (extra.length > 0) {
+      lines.push(
+        "<details>",
+        `<summary>provider 上另有 ${extra.length} 個未收錄於 registry 的模型</summary>`,
+        "",
+        ...extra.map((id) => `- \`${id}\``),
+        "",
+        "</details>",
         "",
       );
     }
-    reportLines.push("| registry 內的模型 | 狀態 |", "| --- | --- |");
-    for (const id of missing) {
-      const isDefault = id === defaultId ? "（預設）" : "";
-      reportLines.push(`| \`${id}\`${isDefault} | ❌ 不在上線清單 |`);
-    }
-    reportLines.push("", "目前可用的模型：", "");
-    for (const id of [...liveIds].sort()) {
-      reportLines.push(`- \`${id}\``);
-    }
-    reportLines.push("");
   }
+  return lines;
+}
 
-  if (checked === 0) {
-    throw new Error(
-      "No provider was checked — set at least one provider API key",
-    );
-  }
-
-  if (!drifted) {
-    console.log("no drift detected");
-    return EXIT_OK;
-  }
-
-  const body = [
+function renderIssueBody(results) {
+  const lines = [
     "偵測到 `src/lib/modelRegistry.ts` 內的模型已不在 provider 的上線清單中。",
     "",
     "使用者影響：選到這些模型的請求會失敗。若其中包含預設模型，全新安裝與從舊版遷移的使用者都會受影響，且語音轉錄本身仍正常，只有 AI 整理失效，容易被忽略。",
     "",
-    ...reportLines,
+  ];
+  for (const r of results) {
+    if (r.skipped || r.missing.length === 0) continue;
+    lines.push(`### ${r.provider.label}`, "");
+    if (r.defaultMissing) {
+      lines.push(
+        `> **預設模型 \`${r.defaultId}\` 已不在上線清單。** 全新安裝與所有遷移到它的使用者都會在整理階段收到 404。`,
+        "",
+      );
+    }
+    lines.push("| registry 內的模型 | 狀態 |", "| --- | --- |");
+    for (const id of r.missing) {
+      const mark = id === r.defaultId ? "（預設）" : "";
+      lines.push(`| \`${id}\`${mark} | ❌ 不在上線清單 |`);
+    }
+    lines.push("", "目前可用的模型：", "");
+    for (const id of [...r.liveIds].sort()) lines.push(`- \`${id}\``);
+    lines.push("");
+  }
+  lines.push(
     "### 修正方式",
     "",
     "1. 在 `LLM_MODEL_LIST` / `WHISPER_MODEL_LIST` 移除失效模型",
@@ -190,22 +214,93 @@ async function main() {
     "4. 移除連帶孤立的 i18n 說明文案",
     "",
     "`model-registry.test.ts` 內已有守衛會驗證「預設模型必須存在於清單、且不得同時列為已下架」。",
-  ].join("\n");
+  );
+  return lines.join("\n");
+}
 
-  // workflow 用這個檔案當 issue body，避免把多行內容塞進 shell 變數
-  const outPath = process.env.MODEL_DRIFT_REPORT_PATH;
-  if (outPath) {
-    const { writeFile } = await import("node:fs/promises");
-    await writeFile(outPath, body, "utf8");
+async function main() {
+  const registry = await loadRegistry();
+  const simulated = process.env.SIMULATE_DRIFT === "1";
+
+  // 告警管線只有在真的出事時才會跑到，等到那時才發現 issue 開不出來就太晚了。
+  // 這條路徑僅由手動觸發帶入，排程不會設定此變數。
+  if (simulated) {
+    console.log("SIMULATE_DRIFT=1: emitting a synthetic report");
+    const fakeProvider = { label: "Simulation", envKey: "SIMULATE_DRIFT" };
+    const fakeId = "example/model-that-does-not-exist";
+    const results = [
+      {
+        provider: fakeProvider,
+        skipped: false,
+        liveIds: new Set(),
+        registryIds: [fakeId],
+        missing: [fakeId],
+        defaultId: fakeId,
+        defaultMissing: true,
+      },
+    ];
+    await appendSummary(renderSummary(results, true));
+    const body = [
+      "### 這是模擬報告",
+      "",
+      "由 `workflow_dispatch` 的 `simulate_drift` 選項手動觸發，用來驗證告警管線本身。",
+      "**沒有任何模型真的失效**，看到這則 issue 直接關閉即可。",
+      "",
+      "| registry 內的模型 | 狀態 |",
+      "| --- | --- |",
+      `| \`${fakeId}\` | ❌ 不在上線清單（模擬） |`,
+    ].join("\n");
+    await writeReport(body);
+    console.log(`\n--- drift report ---\n\n${body}`);
+    return EXIT_DRIFT;
   }
-  console.log("\n--- drift report ---\n");
-  console.log(body);
+
+  const results = [];
+  for (const provider of PROVIDERS) {
+    results.push(await checkProvider(provider, registry));
+  }
+
+  if (results.every((r) => r.skipped)) {
+    throw new Error(
+      "No provider was checked — set at least one provider API key",
+    );
+  }
+
+  // summary 在判斷退出碼之前寫出：無論有沒有漂移都要留下狀態卡片
+  await appendSummary(renderSummary(results, false));
+
+  const drifted = results.some((r) => !r.skipped && r.missing.length > 0);
+  if (!drifted) {
+    console.log("no drift detected");
+    return EXIT_OK;
+  }
+
+  const body = renderIssueBody(results);
+  await writeReport(body);
+  console.log(`\n--- drift report ---\n\n${body}`);
   return EXIT_DRIFT;
+}
+
+/** workflow 用這個檔案當 issue body，避免把多行內容塞進 shell 變數 */
+async function writeReport(body) {
+  const outPath = process.env.MODEL_DRIFT_REPORT_PATH;
+  if (!outPath) return;
+  const { writeFile } = await import("node:fs/promises");
+  await writeFile(outPath, body, "utf8");
 }
 
 main()
   .then((code) => process.exit(code))
-  .catch((error) => {
+  .catch(async (error) => {
     console.error(`check failed: ${error.message}`);
+    // 失敗時也要留下 summary：只看到紅燈卻不知道是「模型下架」還是「API 掛掉」，
+    // 會讓人第一時間跑去改 registry，而那其實不是問題所在。
+    await appendSummary([
+      "## 模型可用性 — 檢查失敗",
+      "",
+      `\`\`\`\n${error.message}\n\`\`\``,
+      "",
+      "**未完成比對，這不代表任何模型有問題。** 常見原因是缺少 provider 金鑰，或 provider API 暫時無法存取。",
+    ]).catch(() => {});
     process.exit(EXIT_ERROR);
   });

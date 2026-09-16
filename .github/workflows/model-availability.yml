@@ -33,9 +33,13 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      # v4 執行在 Node 20 上，GitHub 已宣告棄用並強制改跑 Node 24，每次執行都會
+      # 產生警告。v5 起原生就是 node24。刻意跳過 setup-node v5：它新增了自動偵測
+      # 套件管理器並快取的行為，而本 job 刻意不安裝 pnpm，v6 才把自動快取限縮回
+      # 僅 npm（本 repo 沒有 package-lock.json，因此不會觸發）。
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
 
