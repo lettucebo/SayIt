@@ -3079,6 +3079,14 @@ describe("useVoiceFlowStore", () => {
       await vi.waitFor(() => {
         expect(mockInvoke).toHaveBeenCalledWith("play_stop_sound");
       });
+
+      // 等到終態才結束：handleStopRecording 是 fire-and-forget，測試若在
+      // play_stop_sound / paste_text 一出現就返回，後段會在 afterEach 之後才跑到
+      // transitionTo("success")，屆時排下的 autoHideTimer 已無人可清，
+      // 1.4 秒後便以 hideHud() 的形式落進別的測試。
+      await vi.waitFor(() => {
+        expect(store.status).toBe("success");
+      });
     });
 
     it("play_start_sound 失敗不應影響錄音流程", async () => {
@@ -3165,6 +3173,14 @@ describe("useVoiceFlowStore", () => {
         });
       });
       expect(mockInvoke).not.toHaveBeenCalledWith("play_stop_sound");
+
+      // 等到終態才結束：handleStopRecording 是 fire-and-forget，測試若在
+      // play_stop_sound / paste_text 一出現就返回，後段會在 afterEach 之後才跑到
+      // transitionTo("success")，屆時排下的 autoHideTimer 已無人可清，
+      // 1.4 秒後便以 hideHud() 的形式落進別的測試。
+      await vi.waitFor(() => {
+        expect(store.status).toBe("success");
+      });
     });
   });
 
@@ -3271,9 +3287,6 @@ describe("useVoiceFlowStore", () => {
       vi.useFakeTimers();
       try {
         const store = useVoiceFlowStore();
-        // 只量測本測試自己觸發的呼叫。mockInvoke 是全檔共用的，別的測試若留下
-        // 未清的計時器，遲到的 set_hud_visibility 會被算進這裡的 3/3 斷言。
-        mockInvoke.mockClear();
 
         for (let i = 0; i < 3; i++) {
           store.transitionTo("recording", "voiceFlow.recording");
