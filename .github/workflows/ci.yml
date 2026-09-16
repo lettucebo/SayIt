@@ -10,13 +10,18 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      # v4 跑在 Node 20 上，GitHub 已宣告棄用並強制改跑 Node 24，每次執行都出警告。
+      # v5 起原生就是 node24。
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      # setup-node 自 v5 起會自動偵測套件管理器並啟用快取。本 job 的 pnpm 是在
+      # 下一步才安裝的，若它在此時就去呼叫 pnpm 會失敗；v6 已把自動快取限縮回
+      # 僅 npm，而本 repo 沒有 package-lock.json，因此不會觸發。
+      - uses: actions/setup-node@v7
         with:
           node-version-file: ".nvmrc"
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -50,7 +55,7 @@ jobs:
           - os: windows-latest
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
         with:
