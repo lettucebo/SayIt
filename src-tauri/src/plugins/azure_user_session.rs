@@ -22,6 +22,8 @@ use super::secret_store::{OsKeyring, SecretStore, SecretStoreError};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::future::Future;
+#[cfg(test)]
+use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
@@ -52,6 +54,10 @@ pub struct AzureUserAuthState {
     locks: StdMutex<HashMap<String, Arc<AsyncMutex<()>>>>,
     /// 進行中的登入（同時只允許一個）
     pending: StdMutex<Option<PendingSignIn>>,
+    #[cfg(test)]
+    lock_observations: AtomicUsize,
+    #[cfg(test)]
+    lock_observed: Notify,
 }
 
 struct PendingSignIn {
@@ -99,7 +105,25 @@ impl CancelSignal {
 impl AzureUserAuthState {
     fn lock_for(&self, key: &str) -> Arc<AsyncMutex<()>> {
         let mut locks = self.locks.lock().unwrap();
-        locks.entry(key.to_string()).or_default().clone()
+        let lock = locks.entry(key.to_string()).or_default().clone();
+        #[cfg(test)]
+        {
+            self.lock_observations.fetch_add(1, Ordering::SeqCst);
+            self.lock_observed.notify_one();
+        }
+        lock
+    }
+
+    #[cfg(test)]
+    fn lock_observation_count(&self) -> usize {
+        self.lock_observations.load(Ordering::SeqCst)
+    }
+
+    #[cfg(test)]
+    async fn wait_for_lock_observation_count(&self, expected: usize) {
+        while self.lock_observation_count() < expected {
+            self.lock_observed.notified().await;
+        }
     }
 
     fn cached(&self, key: &str, scope: ScopeKind) -> Option<String> {
@@ -1052,7 +1076,7 @@ mod tests {
             params: Vec<(&'static str, String)>,
         ) -> Result<TokenResponse, AzureUserAuthError> {
             self.token_calls.lock().unwrap().push((tenant_id, params));
-            self.post_token_started.notify_waiters();
+            self.post_token_started.notify_one();
             let hold = self.hold_next_post_token.lock().unwrap().take();
             if let Some(hold) = hold {
                 let _ = hold.await;
@@ -1345,6 +1369,9 @@ mod tests {
         backend.queue(Ok(token_response(Some("access-1"), None, None, Some(3600))));
         let release_refresh = backend.hold_next_post_token();
         let state = Arc::new(AzureUserAuthState::default());
+        let key = account_key(TENANT, CLIENT);
+        let observed_lock = state.lock_for(&key);
+        let baseline_lock_observations = state.lock_observation_count();
 
         let first_backend = backend.clone();
         let first_state = state.clone();
@@ -1361,14 +1388,15 @@ mod tests {
 
         backend.wait_for_post_token_to_start().await;
         assert_eq!(backend.token_call_count(), 1);
+        assert_eq!(
+            state.lock_observation_count(),
+            baseline_lock_observations + 1,
+            "first caller should be holding the per-account lock during refresh"
+        );
 
         let second_backend = backend.clone();
         let second_state = state.clone();
-        let (second_entered, wait_for_second_entered) = tokio::sync::oneshot::channel();
         let second = tokio::spawn(async move {
-            second_entered
-                .send(())
-                .expect("test should still be waiting for the second caller");
             acquire_token(
                 &second_backend,
                 &second_state,
@@ -1379,11 +1407,17 @@ mod tests {
             .await
         });
 
-        tokio::time::timeout(Duration::from_millis(200), wait_for_second_entered)
-            .await
-            .expect("second acquire_token call should enter while refresh is held open")
-            .expect("second caller should report entry");
-        tokio::task::yield_now().await;
+        tokio::time::timeout(
+            Duration::from_secs(2),
+            state.wait_for_lock_observation_count(baseline_lock_observations + 2),
+        )
+        .await
+        .expect("second acquire_token call should reach the per-account lock");
+        assert_eq!(
+            Arc::strong_count(&observed_lock),
+            4,
+            "map, test observer, first caller, and second caller should all hold the same lock Arc"
+        );
         assert_eq!(
             backend.token_call_count(),
             1,
