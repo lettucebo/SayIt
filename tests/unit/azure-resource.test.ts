@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   deriveAzureResourceOrigin,
+  isSameAzureResourceAsFoundryProject,
   isValidAzureResourceName,
   migrateLegacyAzureEndpoints,
   parseAzureResourceName,
@@ -88,6 +89,33 @@ describe("Azure resource endpoint model", () => {
       speech: "https://speech.cognitiveservices.azure.com",
       foundry: "https://main.services.ai.azure.com",
     });
+  });
+
+  it("[P0] accepts same-resource OpenAI and Foundry endpoint families for picker eligibility", () => {
+    expect(
+      isSameAzureResourceAsFoundryProject(
+        "voice-resource",
+        "https://voice-resource.openai.azure.com",
+      ),
+    ).toBe(true);
+    expect(
+      isSameAzureResourceAsFoundryProject(
+        "voice-resource",
+        "https://voice-resource.services.ai.azure.com",
+      ),
+    ).toBe(true);
+    expect(
+      isSameAzureResourceAsFoundryProject(
+        "voice-resource",
+        "https://other-resource.services.ai.azure.com",
+      ),
+    ).toBe(false);
+    expect(
+      isSameAzureResourceAsFoundryProject(
+        "voice-resource",
+        "https://voice-resource.private.example",
+      ),
+    ).toBe(false);
   });
 
   it("[P1] is idempotent after legacy keys are removed", () => {

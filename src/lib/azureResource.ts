@@ -140,6 +140,20 @@ export function resolveAzureResourceOrigins(
   return { main, whisper, speech, foundry };
 }
 
+export function isSameAzureResourceAsFoundryProject(
+  foundryResourceName: string,
+  targetEndpoint: string,
+): boolean {
+  const normalizedFoundryResourceName =
+    normalizeAzureResourceName(foundryResourceName);
+  if (normalizedFoundryResourceName === "") return false;
+  const parsedTarget = parseAzureResourceName(targetEndpoint);
+  return (
+    (parsedTarget?.kind === "openai" || parsedTarget?.kind === "foundry") &&
+    parsedTarget.resourceName === normalizedFoundryResourceName
+  );
+}
+
 /**
  * Converts the persisted endpoint model without changing an existing effective
  * origin. A legacy endpoint that differs from the new canonical host remains

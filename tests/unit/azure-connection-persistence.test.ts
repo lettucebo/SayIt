@@ -29,6 +29,9 @@ vi.mock("@tauri-apps/plugin-store", () => ({
 const mockInvoke = vi.fn().mockResolvedValue(undefined);
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mockInvoke }));
 
+const mockFetch = vi.fn();
+vi.mock("@tauri-apps/plugin-http", () => ({ fetch: mockFetch }));
+
 const mockEmit = vi.fn().mockResolvedValue(undefined);
 vi.mock("@tauri-apps/api/event", () => ({ emit: mockEmit }));
 
@@ -63,6 +66,8 @@ describe("saveAzureConnection 的資料保存性", () => {
     mockStoreGet.mockClear();
     mockStoreSet.mockClear();
     mockInvoke.mockClear();
+    mockFetch.mockReset();
+    mockInvoke.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -199,6 +204,138 @@ describe("saveAzureConnection 的資料保存性", () => {
     );
     expect(config.apiKey).toBe("whisper-resource-key");
     expect(store.hasWhisperConfig).toBe(true);
+  });
+
+  it("[P0] Whisper deployment 清單使用 main Foundry project URL 與 Entra bearer auth", async () => {
+    const { useSettingsStore } = await import(
+      "../../src/stores/useSettingsStore"
+    );
+    const store = useSettingsStore();
+    await store.loadSettings();
+
+    await store.saveAzureConnection(
+      baseConfig({
+        resourceName: "main-resource",
+        projectName: "voice-project",
+        authMode: "entra",
+      }),
+    );
+    await store.saveAzureTranscriptionResources({
+      whisperResourceName: "",
+      whisperEndpointOverride: "",
+      speechResourceName: "",
+      speechEndpointOverride: "",
+      apiKey: "",
+    });
+    mockInvoke.mockResolvedValue({ accessToken: "opaque-access-value", expiresIn: 3600 });
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: vi.fn().mockResolvedValue({
+        value: [
+          {
+            name: "whisper-prod",
+            modelName: "whisper-large-v3",
+            modelPublisher: "OpenAI",
+            capabilities: { audio: "true" },
+          },
+        ],
+      }),
+    });
+
+    const result = await store.listAzureWhisperDeployments();
+
+    expect(result.deploymentList.map((deployment) => deployment.name)).toEqual([
+      "whisper-prod",
+    ]);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(mockFetch.mock.calls[0][0]).toBe(
+      "https://main-resource.services.ai.azure.com/api/projects/voice-project/deployments?api-version=v1",
+    );
+    expect(
+      Object.prototype.hasOwnProperty.call(
+        mockFetch.mock.calls[0][1].headers,
+        "Authorization",
+      ),
+    ).toBe(true);
+    expect(mockFetch.mock.calls[0][1].headers["api-key"]).toBeUndefined();
+    expect(mockInvoke).toHaveBeenCalledWith("get_azure_entra_token", {
+      tenantId: TENANT,
+      clientId: CLIENT,
+      clientSecret: SECRET,
+      scope: "https://ai.azure.com/.default",
+    });
+  });
+
+  it("[P0] Whisper deployment 清單在 transcription target 與 main Foundry resource 不同時拒絕列出", async () => {
+    const { useSettingsStore } = await import(
+      "../../src/stores/useSettingsStore"
+    );
+    const store = useSettingsStore();
+    await store.loadSettings();
+
+    await store.saveAzureConnection(
+      baseConfig({
+        resourceName: "main-resource",
+        projectName: "voice-project",
+        authMode: "entra",
+        transcriptionResources: {
+          whisperResourceName: "whisper-resource",
+          whisperEndpointOverride: "",
+          speechResourceName: "",
+          speechEndpointOverride: "",
+          apiKey: "",
+        },
+      }),
+    );
+
+    await expect(store.listAzureWhisperDeployments()).rejects.toThrow(
+      "AZURE_WHISPER_LIST_RESOURCE_MISMATCH",
+    );
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("[P0] Whisper deployment 清單在 main endpoint override 指向不同資源時拒絕列出", async () => {
+    const { useSettingsStore } = await import(
+      "../../src/stores/useSettingsStore"
+    );
+    const store = useSettingsStore();
+    await store.loadSettings();
+
+    await store.saveAzureConnection(
+      baseConfig({
+        resourceName: "main-resource",
+        endpointOverride: "https://other-resource.openai.azure.com",
+        projectName: "voice-project",
+        authMode: "entra",
+      }),
+    );
+
+    await expect(store.listAzureWhisperDeployments()).rejects.toThrow(
+      "AZURE_WHISPER_LIST_RESOURCE_MISMATCH",
+    );
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("[P0] Whisper deployment 清單在 API key 模式拒絕呼叫 Foundry Projects API", async () => {
+    const { useSettingsStore } = await import(
+      "../../src/stores/useSettingsStore"
+    );
+    const store = useSettingsStore();
+    await store.loadSettings();
+
+    await store.saveAzureConnection(
+      baseConfig({
+        resourceName: "main-resource",
+        projectName: "voice-project",
+        authMode: "key",
+        apiKey: "azure-key",
+      }),
+    );
+
+    await expect(store.listAzureWhisperDeployments()).rejects.toThrow(
+      "AZURE_DEPLOYMENT_LIST_REQUIRES_ENTRA",
+    );
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it("[P0] 設定尚未載入完成時拒絕儲存，避免空白輸入覆寫既有設定", async () => {

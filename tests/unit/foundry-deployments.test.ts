@@ -6,6 +6,7 @@ vi.mock("@tauri-apps/plugin-http", () => ({ fetch: mockFetch }));
 import {
   AzureDeploymentListError,
   listAzureChatDeployments,
+  listAzureWhisperDeployments,
   listAzureV1Models,
   listFoundryDeployments,
 } from "../../src/lib/foundryDeployments";
@@ -201,5 +202,104 @@ describe("Foundry deployments data plane", () => {
     );
     expect(error).toBeInstanceOf(AzureDeploymentListError);
     expect((error as AzureDeploymentListError).statusCode).toBe(401);
+  });
+
+  it("[P0] Whisper deployment 清單使用 Foundry URL、bearer auth，且只保留 audio/whisper capability", async () => {
+    mockFetch.mockResolvedValueOnce(
+      successResponse({
+        value: [
+          {
+            name: "whisper-prod",
+            type: "ModelDeployment",
+            modelName: "whisper-large-v3",
+            modelPublisher: "OpenAI",
+            modelVersion: "1",
+            capabilities: { audio: "true" },
+          },
+          {
+            name: "gpt-chat",
+            type: "ModelDeployment",
+            modelName: "gpt-4.1",
+            modelPublisher: "OpenAI",
+            modelVersion: "1",
+            capabilities: { chat: "true" },
+          },
+          {
+            name: "whisper-fast",
+            type: "ModelDeployment",
+            modelName: "whisper",
+            modelPublisher: "OpenAI",
+            modelVersion: "1",
+            capabilities: { whisper: true },
+          },
+        ],
+      }),
+    );
+
+    await expect(
+      listAzureWhisperDeployments({
+        ...options,
+        authMode: "bearer",
+        authValue: "foundry-token",
+      }),
+    ).resolves.toEqual({
+      deploymentList: [
+        {
+          name: "whisper-prod",
+          source: "foundry",
+          modelName: "whisper-large-v3",
+          modelPublisher: "OpenAI",
+          modelVersion: "1",
+          capabilities: { audio: "true" },
+        },
+        {
+          name: "whisper-fast",
+          source: "foundry",
+          modelName: "whisper",
+          modelPublisher: "OpenAI",
+          modelVersion: "1",
+          capabilities: { whisper: "true" },
+        },
+      ],
+      source: "foundry",
+      capabilityFiltered: true,
+    });
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(mockFetch.mock.calls[0][0]).toBe(
+      "https://resource.services.ai.azure.com/api/projects/voice-project/deployments?api-version=v1",
+    );
+    expect(
+      Object.prototype.hasOwnProperty.call(
+        mockFetch.mock.calls[0][1].headers,
+        "Authorization",
+      ),
+    ).toBe(true);
+    expect(mockFetch.mock.calls[0][1].headers["api-key"]).toBeUndefined();
+  });
+
+  it("[P0] Whisper deployment 在 Foundry 失敗時降級 v1 並標示 capability 未驗證", async () => {
+    mockFetch
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 403,
+        text: vi.fn().mockResolvedValue("Forbidden"),
+      })
+      .mockResolvedValueOnce(
+        successResponse({
+          data: [{ id: "manual-whisper" }],
+        }),
+      );
+
+    await expect(listAzureWhisperDeployments(options)).resolves.toEqual({
+      deploymentList: [{ name: "manual-whisper", source: "v1" }],
+      source: "v1",
+      fallbackReason: "capability-unverified",
+    });
+    expect(mockFetch.mock.calls[0][0]).toBe(
+      "https://resource.services.ai.azure.com/api/projects/voice-project/deployments?api-version=v1",
+    );
+    expect(mockFetch.mock.calls[1][0]).toBe(
+      "https://resource.openai.azure.com/openai/v1/models",
+    );
   });
 });

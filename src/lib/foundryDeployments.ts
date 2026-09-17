@@ -41,6 +41,8 @@ export interface AzureDeploymentListOptions {
   authValue: string;
 }
 
+type AzureDeploymentCapabilityTarget = "chat" | "whisper";
+
 function buildHeaders(
   authMode: AzureAuthHeaderMode,
   authValue: string,
@@ -94,14 +96,39 @@ function isKnownNonChatOnly(capabilities: Record<string, string>): boolean {
   );
 }
 
-function parseFoundryDeploymentList(json: unknown): {
-  chatDeploymentList: AzureChatDeployment[];
+function isWhisperCapable(capabilities: Record<string, string>): boolean {
+  return Object.entries(capabilities).some(
+    ([key, value]) =>
+      ["audio", "whisper"].includes(normalizeCapabilityKey(key)) &&
+      isCapabilityEnabled(value),
+  );
+}
+
+function isKnownNonWhisperOnly(capabilities: Record<string, string>): boolean {
+  return Object.entries(capabilities).some(
+    ([key, value]) =>
+      [
+        "chat",
+        "chatcompletion",
+        "chatcompletions",
+        "embedding",
+        "embeddings",
+        "imagegeneration",
+      ].includes(normalizeCapabilityKey(key)) && isCapabilityEnabled(value),
+  );
+}
+
+function parseFoundryDeploymentList(
+  json: unknown,
+  target: AzureDeploymentCapabilityTarget = "chat",
+): {
+  deploymentList: AzureChatDeployment[];
   unverifiedDeploymentList: AzureChatDeployment[];
   nextLink?: string;
 } {
   const data = json as Record<string, unknown>;
   const valueList = Array.isArray(data.value) ? data.value : [];
-  const chatDeploymentList: AzureChatDeployment[] = [];
+  const deploymentList: AzureChatDeployment[] = [];
   const unverifiedDeploymentList: AzureChatDeployment[] = [];
 
   for (const item of valueList) {
@@ -127,17 +154,25 @@ function parseFoundryDeploymentList(json: unknown): {
           : undefined,
       capabilities,
     };
-    if (isChatCapable(capabilities)) {
-      chatDeploymentList.push(entry);
-    } else if (!isKnownNonChatOnly(capabilities)) {
+    const isCapable =
+      target === "chat"
+        ? isChatCapable(capabilities)
+        : isWhisperCapable(capabilities);
+    const isKnownNonTargetOnly =
+      target === "chat"
+        ? isKnownNonChatOnly(capabilities)
+        : isKnownNonWhisperOnly(capabilities);
+    if (isCapable) {
+      deploymentList.push(entry);
+    } else if (!isKnownNonTargetOnly) {
       // 有些 Foundry 資源回傳尚未文件化的 capability key。寧可誠實顯示
-      // 為未驗證候選項，也不要把使用者唯一可用的 chat deployment 隱藏掉。
+      // 為未驗證候選項，也不要把使用者唯一可用的 deployment 隱藏掉。
       unverifiedDeploymentList.push(entry);
     }
   }
 
   return {
-    chatDeploymentList,
+    deploymentList,
     unverifiedDeploymentList,
     nextLink: typeof data.nextLink === "string" ? data.nextLink : undefined,
   };
@@ -159,6 +194,7 @@ async function fetchJson(url: string, headers: Record<string, string>) {
 
 async function listFoundryDeploymentsWithMetadata(
   options: AzureDeploymentListOptions,
+  target: AzureDeploymentCapabilityTarget = "chat",
 ): Promise<{
   deploymentList: AzureChatDeployment[];
   capabilityFiltered: boolean;
@@ -166,7 +202,7 @@ async function listFoundryDeploymentsWithMetadata(
   const base = normalizeAzureEndpoint(options.foundryEndpoint);
   const origin = new URL(base).origin;
   const headers = buildHeaders(options.authMode, options.authValue);
-  const chatDeploymentList: AzureChatDeployment[] = [];
+  const deploymentList: AzureChatDeployment[] = [];
   const unverifiedDeploymentList: AzureChatDeployment[] = [];
   let nextUrl =
     `${base}/api/projects/${encodeURIComponent(options.projectName)}` +
@@ -177,14 +213,17 @@ async function listFoundryDeploymentsWithMetadata(
     if (parsed.origin !== origin) {
       throw new Error("Foundry deployment nextLink has an unexpected origin");
     }
-    const page = parseFoundryDeploymentList(await fetchJson(nextUrl, headers));
-    chatDeploymentList.push(...page.chatDeploymentList);
+    const page = parseFoundryDeploymentList(
+      await fetchJson(nextUrl, headers),
+      target,
+    );
+    deploymentList.push(...page.deploymentList);
     unverifiedDeploymentList.push(...page.unverifiedDeploymentList);
     nextUrl = page.nextLink ?? "";
   }
 
-  return chatDeploymentList.length > 0
-    ? { deploymentList: chatDeploymentList, capabilityFiltered: true }
+  return deploymentList.length > 0
+    ? { deploymentList, capabilityFiltered: true }
     : { deploymentList: unverifiedDeploymentList, capabilityFiltered: false };
 }
 
@@ -238,5 +277,35 @@ export async function listAzureChatDeployments(
     deploymentList: await listAzureV1Models(options),
     source: "v1",
     fallbackReason: "project-not-configured",
+  };
+}
+
+export async function listAzureWhisperDeployments(
+  options: AzureDeploymentListOptions,
+): Promise<AzureDeploymentListResult> {
+  if (options.projectName && options.foundryEndpoint) {
+    try {
+      const result = await listFoundryDeploymentsWithMetadata(options, "whisper");
+      return {
+        deploymentList: result.deploymentList,
+        source: "foundry",
+        capabilityFiltered: result.capabilityFiltered,
+        fallbackReason: result.capabilityFiltered
+          ? undefined
+          : "capability-unverified",
+      };
+    } catch {
+      return {
+        deploymentList: await listAzureV1Models(options),
+        source: "v1",
+        fallbackReason: "capability-unverified",
+      };
+    }
+  }
+
+  return {
+    deploymentList: await listAzureV1Models(options),
+    source: "v1",
+    fallbackReason: "capability-unverified",
   };
 }

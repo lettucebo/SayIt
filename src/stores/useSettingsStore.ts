@@ -103,6 +103,7 @@ import {
 import type { AzureRequestOptions } from "../lib/llmProvider";
 import {
   isValidAzureResourceName,
+  isSameAzureResourceAsFoundryProject,
   migrateLegacyAzureEndpoints,
   normalizeAzureEndpointOverride,
   normalizeAzureResourceName,
@@ -110,6 +111,7 @@ import {
 } from "../lib/azureResource";
 import {
   listAzureChatDeployments as fetchAzureChatDeployments,
+  listAzureWhisperDeployments as fetchAzureWhisperDeployments,
   type AzureDeploymentListResult,
 } from "../lib/foundryDeployments";
 import {
@@ -475,6 +477,7 @@ export const useSettingsStore = defineStore("settings", () => {
       whisperEndpoint: origins.whisper,
       foundryEndpoint: origins.foundry,
       projectName: azureProjectName.value,
+      resourceName: azureResourceName.value,
       apiVersion: azureApiVersion.value,
       authMode: azureAuthMode.value,
       apiKey: azureApiKey.value,
@@ -677,6 +680,70 @@ export const useSettingsStore = defineStore("settings", () => {
       authMode: auth.authMode,
       authValue: auth.authValue,
     });
+  }
+
+  async function listAzureWhisperDeployments(): Promise<AzureDeploymentListResult> {
+    const snap = snapshotAzureConfig();
+    if (!snap.enabled || snap.endpoint === "" || snap.whisperEndpoint === "") {
+      throw new Error("AZURE_CONNECTION_INCOMPLETE");
+    }
+
+    if (snap.authMode === "key") {
+      throw new Error("AZURE_DEPLOYMENT_LIST_REQUIRES_ENTRA");
+    }
+
+    if (
+      !isSameAzureResourceAsFoundryProject(
+        snap.resourceName,
+        snap.whisperEndpoint,
+      )
+    ) {
+      throw new Error("AZURE_WHISPER_LIST_RESOURCE_MISMATCH");
+    }
+
+    const auth = await resolveAzureChatAuth(snap);
+    if (auth.authValue.trim() === "") {
+      throw new Error("AZURE_CREDENTIALS_INCOMPLETE");
+    }
+
+    return fetchAzureWhisperDeployments({
+      foundryEndpoint: snap.foundryEndpoint,
+      v1Endpoint: snap.whisperEndpoint,
+      projectName: snap.projectName,
+      authMode: auth.authMode,
+      authValue: auth.authValue,
+    });
+  }
+
+  function getAzureWhisperDeploymentListUnavailableReason(cfg: {
+    enabled: boolean;
+    resourceName: string;
+    projectName: string;
+    endpointOverride: string;
+    whisperResourceName: string;
+    whisperEndpointOverride: string;
+    authMode: AzureAuthMode;
+  }): "connection-incomplete" | "entra-required" | "resource-mismatch" | null {
+    if (!cfg.enabled) return "connection-incomplete";
+    if (cfg.authMode === "key") return "entra-required";
+    if (cfg.resourceName.trim() === "" || cfg.projectName.trim() === "") {
+      return "connection-incomplete";
+    }
+    const origins = resolveAzureResourceOrigins({
+      resourceName: cfg.resourceName,
+      whisperResourceName: cfg.whisperResourceName,
+      speechResourceName: "",
+      endpointOverride: cfg.endpointOverride,
+      whisperEndpointOverride: cfg.whisperEndpointOverride,
+      speechEndpointOverride: "",
+    });
+    if (
+      origins.whisper === "" ||
+      !isSameAzureResourceAsFoundryProject(cfg.resourceName, origins.whisper)
+    ) {
+      return "resource-mismatch";
+    }
+    return null;
   }
 
   /** 用於 usage 記錄/成本計算的有效 chat 模型：Azure 用部署名，其餘用 selectedLlmModelId。 */
@@ -3706,6 +3773,8 @@ export const useSettingsStore = defineStore("settings", () => {
     saveAzureConnection,
     deleteAzureConnection,
     listAzureChatDeployments,
+    listAzureWhisperDeployments,
+    getAzureWhisperDeploymentListUnavailableReason,
     saveAzureChatDeployment,
     saveAzureChatModelFamily,
     saveAzureChatDeploymentSelection,
