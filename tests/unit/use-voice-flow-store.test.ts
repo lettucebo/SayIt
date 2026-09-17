@@ -111,6 +111,7 @@ const {
       whisperLanguageCode: "zh" as string | null,
       selectedTranscriptionLocale: "auto" as string,
       selectedLocale: "en" as string,
+      promptMode: "active" as string,
     },
     mockVocabularyState: {
       termList: [] as Array<{
@@ -247,6 +248,9 @@ vi.mock("../../src/stores/useSettingsStore", () => ({
     whisperProviderId: "groq",
     hasWhisperConfig: true,
     getAiPrompt: () => mockSettingsState.aiPrompt,
+    get promptMode() {
+      return mockSettingsState.promptMode;
+    },
     refreshApiKey: vi.fn().mockResolvedValue(undefined),
     refreshTranscriptionApiKey: vi.fn().mockResolvedValue(undefined),
     refreshLlmApiKey: vi.fn().mockResolvedValue(undefined),
@@ -432,6 +436,7 @@ describe("useVoiceFlowStore", () => {
     mockSettingsState.whisperLanguageCode = "zh";
     mockSettingsState.selectedTranscriptionLocale = "auto";
     mockSettingsState.selectedLocale = "en";
+    mockSettingsState.promptMode = "active";
     mockVocabularyState.termList = [];
     mockVocabularyState.getTopTermListByWeight
       .mockClear()
@@ -674,6 +679,45 @@ describe("useVoiceFlowStore", () => {
       });
 
       expect(mockInvoke).not.toHaveBeenCalledWith("read_selected_text");
+    });
+
+    it("[P0] edit mode 不套用 final 簡轉繁", async () => {
+      mockSettingsState.selectedLocale = "zh-TW";
+      withSelectionState({ kind: "selection", text: "請改寫這段文字" });
+      mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
+        if (cmd === "read_selection_state") {
+          return { kind: "selection", text: "請改寫這段文字" };
+        }
+        return createMockInvokeHandler({
+          transcribeResult: {
+            rawText: "翻譯成簡體中文",
+            transcriptionDurationMs: 400,
+            noSpeechProbability: 0.01,
+          },
+        })(cmd, args);
+      });
+      mockEnhanceText.mockResolvedValueOnce({
+        text: "请把会议改到星期五",
+        usage: null,
+      });
+
+      const store = useVoiceFlowStore();
+      await store.initialize();
+      triggerHotkeyEvent("hotkey:pressed");
+      await vi.waitFor(() => {
+        expect(store.isEditMode).toBe(true);
+      });
+      triggerHotkeyEvent("hotkey:released");
+
+      await vi.waitFor(() => {
+        expect(mockInvoke).toHaveBeenCalledWith("paste_text", {
+          text: "请把会议改到星期五",
+          restoreClipboard: false,
+        });
+      });
+      const saved = mockAddTranscription.mock.calls.at(-1)?.[0];
+      expect(saved.isEditMode).toBe(true);
+      expect(saved.processedText).toBe("请把会议改到星期五");
     });
 
     it("[P0] AX 回報 noSelection 應走一般聽寫、全程不模擬 Cmd+C", async () => {
@@ -1484,6 +1528,135 @@ describe("useVoiceFlowStore", () => {
       });
       const saved = mockAddTranscription.mock.calls.at(-1)?.[0];
       expect(saved.processedText).toBe("整理後的最終文字");
+    });
+
+    it.each([
+      ["zh-TW", "請把會議改到星期五"],
+      ["zh-CN", "请把会议改到星期五"],
+      ["en", "请把会议改到星期五"],
+      ["ja", "请把会议改到星期五"],
+      ["ko", "请把会议改到星期五"],
+    ])(
+      "[P0] main AI 成功路徑 final output 只在有效語言 %s 為 zh-TW 時簡轉繁",
+      async (locale, expectedText) => {
+        mockSettingsState.selectedLocale = locale;
+        const longText = "這是一段超過十個字的測試轉錄文字內容";
+        mockInvoke.mockImplementation(
+          createMockInvokeHandler({
+            transcribeResult: {
+              rawText: longText,
+              transcriptionDurationMs: 400,
+              noSpeechProbability: 0.01,
+            },
+          }),
+        );
+        mockEnhanceText.mockResolvedValueOnce({
+          text: "请把会议改到星期五",
+          usage: null,
+        });
+
+        const store = useVoiceFlowStore();
+        await store.initialize();
+        triggerHotkeyEvent("hotkey:pressed");
+        await vi.waitFor(() => {
+          expect(mockInvoke).toHaveBeenCalledWith("start_recording", {
+            deviceName: "",
+          });
+        });
+        triggerHotkeyEvent("hotkey:released");
+
+        await vi.waitFor(() => {
+          expect(mockInvoke).toHaveBeenCalledWith("paste_text", {
+            text: expectedText,
+            restoreClipboard: false,
+          });
+        });
+        const saved = mockAddTranscription.mock.calls.at(-1)?.[0];
+        expect(saved.processedText).toBe(expectedText);
+      },
+    );
+
+    it("[P0] final 簡轉繁先於 afterAI，保留使用者刻意設定的 afterAI 結果", async () => {
+      mockSettingsState.selectedLocale = "zh-TW";
+      mockReplacementState.rules = [
+        {
+          id: "after-main-ai-simplified",
+          patterns: ["請把會議改到星期五"],
+          replacement: "请把会议改到周五",
+          isRegex: false,
+          timing: "afterAI",
+          enabled: true,
+        },
+      ];
+      const longText = "這是一段超過十個字的測試轉錄文字內容";
+      mockInvoke.mockImplementation(
+        createMockInvokeHandler({
+          transcribeResult: {
+            rawText: longText,
+            transcriptionDurationMs: 400,
+            noSpeechProbability: 0.01,
+          },
+        }),
+      );
+      mockEnhanceText.mockResolvedValueOnce({
+        text: "请把会议改到星期五",
+        usage: null,
+      });
+
+      const store = useVoiceFlowStore();
+      await store.initialize();
+      triggerHotkeyEvent("hotkey:pressed");
+      await vi.waitFor(() => {
+        expect(mockInvoke).toHaveBeenCalledWith("start_recording", {
+          deviceName: "",
+        });
+      });
+      triggerHotkeyEvent("hotkey:released");
+
+      await vi.waitFor(() => {
+        expect(mockInvoke).toHaveBeenCalledWith("paste_text", {
+          text: "请把会议改到周五",
+          restoreClipboard: false,
+        });
+      });
+      const saved = mockAddTranscription.mock.calls.at(-1)?.[0];
+      expect(saved.processedText).toBe("请把会议改到周五");
+    });
+
+    it("[P0] custom prompt mode 不套用 final 簡轉繁", async () => {
+      mockSettingsState.selectedLocale = "zh-TW";
+      mockSettingsState.promptMode = "custom";
+      const longText = "這是一段超過十個字的測試轉錄文字內容";
+      mockInvoke.mockImplementation(
+        createMockInvokeHandler({
+          transcribeResult: {
+            rawText: longText,
+            transcriptionDurationMs: 400,
+            noSpeechProbability: 0.01,
+          },
+        }),
+      );
+      mockEnhanceText.mockResolvedValueOnce({
+        text: "请把会议改到星期五",
+        usage: null,
+      });
+
+      const store = useVoiceFlowStore();
+      await store.initialize();
+      triggerHotkeyEvent("hotkey:pressed");
+      await vi.waitFor(() => {
+        expect(mockInvoke).toHaveBeenCalledWith("start_recording", {
+          deviceName: "",
+        });
+      });
+      triggerHotkeyEvent("hotkey:released");
+
+      await vi.waitFor(() => {
+        expect(mockInvoke).toHaveBeenCalledWith("paste_text", {
+          text: "请把会议改到星期五",
+          restoreClipboard: false,
+        });
+      });
     });
 
     it("[P0] < 10 字應跳過 AI 整理，直接貼上原始文字", async () => {
@@ -2835,6 +3008,44 @@ describe("useVoiceFlowStore", () => {
       const updateParams =
         mockUpdateTranscriptionOnRetrySuccess.mock.calls[0][0];
       expect(updateParams.processedText).toBe("AI 整理後的最終文字");
+      expect(updateParams.wasEnhanced).toBe(true);
+    });
+
+    it("[P0] 重送 AI 成功路徑在 zh-TW final output 簡轉繁後貼上並更新歷史", async () => {
+      const store = useVoiceFlowStore();
+      await store.initialize();
+
+      await setupFailedTranscription(store);
+      expect(store.canRetry).toBe(true);
+      mockSettingsState.selectedLocale = "zh-TW";
+      mockInvoke.mockImplementation(
+        createMockInvokeHandler({
+          retranscribeResult: {
+            rawText: "這是一段夠長需要整理的重送逐字稿內容",
+            transcriptionDurationMs: 350,
+            noSpeechProbability: 0.02,
+          },
+        }),
+      );
+      mockEnhanceText.mockResolvedValueOnce({
+        text: "请把会议改到星期五",
+        usage: null,
+      });
+
+      await store.handleRetryTranscription();
+
+      await vi.waitFor(() => {
+        expect(mockInvoke).toHaveBeenCalledWith("paste_text", {
+          text: "請把會議改到星期五",
+          restoreClipboard: false,
+        });
+      });
+      await vi.waitFor(() => {
+        expect(mockUpdateTranscriptionOnRetrySuccess).toHaveBeenCalledTimes(1);
+      });
+      const updateParams =
+        mockUpdateTranscriptionOnRetrySuccess.mock.calls[0][0];
+      expect(updateParams.processedText).toBe("請把會議改到星期五");
       expect(updateParams.wasEnhanced).toBe(true);
     });
 

@@ -103,3 +103,21 @@ export async function applyTranscriptTextTransforms(
     ? await convertSimplifiedToTraditional(replaced)
     : replaced;
 }
+
+/**
+ * AI 最終輸出落地前的共用轉換。
+ *
+ * 順序刻意是：guarded 簡→繁 → afterAI 取代。afterAI 是使用者明確設定的最後輸出
+ * 規則，必須保留最終覆寫權；若反過來做，OpenCC 可能改掉使用者刻意設定的輸出文字。
+ */
+export async function finalizeOutputText(
+  text: string,
+  replacementRules: readonly ReplacementRule[] = [],
+  options: { convertSimplifiedToTraditional?: boolean } = {},
+): Promise<string> {
+  const converted =
+    text && options.convertSimplifiedToTraditional
+      ? await convertSimplifiedToTraditional(text)
+      : text;
+  return applyWordReplacements(converted, replacementRules, "afterAI");
+}
