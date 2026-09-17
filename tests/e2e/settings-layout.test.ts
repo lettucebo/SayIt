@@ -4,6 +4,7 @@ import {
   getHttpRequestList,
   getStoreSetCount,
   installTauriMock,
+  resolveHttpResponse,
 } from "../support/helpers/tauriMock";
 
 /**
@@ -443,6 +444,18 @@ test.describe("Settings model selector layout", () => {
           body: {
             value: [
               {
+                name: "chat-prod",
+                modelName: "gpt-4.1",
+                modelPublisher: "OpenAI",
+                capabilities: { chat: "true" },
+              },
+            ],
+          },
+        },
+        {
+          body: {
+            value: [
+              {
                 name: "whisper-prod",
                 modelName: "whisper-large-v3",
                 modelPublisher: "OpenAI",
@@ -477,5 +490,133 @@ test.describe("Settings model selector layout", () => {
         "Foundry 專案部署清單只支援 Entra ID；API Key 模式請手動輸入部署名稱。",
       ),
     ).toBeVisible();
+  });
+
+  test("[P0] Whisper deployment 忽略連線變更前才完成的 stale response", async ({
+    page,
+  }) => {
+    await openSettings(page, {
+      azureEnabled: true,
+      width: 1280,
+      storeValues: {
+        whisperProviderId: "azure",
+        lastFoundryProvider: "azure",
+        azureResourceName: "resource-a",
+        azureProjectName: "voice-project",
+        azureAuthMode: "entra",
+        azureTenantId: "2aeb30d9-f0a6-4e27-8c47-f97c5b695eb6",
+        azureClientId: "1671ffd4-5c2a-44dd-83a2-e1c8267aa51b",
+        azureClientSecret: "test-client-secret-value-40-characters!!",
+      },
+      httpResponses: [
+        {
+          delayUntil: "resource-a-response",
+          body: {
+            value: [
+              {
+                name: "a-only",
+                modelName: "whisper-large-v3",
+                modelPublisher: "OpenAI",
+                capabilities: { audio: "true" },
+              },
+            ],
+          },
+        },
+      ],
+    });
+
+    await page.getByTestId("azure-whisper-load-deployments").click();
+    await expect
+      .poll(async () => (await getHttpRequestList(page)).length)
+      .toBe(1);
+
+    await page.locator("#azure-resource-name").fill("resource-b");
+    await resolveHttpResponse(page, "resource-a-response");
+
+    await expect(page.getByTestId("azure-whisper-deployment-select")).toHaveCount(
+      0,
+    );
+    await expect(page.getByRole("option", { name: /a-only/ })).toHaveCount(0);
+  });
+
+  test("[P0] Whisper 載入部署清單若儲存 shared Azure connection，會同步重載 chat 清單", async ({
+    page,
+  }) => {
+    await openSettings(page, {
+      azureEnabled: true,
+      width: 1280,
+      llmProviderId: "azure",
+      storeValues: {
+        whisperProviderId: "azure",
+        lastFoundryProvider: "azure",
+        azureResourceName: "resource-a",
+        azureProjectName: "voice-project",
+        azureAuthMode: "entra",
+        azureTenantId: "2aeb30d9-f0a6-4e27-8c47-f97c5b695eb6",
+        azureClientId: "1671ffd4-5c2a-44dd-83a2-e1c8267aa51b",
+        azureClientSecret: "test-client-secret-value-40-characters!!",
+      },
+      httpResponses: [
+        {
+          body: {
+            value: [
+              {
+                name: "chat-a-only",
+                modelName: "gpt-4.1",
+                modelPublisher: "OpenAI",
+                capabilities: { chat: "true" },
+              },
+            ],
+          },
+        },
+        {
+          body: {
+            value: [
+              {
+                name: "chat-b-only",
+                modelName: "gpt-4.1",
+                modelPublisher: "OpenAI",
+                capabilities: { chat: "true" },
+              },
+            ],
+          },
+        },
+        {
+          body: {
+            value: [
+              {
+                name: "whisper-b-only",
+                modelName: "whisper-large-v3",
+                modelPublisher: "OpenAI",
+                capabilities: { audio: "true" },
+              },
+            ],
+          },
+        },
+      ],
+    });
+
+    await expect
+      .poll(async () => (await getHttpRequestList(page)).length)
+      .toBe(1);
+    await page.locator("#azure-chat-deployment-list").click();
+    await expect(
+      page.getByRole("option", { name: /chat-a-only/ }),
+    ).toBeVisible();
+    await page.keyboard.press("Escape");
+
+    await page.locator("#azure-resource-name").fill("resource-b");
+    await page.getByTestId("azure-whisper-load-deployments").click();
+
+    await expect
+      .poll(async () => (await getHttpRequestList(page)).length)
+      .toBe(3);
+    await page.locator("#azure-chat-deployment-list").click();
+    await expect(
+      page.getByRole("option", { name: /chat-b-only/ }),
+    ).toBeVisible();
+    await expect(page.getByRole("option", { name: /chat-a-only/ })).toHaveCount(
+      0,
+    );
   });
 });

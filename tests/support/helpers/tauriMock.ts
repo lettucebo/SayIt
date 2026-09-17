@@ -13,6 +13,7 @@ export interface TauriMockOptions {
     status?: number;
     statusText?: string;
     headers?: Record<string, string>;
+    delayUntil?: string;
     body: unknown;
   }>;
 }
@@ -28,6 +29,7 @@ interface TauriMockState {
     method: string;
     headers: Array<[string, string]>;
   }>;
+  resolveHttpResponse: (key: string) => void;
 }
 
 export async function installTauriMock(
@@ -43,6 +45,7 @@ export async function installTauriMock(
         status?: number;
         statusText?: string;
         headers?: Record<string, string>;
+        delayUntil?: string;
         body: unknown;
       }>;
     }) => {
@@ -64,10 +67,13 @@ export async function installTauriMock(
           statusText: string;
           url: string;
           headers: Record<string, string>;
+          delayUntil?: string;
           body: unknown;
         }
       >();
       const httpBodyReadCountMap = new Map<number, number>();
+      const httpDelayResolverMap = new Map<string, () => void>();
+      const httpDelayPromiseMap = new Map<string, Promise<void>>();
       const globalScope = window as unknown as Record<string, unknown>;
       let nextCallbackId = 0;
       let nextListenerId = 0;
@@ -136,7 +142,17 @@ export async function installTauriMock(
         }
       };
 
-      const invokeHttp = (cmd: string, args: Record<string, unknown>) => {
+      const waitForHttpDelay = (key: string): Promise<void> => {
+        const existing = httpDelayPromiseMap.get(key);
+        if (existing) return existing;
+        const promise = new Promise<void>((resolve) => {
+          httpDelayResolverMap.set(key, resolve);
+        });
+        httpDelayPromiseMap.set(key, promise);
+        return promise;
+      };
+
+      const invokeHttp = async (cmd: string, args: Record<string, unknown>) => {
         switch (cmd) {
           case "plugin:http|fetch": {
             const clientConfig =
@@ -159,6 +175,7 @@ export async function installTauriMock(
               statusText: response.statusText ?? "OK",
               url: request.url,
               headers: response.headers ?? { "content-type": "application/json" },
+              delayUntil: response.delayUntil,
               body: response.body,
             });
             return rid;
@@ -167,6 +184,9 @@ export async function installTauriMock(
             const rid = Number(args.rid);
             const response = httpResponseMap.get(rid);
             if (!response) throw new Error(`Unknown mocked HTTP rid: ${rid}`);
+            if (response.delayUntil) {
+              await waitForHttpDelay(response.delayUntil);
+            }
             return {
               status: response.status,
               statusText: response.statusText,
@@ -267,6 +287,11 @@ export async function installTauriMock(
       globalScope.__SAYIT_E2E_TAURI_MOCK__ = {
         getStoreSetCount: (key: string) => storeSetCountMap.get(key) ?? 0,
         getHttpRequestList: () => httpRequestList,
+        resolveHttpResponse: (key: string) => {
+          const resolve = httpDelayResolverMap.get(key);
+          resolve?.();
+          httpDelayResolverMap.delete(key);
+        },
       } satisfies TauriMockState;
       globalScope.isTauri = true;
     },
@@ -301,4 +326,18 @@ export async function getHttpRequestList(
     ).__SAYIT_E2E_TAURI_MOCK__;
     return mockState.getHttpRequestList();
   });
+}
+
+export async function resolveHttpResponse(
+  page: Page,
+  key: string,
+): Promise<void> {
+  await page.evaluate((delayKey) => {
+    const mockState = (
+      window as unknown as {
+        __SAYIT_E2E_TAURI_MOCK__: TauriMockState;
+      }
+    ).__SAYIT_E2E_TAURI_MOCK__;
+    mockState.resolveHttpResponse(delayKey);
+  }, key);
 }

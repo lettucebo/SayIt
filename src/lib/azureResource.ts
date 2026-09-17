@@ -149,7 +149,7 @@ export function isSameAzureResourceAsFoundryProject(
   if (normalizedFoundryResourceName === "") return false;
   const parsedTarget = parseAzureResourceName(targetEndpoint);
   return (
-    parsedTarget?.kind === "openai" &&
+    (parsedTarget?.kind === "openai" || parsedTarget?.kind === "foundry") &&
     parsedTarget.resourceName === normalizedFoundryResourceName
   );
 }

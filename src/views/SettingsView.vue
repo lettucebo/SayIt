@@ -892,6 +892,8 @@ const azureWhisperDeploymentList = ref<AzureChatDeployment[]>([]);
 const azureWhisperDeploymentListResult =
   ref<AzureDeploymentListResult | null>(null);
 const isManualAzureWhisperDeploymentInputVisible = ref(false);
+let azureWhisperDeploymentListGeneration = 0;
+let pendingAzureWhisperDeploymentListRequests = 0;
 const azureChatModelFamilyConfig = computed(() =>
   findAzureChatModelFamilyConfig(settingsStore.azureChatModelFamily),
 );
@@ -1003,6 +1005,12 @@ const canAutoLoadAzureDeployments = computed(
     settingsStore.azureEndpoint !== "" &&
     settingsStore.hasAzureCredentials,
 );
+function invalidateAzureWhisperDeploymentList() {
+  azureWhisperDeploymentListGeneration += 1;
+  azureWhisperDeploymentList.value = [];
+  azureWhisperDeploymentListResult.value = null;
+}
+
 watch(
   [
     azureEnabledInput,
@@ -1013,10 +1021,7 @@ watch(
     azureWhisperEndpointOverrideInput,
     azureAuthModeInput,
   ],
-  () => {
-    azureWhisperDeploymentList.value = [];
-    azureWhisperDeploymentListResult.value = null;
-  },
+  invalidateAzureWhisperDeploymentList,
 );
 
 function loadAzureInputsFromStore() {
@@ -1309,12 +1314,16 @@ async function loadAzureWhisperDeployments({
   saveConnection: boolean;
   showFeedback: boolean;
 }) {
+  const requestGeneration = azureWhisperDeploymentListGeneration + 1;
+  azureWhisperDeploymentListGeneration = requestGeneration;
+  pendingAzureWhisperDeploymentListRequests += 1;
   try {
     isLoadingAzureWhisperDeployments.value = true;
     if (saveConnection) {
       await handleSaveAzureConnectionOrThrow();
     }
     const result = await settingsStore.listAzureWhisperDeployments();
+    if (requestGeneration !== azureWhisperDeploymentListGeneration) return;
     azureWhisperDeploymentList.value = result.deploymentList;
     azureWhisperDeploymentListResult.value = result;
     if (showFeedback) {
@@ -1328,8 +1337,8 @@ async function loadAzureWhisperDeployments({
       );
     }
   } catch (err) {
-    azureWhisperDeploymentList.value = [];
-    azureWhisperDeploymentListResult.value = null;
+    if (requestGeneration !== azureWhisperDeploymentListGeneration) return;
+    invalidateAzureWhisperDeploymentList();
     if (showFeedback) {
       const message = extractErrorMessage(err);
       azureWhisperDeploymentFeedback.show(
@@ -1342,12 +1351,24 @@ async function loadAzureWhisperDeployments({
       );
     }
   } finally {
-    isLoadingAzureWhisperDeployments.value = false;
+    pendingAzureWhisperDeploymentListRequests = Math.max(
+      0,
+      pendingAzureWhisperDeploymentListRequests - 1,
+    );
+    isLoadingAzureWhisperDeployments.value =
+      pendingAzureWhisperDeploymentListRequests > 0;
   }
 }
 
 async function handleLoadAzureWhisperDeployments() {
-  await loadAzureWhisperDeployments({ saveConnection: true, showFeedback: true });
+  try {
+    await handleSaveAzureConnectionOrThrow();
+  } catch (err) {
+    azureWhisperDeploymentFeedback.show("error", extractErrorMessage(err));
+    return;
+  }
+  await loadAzureDeployments({ saveConnection: false, showFeedback: false });
+  await loadAzureWhisperDeployments({ saveConnection: false, showFeedback: true });
 }
 
 async function handleAzureWhisperDeploymentSelection(name: string) {
@@ -3302,7 +3323,7 @@ onBeforeUnmount(() => {
               {{ $t("settings.azure.enterDeploymentManually") }}
             </Button>
             <p
-              v-if="azureWhisperDeploymentListResult?.fallbackReason === 'capability-unverified'"
+              v-if="azureWhisperDeploymentListResult?.source === 'v1' && azureWhisperDeploymentListResult.fallbackReason === 'capability-unverified'"
               class="text-xs text-amber-400"
             >
               {{ $t("settings.azure.whisperDeploymentListUnverifiedFallback") }}
