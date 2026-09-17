@@ -360,5 +360,44 @@ describe("useHistoryStore retry", () => {
         "請把會議改到星期五。",
       );
     });
+
+    it("[P0] history re-enhancement 以送出請求當下的 locale/promptMode 決定 final conversion", async () => {
+      h.settingsStub.selectedLocale = "zh-CN";
+      let resolveEnhance!: (value: {
+        text: string;
+        usage: null;
+        wasAnomalous: false;
+      }) => void;
+      h.mockEnhanceGuard.mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveEnhance = resolve;
+        }),
+      );
+      const store = useHistoryStore();
+      const record = createRecord({
+        status: "success",
+        rawText: "原始口語內容",
+        wasEnhanced: false,
+      });
+      store.transcriptionList.push(record);
+
+      const reEnhancePromise = store.reEnhanceRecord(record);
+      await vi.waitFor(() => {
+        expect(h.mockEnhanceGuard).toHaveBeenCalled();
+      });
+
+      h.settingsStub.selectedLocale = "zh-TW";
+      resolveEnhance({
+        text: "请把会议改到星期五。",
+        usage: null,
+        wasAnomalous: false,
+      });
+      const res = await reEnhancePromise;
+
+      expect(res.ok).toBe(true);
+      expect(store.transcriptionList[0].processedText).toBe(
+        "请把会议改到星期五。",
+      );
+    });
   });
 });

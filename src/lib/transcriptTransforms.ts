@@ -44,6 +44,131 @@ function buildLiteralPattern(pattern: string): RegExp {
   );
 }
 
+interface TextSegment {
+  text: string;
+  protectedFromConversion: boolean;
+}
+
+function expandRegexReplacement(
+  template: string,
+  match: string,
+  captures: readonly unknown[],
+  fullText: string,
+  offset: number,
+  groups?: Record<string, string | undefined>,
+): string {
+  return template.replace(/\$(\$|&|`|'|<[^>]+>|\d{1,2})/g, (token, key) => {
+    if (key === "$") return "$";
+    if (key === "&") return match;
+    if (key === "`") return fullText.slice(0, offset);
+    if (key === "'") return fullText.slice(offset + match.length);
+    if (key.startsWith("<") && key.endsWith(">")) {
+      if (!groups) return token;
+      const name = key.slice(1, -1);
+      return groups[name] ?? "";
+    }
+
+    const captureIndex = Number(key);
+    if (key.length === 2 && captureIndex > captures.length) {
+      const firstCaptureIndex = Number(key[0]);
+      if (firstCaptureIndex >= 1 && firstCaptureIndex <= captures.length) {
+        return `${captures[firstCaptureIndex - 1] ?? ""}${key[1]}`;
+      }
+      return token;
+    }
+    if (captureIndex < 1 || captureIndex > captures.length) return token;
+    return `${captures[captureIndex - 1] ?? ""}`;
+  });
+}
+
+function replaceSegmentWithProtectedOutput(
+  segment: TextSegment,
+  matcher: RegExp,
+  replacement: string,
+  isRegex: boolean,
+): TextSegment[] {
+  const next: TextSegment[] = [];
+  let cursor = 0;
+  let changed = false;
+  segment.text.replace(matcher, (...args: unknown[]) => {
+    const match = String(args[0]);
+    const lastArg = args[args.length - 1];
+    const hasGroups =
+      typeof lastArg === "object" && lastArg !== null;
+    const offset = args[args.length - (hasGroups ? 3 : 2)] as number;
+    const fullText = args[args.length - (hasGroups ? 2 : 1)] as string;
+    const captures = args.slice(1, hasGroups ? -3 : -2);
+    const groups = hasGroups
+      ? (lastArg as Record<string, string | undefined>)
+      : undefined;
+
+    if (offset > cursor) {
+      next.push({
+        text: segment.text.slice(cursor, offset),
+        protectedFromConversion: segment.protectedFromConversion,
+      });
+    }
+    next.push({
+      text: isRegex
+        ? expandRegexReplacement(
+            replacement,
+            match,
+            captures,
+            fullText,
+            offset,
+            groups,
+          )
+        : replacement,
+      protectedFromConversion: true,
+    });
+    cursor = offset + match.length;
+    changed = true;
+    return match;
+  });
+
+  if (!changed) return [segment];
+  if (cursor < segment.text.length) {
+    next.push({
+      text: segment.text.slice(cursor),
+      protectedFromConversion: segment.protectedFromConversion,
+    });
+  }
+  return next;
+}
+
+function applyWordReplacementSegments(
+  text: string,
+  rules: readonly ReplacementRule[],
+  phase: Exclude<ReplacementTiming, "both">,
+): TextSegment[] {
+  let segmentList: TextSegment[] = [
+    { text, protectedFromConversion: false },
+  ];
+  for (const rule of rules) {
+    if (!rule.enabled) continue;
+    if (rule.timing !== phase && rule.timing !== "both") continue;
+    for (const pattern of rule.patterns) {
+      if (!pattern) continue;
+      try {
+        const matcher = rule.isRegex
+          ? new RegExp(pattern, "g")
+          : buildLiteralPattern(pattern);
+        segmentList = segmentList.flatMap((segment) =>
+          replaceSegmentWithProtectedOutput(
+            segment,
+            matcher,
+            rule.replacement,
+            rule.isRegex,
+          ),
+        );
+      } catch {
+        // 無效正則：略過此 pattern，不影響其餘規則與主流程
+      }
+    }
+  }
+  return segmentList;
+}
+
 /**
  * #55：套用使用者維護的「取代規則」到單一階段（beforeAI / afterAI）。
  * 純函式——規則由呼叫端（store）提供，不在此讀取，維持依賴方向。
@@ -107,17 +232,30 @@ export async function applyTranscriptTextTransforms(
 /**
  * AI 最終輸出落地前的共用轉換。
  *
- * 順序刻意是：guarded 簡→繁 → afterAI 取代。afterAI 是使用者明確設定的最後輸出
- * 規則，必須保留最終覆寫權；若反過來做，OpenCC 可能改掉使用者刻意設定的輸出文字。
+ * 順序刻意是：afterAI 取代 → guarded 簡→繁。先跑 afterAI 可保留既有簡體
+ * source pattern 的匹配行為；後續 OpenCC 只轉換非 replacement 產生的片段，
+ * 避免改寫使用者明確設定的 replacement 文字。
  */
 export async function finalizeOutputText(
   text: string,
   replacementRules: readonly ReplacementRule[] = [],
   options: { convertSimplifiedToTraditional?: boolean } = {},
 ): Promise<string> {
-  const converted =
-    text && options.convertSimplifiedToTraditional
-      ? await convertSimplifiedToTraditional(text)
-      : text;
-  return applyWordReplacements(converted, replacementRules, "afterAI");
+  if (!text) return text;
+  const segmentList = applyWordReplacementSegments(
+    text,
+    replacementRules,
+    "afterAI",
+  );
+  if (!options.convertSimplifiedToTraditional) {
+    return segmentList.map((segment) => segment.text).join("");
+  }
+  const convertedSegmentList = await Promise.all(
+    segmentList.map(async (segment) =>
+      segment.protectedFromConversion
+        ? segment.text
+        : await convertSimplifiedToTraditional(segment.text),
+    ),
+  );
+  return convertedSegmentList.join("");
 }

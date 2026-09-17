@@ -1619,6 +1619,8 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
             signal: abortController?.signal,
             ...contextOptions,
           };
+          const convertFinalEnhancedOutput =
+            shouldConvertFinalEnhancedOutput(settingsStore);
           const azureFamily = llmCfg.azure
             ? findAzureChatModelFamilyConfig(
                 getEffectiveAzureChatModelFamilyId(
@@ -1722,8 +1724,7 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
             chatUsage: enhanceResult.usage,
             transcriptionUsage,
             convertFinalSimplifiedToTraditional:
-              !finalAnomaly.isAnomaly &&
-              shouldConvertFinalEnhancedOutput(settingsStore),
+              !finalAnomaly.isAnomaly && convertFinalEnhancedOutput,
           });
 
           writeInfoLog(
@@ -2050,6 +2051,8 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
           const contextOptions = await readEnhancementContext(
             settingsStore.contextInjectionEnabled,
           );
+          const convertFinalEnhancedOutput =
+            shouldConvertFinalEnhancedOutput(settingsStore);
           const azureFamily = llmCfg.azure
             ? findAzureChatModelFamilyConfig(
                 getEffectiveAzureChatModelFamilyId(
@@ -2108,8 +2111,7 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
             chatUsage: enhanceResult.usage,
             skipRecordSaving: true,
             convertFinalSimplifiedToTraditional:
-              !enhanceResult.wasAnomalous &&
-              shouldConvertFinalEnhancedOutput(settingsStore),
+              !enhanceResult.wasAnomalous && convertFinalEnhancedOutput,
           });
           if (!pasteText) return;
 

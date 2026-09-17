@@ -848,6 +848,12 @@ export const useHistoryStore = defineStore("history", () => {
     }
 
     const termList = await vocabularyStore.getTopTermListByWeight(50);
+    const convertFinalEnhancedOutput =
+      settingsStore.promptMode !== "custom" &&
+      resolveEffectiveTranscriptionLocale(
+        settingsStore.selectedTranscriptionLocale,
+        settingsStore.selectedLocale,
+      ) === "zh-TW";
     const startTime = performance.now();
 
     let enhanceResult: EnhanceWithGuardResult;
@@ -887,12 +893,7 @@ export const useHistoryStore = defineStore("history", () => {
       enhanceResult.text,
       replacementStore.rules,
       {
-        convertSimplifiedToTraditional:
-          settingsStore.promptMode !== "custom" &&
-          resolveEffectiveTranscriptionLocale(
-            settingsStore.selectedTranscriptionLocale,
-            settingsStore.selectedLocale,
-          ) === "zh-TW",
+        convertSimplifiedToTraditional: convertFinalEnhancedOutput,
       },
     );
 

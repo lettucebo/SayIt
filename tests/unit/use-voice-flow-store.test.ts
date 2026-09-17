@@ -1576,13 +1576,13 @@ describe("useVoiceFlowStore", () => {
       },
     );
 
-    it("[P0] final 簡轉繁先於 afterAI，保留使用者刻意設定的 afterAI 結果", async () => {
+    it("[P0] afterAI 先匹配簡體 source pattern，且 replacement 結果不被 final 簡轉繁覆寫", async () => {
       mockSettingsState.selectedLocale = "zh-TW";
       mockReplacementState.rules = [
         {
           id: "after-main-ai-simplified",
-          patterns: ["請把會議改到星期五"],
-          replacement: "请把会议改到周五",
+          patterns: ["会议"],
+          replacement: "请保持简体",
           isRegex: false,
           timing: "afterAI",
           enabled: true,
@@ -1615,12 +1615,12 @@ describe("useVoiceFlowStore", () => {
 
       await vi.waitFor(() => {
         expect(mockInvoke).toHaveBeenCalledWith("paste_text", {
-          text: "请把会议改到周五",
+          text: "請把请保持简体改到星期五",
           restoreClipboard: false,
         });
       });
       const saved = mockAddTranscription.mock.calls.at(-1)?.[0];
-      expect(saved.processedText).toBe("请把会议改到周五");
+      expect(saved.processedText).toBe("請把请保持简体改到星期五");
     });
 
     it("[P0] custom prompt mode 不套用 final 簡轉繁", async () => {
@@ -1657,6 +1657,54 @@ describe("useVoiceFlowStore", () => {
           restoreClipboard: false,
         });
       });
+    });
+
+    it("[P0] main AI 成功路徑以送出請求當下的 custom promptMode 決定 final conversion", async () => {
+      mockSettingsState.selectedLocale = "zh-TW";
+      mockSettingsState.promptMode = "custom";
+      const enhanceDeferred = createDeferredPromise<{
+        text: string;
+        usage: null;
+      }>();
+      mockEnhanceText.mockReturnValueOnce(enhanceDeferred.promise);
+      const longText = "這是一段超過十個字的測試轉錄文字內容";
+      mockInvoke.mockImplementation(
+        createMockInvokeHandler({
+          transcribeResult: {
+            rawText: longText,
+            transcriptionDurationMs: 400,
+            noSpeechProbability: 0.01,
+          },
+        }),
+      );
+
+      const store = useVoiceFlowStore();
+      await store.initialize();
+      triggerHotkeyEvent("hotkey:pressed");
+      await vi.waitFor(() => {
+        expect(mockInvoke).toHaveBeenCalledWith("start_recording", {
+          deviceName: "",
+        });
+      });
+      triggerHotkeyEvent("hotkey:released");
+      await vi.waitFor(() => {
+        expect(mockEnhanceText).toHaveBeenCalled();
+      });
+
+      mockSettingsState.promptMode = "active";
+      enhanceDeferred.resolvePromise({
+        text: "请把会议改到星期五",
+        usage: null,
+      });
+
+      await vi.waitFor(() => {
+        expect(mockInvoke).toHaveBeenCalledWith("paste_text", {
+          text: "请把会议改到星期五",
+          restoreClipboard: false,
+        });
+      });
+      const saved = mockAddTranscription.mock.calls.at(-1)?.[0];
+      expect(saved.processedText).toBe("请把会议改到星期五");
     });
 
     it("[P0] < 10 字應跳過 AI 整理，直接貼上原始文字", async () => {
@@ -3047,6 +3095,52 @@ describe("useVoiceFlowStore", () => {
         mockUpdateTranscriptionOnRetrySuccess.mock.calls[0][0];
       expect(updateParams.processedText).toBe("請把會議改到星期五");
       expect(updateParams.wasEnhanced).toBe(true);
+    });
+
+    it("[P0] 重送 AI 成功路徑以送出請求當下的 locale/promptMode 決定 final conversion", async () => {
+      const store = useVoiceFlowStore();
+      await store.initialize();
+
+      await setupFailedTranscription(store);
+      expect(store.canRetry).toBe(true);
+      mockSettingsState.selectedLocale = "zh-CN";
+      mockSettingsState.promptMode = "active";
+      const enhanceDeferred = createDeferredPromise<{
+        text: string;
+        usage: null;
+      }>();
+      mockEnhanceText.mockReturnValueOnce(enhanceDeferred.promise);
+      mockInvoke.mockImplementation(
+        createMockInvokeHandler({
+          retranscribeResult: {
+            rawText: "這是一段夠長需要整理的重送逐字稿內容",
+            transcriptionDurationMs: 350,
+            noSpeechProbability: 0.02,
+          },
+        }),
+      );
+
+      const retryPromise = store.handleRetryTranscription();
+      await vi.waitFor(() => {
+        expect(mockEnhanceText).toHaveBeenCalled();
+      });
+
+      mockSettingsState.selectedLocale = "zh-TW";
+      enhanceDeferred.resolvePromise({
+        text: "请把会议改到星期五",
+        usage: null,
+      });
+      await retryPromise;
+
+      await vi.waitFor(() => {
+        expect(mockInvoke).toHaveBeenCalledWith("paste_text", {
+          text: "请把会议改到星期五",
+          restoreClipboard: false,
+        });
+      });
+      const updateParams =
+        mockUpdateTranscriptionOnRetrySuccess.mock.calls[0][0];
+      expect(updateParams.processedText).toBe("请把会议改到星期五");
     });
 
     it("[P1] 重送 AI 整理前若情境注入開啟，應傳入 contextText 與 appName", async () => {
