@@ -9,6 +9,12 @@ import type { Page } from "@playwright/test";
 export interface TauriMockOptions {
   /** 預先寫入 tauri-plugin-store 的鍵值，對應 `useSettingsStore` 讀取的欄位。 */
   storeValues?: Record<string, unknown>;
+  httpResponses?: Array<{
+    status?: number;
+    statusText?: string;
+    headers?: Record<string, string>;
+    body: unknown;
+  }>;
 }
 
 /** SQLite schema 的最新版本；回報此版本可讓所有 migration 直接略過。 */
@@ -17,6 +23,11 @@ const MOCKED_TABLE_SET = new Set(["api_usage", "schema_version", "transcriptions
 
 interface TauriMockState {
   getStoreSetCount: (key: string) => number;
+  getHttpRequestList: () => Array<{
+    url: string;
+    method: string;
+    headers: Array<[string, string]>;
+  }>;
 }
 
 export async function installTauriMock(
@@ -28,6 +39,12 @@ export async function installTauriMock(
       storeValues: Record<string, unknown>;
       schemaVersion: number;
       tableList: string[];
+      httpResponses: Array<{
+        status?: number;
+        statusText?: string;
+        headers?: Record<string, string>;
+        body: unknown;
+      }>;
     }) => {
       const storeState = new Map<string, unknown>(
         Object.entries(init.storeValues),
@@ -35,9 +52,26 @@ export async function installTauriMock(
       const callbackRegistry = new Map<number, (payload: unknown) => void>();
       const eventCallbackIdMap = new Map<number, number>();
       const storeSetCountMap = new Map<string, number>();
+      const httpRequestList: Array<{
+        url: string;
+        method: string;
+        headers: Array<[string, string]>;
+      }> = [];
+      const httpResponseMap = new Map<
+        number,
+        {
+          status: number;
+          statusText: string;
+          url: string;
+          headers: Record<string, string>;
+          body: unknown;
+        }
+      >();
+      const httpBodyReadCountMap = new Map<number, number>();
       const globalScope = window as unknown as Record<string, unknown>;
       let nextCallbackId = 0;
       let nextListenerId = 0;
+      let nextHttpRid = 0;
 
       const selectRows = (query: string, values: unknown[]): unknown[] => {
         if (query.includes("SELECT version FROM schema_version")) {
@@ -102,12 +136,70 @@ export async function installTauriMock(
         }
       };
 
+      const invokeHttp = (cmd: string, args: Record<string, unknown>) => {
+        switch (cmd) {
+          case "plugin:http|fetch": {
+            const clientConfig =
+              (args.clientConfig as Record<string, unknown>) ?? {};
+            const request = {
+              url: String(clientConfig.url ?? ""),
+              method: String(clientConfig.method ?? "GET"),
+              headers:
+                (clientConfig.headers as Array<[string, string]>) ?? [],
+            };
+            httpRequestList.push(request);
+            const rid = ++nextHttpRid;
+            const response =
+              init.httpResponses[httpRequestList.length - 1] ?? {
+                status: 200,
+                body: {},
+              };
+            httpResponseMap.set(rid, {
+              status: response.status ?? 200,
+              statusText: response.statusText ?? "OK",
+              url: request.url,
+              headers: response.headers ?? { "content-type": "application/json" },
+              body: response.body,
+            });
+            return rid;
+          }
+          case "plugin:http|fetch_send": {
+            const rid = Number(args.rid);
+            const response = httpResponseMap.get(rid);
+            if (!response) throw new Error(`Unknown mocked HTTP rid: ${rid}`);
+            return {
+              status: response.status,
+              statusText: response.statusText,
+              url: response.url,
+              headers: response.headers,
+              rid,
+            };
+          }
+          case "plugin:http|fetch_read_body": {
+            const rid = Number(args.rid);
+            const response = httpResponseMap.get(rid);
+            if (!response) throw new Error(`Unknown mocked HTTP body rid: ${rid}`);
+            const readCount = httpBodyReadCountMap.get(rid) ?? 0;
+            httpBodyReadCountMap.set(rid, readCount + 1);
+            if (readCount > 0) return [1];
+            const text = JSON.stringify(response.body);
+            return [...new TextEncoder().encode(text), 0];
+          }
+          case "plugin:http|fetch_cancel":
+          case "plugin:http|fetch_cancel_body":
+            return null;
+          default:
+            throw new Error(`Unsupported HTTP command in E2E mock: ${cmd}`);
+        }
+      };
+
       const invoke = async (
         cmd: string,
         args: Record<string, unknown> = {},
       ): Promise<unknown> => {
         if (cmd.startsWith("plugin:store|")) return invokeStore(cmd, args);
         if (cmd.startsWith("plugin:sql|")) return invokeSql(cmd, args);
+        if (cmd.startsWith("plugin:http|")) return invokeHttp(cmd, args);
         if (cmd === "plugin:event|listen") {
           const eventId = ++nextListenerId;
           eventCallbackIdMap.set(eventId, Number(args.handler));
@@ -122,6 +214,9 @@ export async function installTauriMock(
         }
         if (cmd === "plugin:autostart|is_enabled") return false;
         if (cmd === "get_os_theme") return "light";
+        if (cmd === "get_azure_entra_token") {
+          return { accessToken: "e2e-access-token", expiresIn: 3600 };
+        }
         if (cmd === "cleanup_old_logs" || cmd === "cleanup_old_recordings") {
           return [];
         }
@@ -171,6 +266,7 @@ export async function installTauriMock(
       };
       globalScope.__SAYIT_E2E_TAURI_MOCK__ = {
         getStoreSetCount: (key: string) => storeSetCountMap.get(key) ?? 0,
+        getHttpRequestList: () => httpRequestList,
       } satisfies TauriMockState;
       globalScope.isTauri = true;
     },
@@ -178,6 +274,7 @@ export async function installTauriMock(
       storeValues: options.storeValues ?? {},
       schemaVersion: MOCKED_SCHEMA_VERSION,
       tableList: [...MOCKED_TABLE_SET],
+      httpResponses: options.httpResponses ?? [],
     },
   );
 }
@@ -191,4 +288,17 @@ export async function getStoreSetCount(page: Page, key: string): Promise<number>
     ).__SAYIT_E2E_TAURI_MOCK__;
     return mockState.getStoreSetCount(storeKey);
   }, key);
+}
+
+export async function getHttpRequestList(
+  page: Page,
+): Promise<Array<{ url: string; method: string; headers: Array<[string, string]> }>> {
+  return page.evaluate(() => {
+    const mockState = (
+      window as unknown as {
+        __SAYIT_E2E_TAURI_MOCK__: TauriMockState;
+      }
+    ).__SAYIT_E2E_TAURI_MOCK__;
+    return mockState.getHttpRequestList();
+  });
 }

@@ -887,6 +887,11 @@ const azureDeploymentList = ref<AzureChatDeployment[]>([]);
 const azureDeploymentListResult = ref<AzureDeploymentListResult | null>(null);
 const isManualAzureChatDeploymentInputVisible = ref(false);
 const hasAttemptedAzureAutoLoad = ref(false);
+const isLoadingAzureWhisperDeployments = ref(false);
+const azureWhisperDeploymentList = ref<AzureChatDeployment[]>([]);
+const azureWhisperDeploymentListResult =
+  ref<AzureDeploymentListResult | null>(null);
+const isManualAzureWhisperDeploymentInputVisible = ref(false);
 const azureChatModelFamilyConfig = computed(() =>
   findAzureChatModelFamilyConfig(settingsStore.azureChatModelFamily),
 );
@@ -936,6 +941,55 @@ const isStoredAzureDeploymentMissingFromList = computed(
     azureChatDeploymentInput.value.trim() !== "" &&
     selectedAzureDeployment.value === undefined,
 );
+const azureWhisperDeploymentOptions = computed(() => {
+  const savedDeployment = azureWhisperDeploymentInput.value.trim();
+  if (
+    savedDeployment === "" ||
+    azureWhisperDeploymentList.value.some(
+      (deployment) => deployment.name === savedDeployment,
+    )
+  ) {
+    return azureWhisperDeploymentList.value;
+  }
+
+  return [
+    {
+      name: savedDeployment,
+      source: "v1" as const,
+    },
+    ...azureWhisperDeploymentList.value,
+  ];
+});
+const selectedAzureWhisperDeployment = computed(() =>
+  azureWhisperDeploymentList.value.find(
+    (deployment) => deployment.name === azureWhisperDeploymentInput.value,
+  ),
+);
+const isStoredAzureWhisperDeploymentMissingFromList = computed(
+  () =>
+    azureWhisperDeploymentListResult.value !== null &&
+    azureWhisperDeploymentInput.value.trim() !== "" &&
+    selectedAzureWhisperDeployment.value === undefined,
+);
+const azureWhisperDeploymentListUnavailableReason = computed<
+  "connection-incomplete" | "entra-required" | "resource-mismatch" | null
+>(() =>
+  settingsStore.getAzureWhisperDeploymentListUnavailableReason({
+    enabled: azureEnabledInput.value,
+    resourceName: azureResourceNameInput.value,
+    projectName: azureProjectNameInput.value,
+    endpointOverride: azureEndpointOverrideInput.value,
+    whisperResourceName: azureWhisperResourceNameInput.value,
+    whisperEndpointOverride: azureWhisperEndpointOverrideInput.value,
+    authMode: azureAuthModeInput.value,
+  }),
+);
+const canLoadAzureWhisperDeployments = computed(
+  () =>
+    settingsStore.foundryTranscriptionProviderId === "azure" &&
+    !isLoadingAzureWhisperDeployments.value &&
+    azureWhisperDeploymentListUnavailableReason.value === null,
+);
 const isAzureDetectedFamilyDifferent = computed(
   () =>
     azureDetectedModelFamily.value !== null &&
@@ -948,6 +1002,21 @@ const canAutoLoadAzureDeployments = computed(
     settingsStore.azureEnabled &&
     settingsStore.azureEndpoint !== "" &&
     settingsStore.hasAzureCredentials,
+);
+watch(
+  [
+    azureEnabledInput,
+    azureResourceNameInput,
+    azureProjectNameInput,
+    azureEndpointOverrideInput,
+    azureWhisperResourceNameInput,
+    azureWhisperEndpointOverrideInput,
+    azureAuthModeInput,
+  ],
+  () => {
+    azureWhisperDeploymentList.value = [];
+    azureWhisperDeploymentListResult.value = null;
+  },
 );
 
 function loadAzureInputsFromStore() {
@@ -1230,6 +1299,66 @@ async function handleAzureDeploymentSelection(name: string) {
   } catch (err) {
     azureChatDeploymentInput.value = previousDeployment;
     azureChatDeploymentFeedback.show("error", extractErrorMessage(err));
+  }
+}
+
+async function loadAzureWhisperDeployments({
+  saveConnection,
+  showFeedback,
+}: {
+  saveConnection: boolean;
+  showFeedback: boolean;
+}) {
+  try {
+    isLoadingAzureWhisperDeployments.value = true;
+    if (saveConnection) {
+      await handleSaveAzureConnectionOrThrow();
+    }
+    const result = await settingsStore.listAzureWhisperDeployments();
+    azureWhisperDeploymentList.value = result.deploymentList;
+    azureWhisperDeploymentListResult.value = result;
+    if (showFeedback) {
+      azureWhisperDeploymentFeedback.show(
+        "success",
+        result.deploymentList.length === 0
+          ? t("settings.azure.deploymentListEmpty")
+          : t("settings.azure.deploymentListLoaded", {
+              count: result.deploymentList.length,
+            }),
+      );
+    }
+  } catch (err) {
+    azureWhisperDeploymentList.value = [];
+    azureWhisperDeploymentListResult.value = null;
+    if (showFeedback) {
+      const message = extractErrorMessage(err);
+      azureWhisperDeploymentFeedback.show(
+        "error",
+        message === "AZURE_DEPLOYMENT_LIST_REQUIRES_ENTRA"
+          ? t("settings.azure.whisperDeploymentListRequiresEntra")
+          : message === "AZURE_WHISPER_LIST_RESOURCE_MISMATCH"
+            ? t("settings.azure.whisperDeploymentListResourceMismatch")
+            : message,
+      );
+    }
+  } finally {
+    isLoadingAzureWhisperDeployments.value = false;
+  }
+}
+
+async function handleLoadAzureWhisperDeployments() {
+  await loadAzureWhisperDeployments({ saveConnection: true, showFeedback: true });
+}
+
+async function handleAzureWhisperDeploymentSelection(name: string) {
+  const previousDeployment = azureWhisperDeploymentInput.value;
+  azureWhisperDeploymentInput.value = name;
+  try {
+    await settingsStore.saveAzureWhisperDeployment(name);
+    azureWhisperDeploymentFeedback.show("success", t("settings.azure.deploymentSaved"));
+  } catch (err) {
+    azureWhisperDeploymentInput.value = previousDeployment;
+    azureWhisperDeploymentFeedback.show("error", extractErrorMessage(err));
   }
 }
 
@@ -3088,20 +3217,96 @@ onBeforeUnmount(() => {
           <!-- Azure OpenAI Whisper 部署 -->
           <template v-else-if="settingsStore.foundryTranscriptionProviderId === 'azure'">
             <div class="flex items-baseline">
-              <Label for="azure-whisper-deployment">{{ $t("settings.azure.whisperDeploymentLabel") }}</Label>
+              <Label for="azure-whisper-deployment-list">{{ $t("settings.azure.whisperDeploymentLabel") }}</Label>
               <InlineFeedback :feedback="azureWhisperDeploymentFeedback.state.value" class="ms-2" />
             </div>
-            <div class="flex gap-2">
-              <Input
-                id="azure-whisper-deployment"
-                v-model="azureWhisperDeploymentInput"
-                :placeholder="$t('settings.azure.whisperDeploymentPlaceholder')"
-                class="flex-1 font-mono text-xs"
-              />
-              <Button size="sm" :disabled="!azureWhisperDeploymentInput.trim()" @click="handleSaveAzureWhisperDeployment">
-                {{ $t('common.save') }}
+            <div class="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                data-testid="azure-whisper-load-deployments"
+                :disabled="!canLoadAzureWhisperDeployments"
+                @click="handleLoadAzureWhisperDeployments"
+              >
+                <LoaderCircle v-if="isLoadingAzureWhisperDeployments" class="mr-1 size-4 animate-spin" />
+                {{ $t(azureWhisperDeploymentListResult ? "settings.azure.reloadDeployments" : "settings.azure.loadDeployments") }}
               </Button>
+              <span
+                v-if="azureWhisperDeploymentListResult?.source === 'foundry'"
+                class="text-xs text-muted-foreground"
+              >
+                {{ azureWhisperDeploymentListResult.capabilityFiltered
+                  ? $t("settings.azure.whisperDeploymentListVerified")
+                  : $t("settings.azure.whisperDeploymentListUnverified") }}
+              </span>
             </div>
+            <p
+              v-if="azureWhisperDeploymentListUnavailableReason && azureWhisperDeploymentListUnavailableReason !== 'connection-incomplete'"
+              class="text-xs text-amber-400"
+            >
+              {{ azureWhisperDeploymentListUnavailableReason === "entra-required"
+                ? $t("settings.azure.whisperDeploymentListRequiresEntra")
+                : $t("settings.azure.whisperDeploymentListResourceMismatch") }}
+            </p>
+            <div
+              v-if="azureWhisperDeploymentList.length > 0 && azureWhisperDeploymentListUnavailableReason === null"
+              class="space-y-2"
+            >
+              <Select
+                :model-value="azureWhisperDeploymentInput"
+                @update:model-value="handleAzureWhisperDeploymentSelection(String($event))"
+              >
+                <SelectTrigger
+                  id="azure-whisper-deployment-list"
+                  class="w-full"
+                  data-testid="azure-whisper-deployment-select"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem
+                    v-for="deployment in azureWhisperDeploymentOptions"
+                    :key="deployment.name"
+                    :value="deployment.name"
+                  >
+                    {{ deployment.name }}<template v-if="deployment.modelName"> — {{ deployment.modelPublisher }} {{ deployment.modelName }}</template><template v-else-if="isStoredAzureWhisperDeploymentMissingFromList && deployment.name === azureWhisperDeploymentInput"> — {{ $t("settings.azure.deploymentMissingFromList") }}</template>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div
+              v-if="azureWhisperDeploymentList.length === 0 || isManualAzureWhisperDeploymentInputVisible || azureWhisperDeploymentListUnavailableReason !== null"
+              class="space-y-2"
+            >
+              <Label for="azure-whisper-deployment">{{ $t("settings.azure.manualWhisperDeploymentLabel") }}</Label>
+              <div class="flex gap-2">
+                <Input
+                  id="azure-whisper-deployment"
+                  v-model="azureWhisperDeploymentInput"
+                  data-testid="azure-whisper-deployment-manual-input"
+                  :placeholder="$t('settings.azure.whisperDeploymentPlaceholder')"
+                  class="flex-1 font-mono text-xs"
+                />
+                <Button size="sm" :disabled="!azureWhisperDeploymentInput.trim()" @click="handleSaveAzureWhisperDeployment">
+                  {{ $t('common.save') }}
+                </Button>
+              </div>
+            </div>
+            <Button
+              v-else
+              variant="link"
+              size="sm"
+              class="h-auto w-fit px-0 text-muted-foreground"
+              @click="isManualAzureWhisperDeploymentInputVisible = true"
+            >
+              {{ $t("settings.azure.enterDeploymentManually") }}
+            </Button>
+            <p
+              v-if="azureWhisperDeploymentListResult?.fallbackReason === 'capability-unverified'"
+              class="text-xs text-amber-400"
+            >
+              {{ $t("settings.azure.whisperDeploymentListUnverifiedFallback") }}
+            </p>
             <p class="text-xs text-muted-foreground">{{ $t("settings.azure.whisperHint") }}</p>
             <ConnectionTestButton
               :on-test="testAzureWhisperConnection"

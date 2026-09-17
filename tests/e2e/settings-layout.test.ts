@@ -1,6 +1,7 @@
 import type { Locator, Page } from "@playwright/test";
 import { test, expect } from "../support/fixtures";
 import {
+  getHttpRequestList,
   getStoreSetCount,
   installTauriMock,
 } from "../support/helpers/tauriMock";
@@ -46,6 +47,8 @@ async function openSettings(
     locale?: (typeof LAYOUT_LOCALE_LIST)[number];
     width?: number;
     llmProviderId?: "groq" | "openai" | "anthropic" | "gemini" | "azure";
+    storeValues?: Record<string, unknown>;
+    httpResponses?: Parameters<typeof installTauriMock>[1]["httpResponses"];
   },
 ): Promise<void> {
   await page.setViewportSize({
@@ -57,7 +60,9 @@ async function openSettings(
       azureEnabled: options.azureEnabled,
       selectedLocale: options.locale ?? "zh-TW",
       llmProviderId: options.llmProviderId,
+      ...options.storeValues,
     },
+    httpResponses: options.httpResponses,
   });
   await page.goto(SETTINGS_URL, { waitUntil: "domcontentloaded" });
   await expect(page.getByTestId("whisper-provider-group")).toBeVisible();
@@ -415,5 +420,62 @@ test.describe("Settings model selector layout", () => {
         readOverflowReportList(page.getByTestId("whisper-provider-group")),
       )
       .toEqual([]);
+  });
+
+  test("[P0] Whisper deployment 清單在切到 API Key 後不顯示舊候選項", async ({
+    page,
+  }) => {
+    await openSettings(page, {
+      azureEnabled: true,
+      width: 1280,
+      storeValues: {
+        whisperProviderId: "azure",
+        lastFoundryProvider: "azure",
+        azureResourceName: "main-resource",
+        azureProjectName: "voice-project",
+        azureAuthMode: "entra",
+        azureTenantId: "2aeb30d9-f0a6-4e27-8c47-f97c5b695eb6",
+        azureClientId: "1671ffd4-5c2a-44dd-83a2-e1c8267aa51b",
+        azureClientSecret: "test-client-secret-value-40-characters!!",
+      },
+      httpResponses: [
+        {
+          body: {
+            value: [
+              {
+                name: "whisper-prod",
+                modelName: "whisper-large-v3",
+                modelPublisher: "OpenAI",
+                capabilities: { audio: "true" },
+              },
+            ],
+          },
+        },
+      ],
+    });
+
+    await page.getByTestId("azure-whisper-load-deployments").click();
+
+    await expect(page.getByTestId("azure-whisper-deployment-select")).toBeVisible();
+    await page.getByTestId("azure-whisper-deployment-select").click();
+    await expect(page.getByRole("option", { name: /whisper-prod/ })).toBeVisible();
+    await page.keyboard.press("Escape");
+    expect((await getHttpRequestList(page))[0].url).toBe(
+      "https://main-resource.services.ai.azure.com/api/projects/voice-project/deployments?api-version=v1",
+    );
+
+    await page.locator('label[for="azure-auth-key"]').click();
+
+    await expect(page.getByTestId("azure-whisper-deployment-select")).toHaveCount(
+      0,
+    );
+    await expect(
+      page.getByTestId("azure-whisper-deployment-manual-input"),
+    ).toBeVisible();
+    await expect(
+      page.getByText(
+        "Foundry 專案部署清單只支援 Entra ID；API Key 模式請手動輸入部署名稱。",
+      ),
+    ).toBeVisible();
   });
 });
