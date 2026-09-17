@@ -201,6 +201,8 @@ invoke('transcribe_audio', {
 > 也就是本功能推出前唯一送出過的 wire 行為。正規 ID 一律小寫 kebab（用量統計以 SQL `model LIKE 'mai-%'`
 > 分桶）；送給服務端的大小寫由 Rust `MaiModel::wire_name()` 決定（v2 為 `MAI-Transcribe-2`）。
 >
+> **MAI 的 `phraseList`**：Rust 會先 trim、去空字串、略過超過 `MAX_WHISPER_TERM_CHARS` 的異常長詞，再保留 caller order，最後才套用 model-specific count cap。`mai-transcribe-2` 的服務觀測上限是 50 個 normalized terms，`mai-transcribe-1.5` 則維持 500。前端現有 call sites 已經用 `getTopTermListByWeight(50)`，所以 Rust 這層限制只是 defense in depth，保護未來或 direct IPC 呼叫者。Microsoft Learn 有列 `phraseList.phrases`，但目前沒有公開這個數字上限。
+>
 > **`transcribeStyle` 的 wire 形狀依模型而異**，前端不需要知道：
 > - `mai-transcribe-1.5` → `enhancedMode.transcribeStyle`，僅 `verbatim` 時送出（服務端預設即可讀）
 > - `mai-transcribe-2` → `enhancedMode.modelOptions.transcribeStyle`，**兩種風格都明確送出**
