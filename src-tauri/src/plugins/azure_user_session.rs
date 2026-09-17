@@ -15,8 +15,8 @@
 use super::azure_user_auth::{
     account_key, bind_loopback, build_authorize_url, generate_pkce, open_in_browser,
     parse_account_from_id_token, random_url_safe, sign_in_timeout, validate_client_id,
-    validate_tenant_id, wait_for_callback, AzureUserAccount, AzureUserAuthError, ScopeKind,
-    StoredSession,
+    validate_tenant_id, wait_for_callback, AzureUserAccount, AzureUserAuthError, CallbackResult,
+    ScopeKind, StoredSession,
 };
 use super::secret_store::{OsKeyring, SecretStore, SecretStoreError};
 use serde::Deserialize;
@@ -395,6 +395,48 @@ impl SessionBackend for RealBackend {
     }
 }
 
+trait SignInAdapter: Sync {
+    type Listener: Sync;
+
+    fn bind_loopback(
+        &self,
+    ) -> impl Future<Output = Result<(Self::Listener, String), AzureUserAuthError>> + Send;
+
+    fn open_in_browser(&self, url: &str) -> Result<(), AzureUserAuthError>;
+
+    fn wait_for_callback<'a>(
+        &'a self,
+        listener: &'a Self::Listener,
+        expected_state: &'a str,
+        success_title: &'a str,
+        success_body: &'a str,
+    ) -> impl Future<Output = Result<CallbackResult, AzureUserAuthError>> + Send + 'a;
+}
+
+struct RealSignInAdapter;
+
+impl SignInAdapter for RealSignInAdapter {
+    type Listener = tokio::net::TcpListener;
+
+    async fn bind_loopback(&self) -> Result<(Self::Listener, String), AzureUserAuthError> {
+        bind_loopback().await
+    }
+
+    fn open_in_browser(&self, url: &str) -> Result<(), AzureUserAuthError> {
+        open_in_browser(url)
+    }
+
+    async fn wait_for_callback(
+        &self,
+        listener: &Self::Listener,
+        expected_state: &str,
+        success_title: &str,
+        success_body: &str,
+    ) -> Result<CallbackResult, AzureUserAuthError> {
+        wait_for_callback(listener, expected_state, success_title, success_body).await
+    }
+}
+
 /// 登入的收尾：換 token → 驗 id_token → 確認未被取消 → 落地憑證庫。
 ///
 /// 取得 per-account 鎖之後、寫入之前會再確認一次取消旗標：使用者可能在
@@ -557,13 +599,13 @@ fn require_config(tenant_id: &str, client_id: &str) -> Result<(), AzureUserAuthE
     Ok(())
 }
 
-/// 互動登入：開系統瀏覽器 → 攔 loopback callback → 換 token → 存憑證庫。
-#[command]
-pub async fn azure_user_sign_in(
+async fn sign_in_inner<B: SessionBackend, A: SignInAdapter>(
+    backend: &B,
+    adapter: &A,
     tenant_id: String,
     client_id: String,
     operation_id: String,
-    state: tauri::State<'_, AzureUserAuthState>,
+    state: &AzureUserAuthState,
 ) -> Result<AzureUserAccount, AzureUserAuthError> {
     let tenant_id = normalize(&tenant_id);
     let client_id = normalize(&client_id);
@@ -571,7 +613,7 @@ pub async fn azure_user_sign_in(
 
     let cancel = state.begin_sign_in(&operation_id, &account_key(&tenant_id, &client_id))?;
     let _guard = SignInGuard {
-        state: &state,
+        state,
         operation_id: operation_id.clone(),
     };
 
@@ -580,7 +622,7 @@ pub async fn azure_user_sign_in(
     let nonce = random_url_safe(16)?;
 
     // 必須先 bind 再開瀏覽器，否則 redirect 可能早於 listener 就緒
-    let (listener, redirect_uri) = bind_loopback().await?;
+    let (listener, redirect_uri) = adapter.bind_loopback().await?;
     let authorize_url = build_authorize_url(
         &tenant_id,
         &client_id,
@@ -589,10 +631,10 @@ pub async fn azure_user_sign_in(
         &nonce,
         &pkce.challenge,
     );
-    open_in_browser(&authorize_url)?;
+    adapter.open_in_browser(&authorize_url)?;
 
     let callback = tokio::select! {
-        result = wait_for_callback(
+        result = adapter.wait_for_callback(
             &listener,
             &csrf_state,
             "登入完成",
@@ -603,8 +645,8 @@ pub async fn azure_user_sign_in(
     };
 
     finalize_sign_in(
-        &RealBackend,
-        &state,
+        backend,
+        state,
         &cancel,
         &tenant_id,
         &client_id,
@@ -612,6 +654,49 @@ pub async fn azure_user_sign_in(
         &callback.code,
         &pkce.verifier,
         &nonce,
+    )
+    .await
+}
+
+async fn sign_out_inner<B: SessionBackend>(
+    backend: &B,
+    state: &AzureUserAuthState,
+    tenant_id: &str,
+    client_id: &str,
+) -> Result<(), AzureUserAuthError> {
+    let tenant_id = normalize(tenant_id);
+    let client_id = normalize(client_id);
+    // 登出容許格式不合法的舊值：使用者可能就是要清掉那筆壞掉的設定
+    if tenant_id.is_empty() || client_id.is_empty() {
+        return Ok(());
+    }
+    let key = account_key(&tenant_id, &client_id);
+    // 先取消寫向同一個帳號的進行中登入：呼叫端可能是另一個 WebView，
+    // 不知道 operation_id，但那次登入的 callback 會寫進同一把 key。
+    // 取消後它會在拿到下面這把鎖時自行收回已寫入的內容。
+    state.cancel_sign_in_for_account(&key);
+    let lock = state.lock_for(&key);
+    let _held = lock.lock().await;
+    backend.delete(key.clone()).await?;
+    state.clear_tokens(&key);
+    Ok(())
+}
+
+/// 互動登入：開系統瀏覽器 → 攔 loopback callback → 換 token → 存憑證庫。
+#[command]
+pub async fn azure_user_sign_in(
+    tenant_id: String,
+    client_id: String,
+    operation_id: String,
+    state: tauri::State<'_, AzureUserAuthState>,
+) -> Result<AzureUserAccount, AzureUserAuthError> {
+    sign_in_inner(
+        &RealBackend,
+        &RealSignInAdapter,
+        tenant_id,
+        client_id,
+        operation_id,
+        &state,
     )
     .await
 }
@@ -631,21 +716,7 @@ pub async fn azure_user_sign_out(
     client_id: String,
     state: tauri::State<'_, AzureUserAuthState>,
 ) -> Result<(), AzureUserAuthError> {
-    let tenant_id = normalize(&tenant_id);
-    let client_id = normalize(&client_id);
-    // 登出容許格式不合法的舊值：使用者可能就是要清掉那筆壞掉的設定
-    if tenant_id.is_empty() || client_id.is_empty() {
-        return Ok(());
-    }
-    let key = account_key(&tenant_id, &client_id);
-    // 先取消寫向同一個帳號的進行中登入：呼叫端可能是另一個 WebView，
-    // 不知道 operation_id，但那次登入的 callback 會寫進同一把 key。
-    // 取消後它會在拿到下面這把鎖時自行收回已寫入的內容。
-    state.cancel_sign_in_for_account(&key);
-    let lock = state.lock_for(&key);
-    let _held = lock.lock().await;
-    state.clear_tokens(&key);
-    delete_session(key).await
+    sign_out_inner(&RealBackend, &state, &tenant_id, &client_id).await
 }
 
 #[command]
@@ -887,6 +958,8 @@ mod tests {
         fail_load: AtomicBool,
         fail_delete: AtomicBool,
         deletes: StdMutex<Vec<String>>,
+        hold_next_post_token: StdMutex<Option<tokio::sync::oneshot::Receiver<()>>>,
+        post_token_started: Notify,
     }
 
     impl FakeBackend {
@@ -922,6 +995,18 @@ mod tests {
 
         fn delete_count(&self) -> usize {
             self.deletes.lock().unwrap().len()
+        }
+
+        fn hold_next_post_token(&self) -> tokio::sync::oneshot::Sender<()> {
+            let (release, wait) = tokio::sync::oneshot::channel();
+            *self.hold_next_post_token.lock().unwrap() = Some(wait);
+            release
+        }
+
+        async fn wait_for_post_token_to_start(&self) {
+            while self.token_call_count() == 0 {
+                self.post_token_started.notified().await;
+            }
         }
 
         fn param(&self, call: usize, name: &str) -> Option<String> {
@@ -968,6 +1053,11 @@ mod tests {
             params: Vec<(&'static str, String)>,
         ) -> Result<TokenResponse, AzureUserAuthError> {
             self.token_calls.lock().unwrap().push((tenant_id, params));
+            self.post_token_started.notify_waiters();
+            let hold = self.hold_next_post_token.lock().unwrap().take();
+            if let Some(hold) = hold {
+                let _ = hold.await;
+            }
             let canned = self.responses.lock().unwrap().pop_front();
             canned.unwrap_or_else(|| {
                 Err(AzureUserAuthError::Failed("no canned response".to_string()))
@@ -983,6 +1073,32 @@ mod tests {
             }
             *self.session.lock().unwrap() = None;
             Ok(())
+        }
+    }
+
+    impl<T: SessionBackend + Send + Sync> SessionBackend for Arc<T> {
+        async fn load(&self, key: String) -> Result<Option<StoredSession>, AzureUserAuthError> {
+            (**self).load(key).await
+        }
+
+        async fn save(
+            &self,
+            key: String,
+            session: StoredSession,
+        ) -> Result<(), AzureUserAuthError> {
+            (**self).save(key, session).await
+        }
+
+        async fn delete(&self, key: String) -> Result<(), AzureUserAuthError> {
+            (**self).delete(key).await
+        }
+
+        async fn post_token(
+            &self,
+            tenant_id: String,
+            params: Vec<(&'static str, String)>,
+        ) -> Result<TokenResponse, AzureUserAuthError> {
+            (**self).post_token(tenant_id, params).await
         }
     }
 
@@ -1225,6 +1341,68 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn concurrent_refresh_for_the_same_account_is_single_flight() {
+        let backend = Arc::new(FakeBackend::with_session("refresh-1"));
+        backend.queue(Ok(token_response(Some("access-1"), None, None, Some(3600))));
+        let release_refresh = backend.hold_next_post_token();
+        let state = Arc::new(AzureUserAuthState::default());
+
+        let first_backend = backend.clone();
+        let first_state = state.clone();
+        let first = tokio::spawn(async move {
+            acquire_token(
+                &first_backend,
+                &first_state,
+                TENANT,
+                CLIENT,
+                ScopeKind::Chat,
+            )
+            .await
+        });
+
+        backend.wait_for_post_token_to_start().await;
+        assert_eq!(backend.token_call_count(), 1);
+
+        let second_backend = backend.clone();
+        let second_state = state.clone();
+        let (second_entered, wait_for_second_entered) = tokio::sync::oneshot::channel();
+        let second = tokio::spawn(async move {
+            second_entered
+                .send(())
+                .expect("test should still be waiting for the second caller");
+            acquire_token(
+                &second_backend,
+                &second_state,
+                TENANT,
+                CLIENT,
+                ScopeKind::Chat,
+            )
+            .await
+        });
+
+        tokio::time::timeout(Duration::from_millis(200), wait_for_second_entered)
+            .await
+            .expect("second acquire_token call should enter while refresh is held open")
+            .expect("second caller should report entry");
+        tokio::task::yield_now().await;
+        assert_eq!(
+            backend.token_call_count(),
+            1,
+            "second concurrent caller must wait for the in-flight refresh"
+        );
+
+        release_refresh
+            .send(())
+            .expect("held refresh should still be awaiting release");
+        let first = first.await.expect("first task should not panic").unwrap();
+        let second = second.await.expect("second task should not panic").unwrap();
+
+        assert_eq!(first, "access-1");
+        assert_eq!(second, "access-1");
+        assert_eq!(backend.token_call_count(), 1);
+    }
+
+    #[tokio::test]
     async fn rotated_refresh_token_replaces_the_stored_one() {
         let backend = FakeBackend::with_session("refresh-1");
         backend.queue(Ok(token_response(
@@ -1443,6 +1621,113 @@ mod tests {
         assert_ne!(
             backend.param(0, "scope").unwrap(),
             backend.param(1, "scope").unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn sign_out_reports_delete_failure_without_clearing_cached_tokens() {
+        let backend = FakeBackend::with_session("refresh-1");
+        backend.fail_delete.store(true, Ordering::SeqCst);
+        let state = AzureUserAuthState::default();
+        let key = account_key(TENANT, CLIENT);
+        state.store_token(&key, ScopeKind::Chat, "cached-chat".into(), 3600);
+
+        let result = sign_out_inner(&backend, &state, TENANT, CLIENT).await;
+
+        assert!(matches!(result, Err(AzureUserAuthError::Failed(_))));
+        assert_eq!(backend.delete_count(), 1);
+        assert_eq!(backend.stored_refresh().as_deref(), Some("refresh-1"));
+        assert_eq!(
+            state.cached(&key, ScopeKind::Chat).as_deref(),
+            Some("cached-chat"),
+            "failed sign-out must not look successful by clearing local cache first"
+        );
+    }
+
+    struct FakeSignInAdapter<'a> {
+        backend: &'a FakeBackend,
+        opened_urls: StdMutex<Vec<String>>,
+        callback_code: String,
+    }
+
+    impl<'a> FakeSignInAdapter<'a> {
+        fn new(backend: &'a FakeBackend) -> Self {
+            Self {
+                backend,
+                opened_urls: StdMutex::new(Vec::new()),
+                callback_code: "auth-code".to_string(),
+            }
+        }
+
+        fn opened_count(&self) -> usize {
+            self.opened_urls.lock().unwrap().len()
+        }
+
+        fn opened_url(&self) -> String {
+            self.opened_urls.lock().unwrap()[0].clone()
+        }
+    }
+
+    impl SignInAdapter for FakeSignInAdapter<'_> {
+        type Listener = ();
+
+        async fn bind_loopback(&self) -> Result<(Self::Listener, String), AzureUserAuthError> {
+            Ok(((), "http://127.0.0.1:1234".to_string()))
+        }
+
+        fn open_in_browser(&self, url: &str) -> Result<(), AzureUserAuthError> {
+            self.opened_urls.lock().unwrap().push(url.to_string());
+            Ok(())
+        }
+
+        async fn wait_for_callback(
+            &self,
+            _listener: &Self::Listener,
+            _expected_state: &str,
+            _success_title: &str,
+            _success_body: &str,
+        ) -> Result<CallbackResult, AzureUserAuthError> {
+            let url = self.opened_url();
+            let nonce = url
+                .split('&')
+                .find_map(|part| part.strip_prefix("nonce="))
+                .expect("authorize URL should include nonce")
+                .to_string();
+            self.backend.queue(Ok(token_response(
+                Some("access-1"),
+                Some("refresh-1"),
+                Some(id_token(CLIENT, TENANT, &nonce)),
+                Some(3600),
+            )));
+            Ok(CallbackResult {
+                code: self.callback_code.clone(),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn sign_in_command_flow_uses_injected_browser_adapter() {
+        let backend = FakeBackend::default();
+        let adapter = FakeSignInAdapter::new(&backend);
+        let state = AzureUserAuthState::default();
+
+        let account = sign_in_inner(
+            &backend,
+            &adapter,
+            TENANT.to_string(),
+            CLIENT.to_string(),
+            "op-1".to_string(),
+            &state,
+        )
+        .await
+        .expect("sign-in should complete through fake adapter");
+
+        assert_eq!(account.username.as_deref(), Some("user@contoso.com"));
+        assert_eq!(adapter.opened_count(), 1);
+        assert_eq!(backend.stored_refresh().as_deref(), Some("refresh-1"));
+        assert_eq!(
+            backend.param(0, "grant_type").as_deref(),
+            Some("authorization_code")
         );
     }
 }
