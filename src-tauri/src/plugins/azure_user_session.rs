@@ -677,9 +677,8 @@ async fn sign_out_inner<B: SessionBackend>(
     state.cancel_sign_in_for_account(&key);
     let lock = state.lock_for(&key);
     let _held = lock.lock().await;
-    backend.delete(key.clone()).await?;
     state.clear_tokens(&key);
-    Ok(())
+    backend.delete(key).await
 }
 
 /// 互動登入：開系統瀏覽器 → 攔 loopback callback → 換 token → 存憑證庫。
@@ -1625,7 +1624,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sign_out_reports_delete_failure_without_clearing_cached_tokens() {
+    async fn sign_out_clears_cached_tokens_before_reporting_delete_failure() {
         let backend = FakeBackend::with_session("refresh-1");
         backend.fail_delete.store(true, Ordering::SeqCst);
         let state = AzureUserAuthState::default();
@@ -1637,11 +1636,7 @@ mod tests {
         assert!(matches!(result, Err(AzureUserAuthError::Failed(_))));
         assert_eq!(backend.delete_count(), 1);
         assert_eq!(backend.stored_refresh().as_deref(), Some("refresh-1"));
-        assert_eq!(
-            state.cached(&key, ScopeKind::Chat).as_deref(),
-            Some("cached-chat"),
-            "failed sign-out must not look successful by clearing local cache first"
-        );
+        assert!(state.cached(&key, ScopeKind::Chat).is_none());
     }
 
     struct FakeSignInAdapter<'a> {
