@@ -202,7 +202,10 @@ export function buildSystemPrompt(
 
   if (vocabularyTermList && vocabularyTermList.length > 0) {
     const truncatedTermList = vocabularyTermList.slice(0, MAX_VOCABULARY_TERMS);
-    prompt += `\n\n<vocabulary>\n${truncatedTermList.join(", ")}\n</vocabulary>`;
+    const encodedTermList = JSON.stringify(truncatedTermList)
+      .replace(/</g, "\\u003C")
+      .replace(/>/g, "\\u003E");
+    prompt += `\n\n<vocabulary>\n${encodedTermList}\n</vocabulary>`;
   }
 
   // #38 方案 A（結構分離）：context 內容不放 system role（最高權限），改由
@@ -223,6 +226,33 @@ export function buildSystemPrompt(
   }
 
   return prompt;
+}
+
+function buildTranscriptMessageContent(rawText: string): string {
+  return `<transcript>\n${rawText}\n</transcript>`;
+}
+
+export function buildEnhancementMessages(
+  rawText: string,
+  fullPrompt: string,
+  context?: PromptContextOptions,
+): LlmChatMessage[] {
+  // #38 方案 A：不可信 context 以獨立 user 訊息（低於 system 權限）傳入，
+  // 插在要整理的逐字稿之前；無 context 時不插入。
+  const untrustedContextMessage = buildUntrustedContextMessage(context);
+  const messageList: LlmChatMessage[] = [
+    { role: "system", content: fullPrompt },
+  ];
+  if (untrustedContextMessage) {
+    messageList.push({ role: "user", content: untrustedContextMessage });
+  }
+  // 無論是否有 context，都以 <transcript> 明確標記要整理的逐字稿：部分 provider
+  // （如 Anthropic）會合併連續同 role 訊息，不能只靠「最後一則訊息」界定邊界。
+  messageList.push({
+    role: "user",
+    content: buildTranscriptMessageContent(rawText),
+  });
+  return messageList;
 }
 
 /**
@@ -361,6 +391,10 @@ export async function enhanceText(
   apiKey: string,
   options?: EnhanceOptions,
 ): Promise<EnhanceResult> {
+  if (rawText.trim() === "") {
+    return { text: "", usage: null };
+  }
+
   if (!apiKey || apiKey.trim() === "") {
     throw new Error("API Key not configured");
   }
@@ -378,23 +412,12 @@ export async function enhanceText(
     options?.vocabularyTermList,
     contextOptions,
   );
-  // #38 方案 A：不可信 context 以獨立 user 訊息（低於 system 權限）傳入，
-  // 插在要整理的逐字稿之前；無 context 時不插入。
   const untrustedContextMessage = buildUntrustedContextMessage(contextOptions);
-  const messageList: LlmChatMessage[] = [
-    { role: "system", content: fullPrompt },
-  ];
-  if (untrustedContextMessage) {
-    messageList.push({ role: "user", content: untrustedContextMessage });
-    // 有 context 時以 <transcript> 明確標記要整理的逐字稿：部分 provider（如
-    // Anthropic）會合併連續同 role 訊息，故不能只靠「最後一則訊息」界定邊界。
-    messageList.push({
-      role: "user",
-      content: `<transcript>\n${rawText}\n</transcript>`,
-    });
-  } else {
-    messageList.push({ role: "user", content: rawText });
-  }
+  const messageList = buildEnhancementMessages(
+    rawText,
+    fullPrompt,
+    contextOptions,
+  );
 
   const azureFamily =
     providerId === "azure" && options?.azure
