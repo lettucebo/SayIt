@@ -32,6 +32,7 @@ import { detectHallucination } from "../lib/hallucinationDetector";
 import { observeSemanticDrift } from "../lib/semanticDriftObserver";
 import {
   applyTranscriptTextTransforms,
+  finalizeOutputText,
   resolveEffectiveTranscriptionLocale,
 } from "../lib/transcriptTransforms";
 import { useSettingsStore } from "./useSettingsStore";
@@ -847,6 +848,12 @@ export const useHistoryStore = defineStore("history", () => {
     }
 
     const termList = await vocabularyStore.getTopTermListByWeight(50);
+    const convertFinalEnhancedOutput =
+      settingsStore.promptMode !== "custom" &&
+      resolveEffectiveTranscriptionLocale(
+        settingsStore.selectedTranscriptionLocale,
+        settingsStore.selectedLocale,
+      ) === "zh-TW";
     const startTime = performance.now();
 
     let enhanceResult: EnhanceWithGuardResult;
@@ -880,8 +887,18 @@ export const useHistoryStore = defineStore("history", () => {
       return { ok: false, errorKey: "history.reEnhanceFailed" };
     }
 
+    const replacementStore = useReplacementStore();
+    await replacementStore.ensureLoaded();
+    const finalText = await finalizeOutputText(
+      enhanceResult.text,
+      replacementStore.rules,
+      {
+        convertSimplifiedToTraditional: convertFinalEnhancedOutput,
+      },
+    );
+
     // a5-B shadow：觀測語意漂移（不改行為）
-    observeSemanticDrift(record.rawText, enhanceResult.text, "history", {
+    observeSemanticDrift(record.rawText, finalText, "history", {
       locale: settingsStore.selectedLocale,
       provider: llmCfg.provider,
       model: llmCfg.modelId,
@@ -889,7 +906,7 @@ export const useHistoryStore = defineStore("history", () => {
 
     const db = getDatabase();
     const res = await db.execute(UPDATE_ON_REENHANCE_SQL, [
-      enhanceResult.text,
+      finalText,
       enhancementDurationMs,
       record.id,
     ]);
@@ -898,7 +915,7 @@ export const useHistoryStore = defineStore("history", () => {
     }
 
     const updated = applyLocalRecordUpdate(record.id, {
-      processedText: enhanceResult.text,
+      processedText: finalText,
       wasEnhanced: true,
       enhancementDurationMs,
     });

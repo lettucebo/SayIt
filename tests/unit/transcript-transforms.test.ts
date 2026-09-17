@@ -3,6 +3,7 @@ import { convertSimplifiedToTraditional } from "../../src/lib/simplifiedToTradit
 import {
   applyTranscriptTextTransforms,
   applyWordReplacements,
+  finalizeOutputText,
   resolveEffectiveTranscriptionLocale,
 } from "../../src/lib/transcriptTransforms";
 import { createReplacementRule } from "../support/factories";
@@ -273,5 +274,35 @@ describe("applyTranscriptTextTransforms with replacements", () => {
     expect(await applyTranscriptTextTransforms("请用 kubernetes", "zh-TW")).toBe(
       "請用 kubernetes",
     );
+  });
+});
+
+describe("finalizeOutputText", () => {
+  it("[P0] afterAI 簡體 source pattern 應先匹配，再只轉換未被 replacement 產生的文字", async () => {
+    const rule = createReplacementRule({
+      patterns: ["会议"],
+      replacement: "Stand-up",
+      timing: "afterAI",
+    });
+
+    expect(
+      await finalizeOutputText("请安排会议", [rule], {
+        convertSimplifiedToTraditional: true,
+      }),
+    ).toBe("請安排Stand-up");
+  });
+
+  it("[P0] afterAI replacement 產生的簡體文字不可被 final 簡轉繁覆寫", async () => {
+    const rule = createReplacementRule({
+      patterns: ["会议"],
+      replacement: "请保持简体",
+      timing: "afterAI",
+    });
+
+    expect(
+      await finalizeOutputText("请安排会议", [rule], {
+        convertSimplifiedToTraditional: true,
+      }),
+    ).toBe("請安排请保持简体");
   });
 });

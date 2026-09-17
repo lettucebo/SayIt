@@ -31,6 +31,9 @@ const h = vi.hoisted(() => {
     getLlmRequestConfig: vi.fn(),
     getAiPrompt: () => "prompt",
     getEffectiveChatModel: () => "qwen/qwen3.6-27b",
+    selectedTranscriptionLocale: "auto",
+    selectedLocale: "en",
+    promptMode: "active",
   };
   return {
     mockDbExecute,
@@ -127,6 +130,9 @@ describe("useHistoryStore retry", () => {
       provider: "groq",
       modelId: "qwen/qwen3.6-27b",
     });
+    h.settingsStub.selectedTranscriptionLocale = "auto";
+    h.settingsStub.selectedLocale = "en";
+    h.settingsStub.promptMode = "active";
   });
 
   describe("retranscribeRecord", () => {
@@ -326,6 +332,72 @@ describe("useHistoryStore retry", () => {
       expect(res.ok).toBe(true);
       expect(store.transcriptionList[0].processedText).toBe("新的整理結果。");
       expect(store.transcriptionList[0].wasEnhanced).toBe(true);
+    });
+
+    it("[P0] zh-TW history re-enhancement final output 簡轉繁後寫入 processed_text", async () => {
+      h.settingsStub.selectedLocale = "zh-TW";
+      h.mockEnhanceGuard.mockResolvedValue({
+        text: "请把会议改到星期五。",
+        usage: null,
+        wasAnomalous: false,
+      });
+      const store = useHistoryStore();
+      const record = createRecord({
+        status: "success",
+        rawText: "原始口語內容",
+        wasEnhanced: false,
+      });
+      store.transcriptionList.push(record);
+
+      const res = await store.reEnhanceRecord(record);
+
+      expect(res.ok).toBe(true);
+      expect(h.mockDbExecute).toHaveBeenLastCalledWith(
+        expect.any(String),
+        expect.arrayContaining(["請把會議改到星期五。"]),
+      );
+      expect(store.transcriptionList[0].processedText).toBe(
+        "請把會議改到星期五。",
+      );
+    });
+
+    it("[P0] history re-enhancement 以送出請求當下的 locale/promptMode 決定 final conversion", async () => {
+      h.settingsStub.selectedLocale = "zh-CN";
+      let resolveEnhance!: (value: {
+        text: string;
+        usage: null;
+        wasAnomalous: false;
+      }) => void;
+      h.mockEnhanceGuard.mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveEnhance = resolve;
+        }),
+      );
+      const store = useHistoryStore();
+      const record = createRecord({
+        status: "success",
+        rawText: "原始口語內容",
+        wasEnhanced: false,
+      });
+      store.transcriptionList.push(record);
+
+      const reEnhancePromise = store.reEnhanceRecord(record);
+      await vi.waitFor(() => {
+        expect(h.mockEnhanceGuard).toHaveBeenCalled();
+      });
+
+      h.settingsStub.selectedLocale = "zh-TW";
+      resolveEnhance({
+        text: "请把会议改到星期五。",
+        usage: null,
+        wasAnomalous: false,
+      });
+      const res = await reEnhancePromise;
+
+      expect(res.ok).toBe(true);
+      expect(store.transcriptionList[0].processedText).toBe(
+        "请把会议改到星期五。",
+      );
     });
   });
 });

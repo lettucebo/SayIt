@@ -28,7 +28,7 @@ import type { SupportedLocale } from "../i18n/languageConfig";
 import { analyzeCorrections } from "../lib/vocabularyAnalyzer";
 import {
   applyTranscriptTextTransforms,
-  applyWordReplacements,
+  finalizeOutputText,
   resolveEffectiveTranscriptionLocale,
 } from "../lib/transcriptTransforms";
 import i18n from "../i18n";
@@ -909,18 +909,22 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
     chatUsage: ChatUsageData | null;
     transcriptionUsage?: TranscriptionUsageSnapshot | null;
     skipRecordSaving?: boolean;
+    convertFinalSimplifiedToTraditional?: boolean;
   }): Promise<string | null> {
     try {
       const settingsStore = useSettingsStore();
-      // #55 afterAI：completePasteFlow 是所有貼上路徑（主流程 / AI 跳過 /
-      // 失敗 fallback / 重送 / edit mode）的唯一出口，在此套用 afterAI 取代可
-      // 涵蓋全部情境，並同步更新 record 讓歷史與實際貼上一致。
+      // #49/#55：completePasteFlow 是所有貼上路徑的唯一出口。AI final 簡→繁
+      // 只由 normal enhancement 呼叫端開啟，且在 afterAI 前執行；afterAI 是使用者
+      // 明確設定的最後輸出規則，必須保留最終覆寫權，避免 OpenCC 改掉使用者刻意輸出。
       const replacementStore = useReplacementStore();
       await replacementStore.ensureLoaded();
-      const pasteText = applyWordReplacements(
+      const pasteText = await finalizeOutputText(
         params.text,
         replacementStore.rules,
-        "afterAI",
+        {
+          convertSimplifiedToTraditional:
+            params.convertFinalSimplifiedToTraditional === true,
+        },
       );
       if (pasteText !== params.text) {
         if (params.record.processedText != null) {
@@ -965,6 +969,20 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
       );
       return null;
     }
+  }
+
+  function shouldConvertFinalEnhancedOutput(settingsStore: {
+    selectedTranscriptionLocale: string;
+    selectedLocale: string;
+    promptMode: string;
+  }): boolean {
+    return (
+      settingsStore.promptMode !== "custom" &&
+      resolveEffectiveTranscriptionLocale(
+        settingsStore.selectedTranscriptionLocale,
+        settingsStore.selectedLocale,
+      ) === "zh-TW"
+    );
   }
 
   function saveApiUsageRecordList(
@@ -1601,6 +1619,8 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
             signal: abortController?.signal,
             ...contextOptions,
           };
+          const convertFinalEnhancedOutput =
+            shouldConvertFinalEnhancedOutput(settingsStore);
           const azureFamily = llmCfg.azure
             ? findAzureChatModelFamilyConfig(
                 getEffectiveAzureChatModelFamilyId(
@@ -1703,6 +1723,8 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
             record,
             chatUsage: enhanceResult.usage,
             transcriptionUsage,
+            convertFinalSimplifiedToTraditional:
+              !finalAnomaly.isAnomaly && convertFinalEnhancedOutput,
           });
 
           writeInfoLog(
@@ -2029,6 +2051,8 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
           const contextOptions = await readEnhancementContext(
             settingsStore.contextInjectionEnabled,
           );
+          const convertFinalEnhancedOutput =
+            shouldConvertFinalEnhancedOutput(settingsStore);
           const azureFamily = llmCfg.azure
             ? findAzureChatModelFamilyConfig(
                 getEffectiveAzureChatModelFamilyId(
@@ -2086,6 +2110,8 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
             record,
             chatUsage: enhanceResult.usage,
             skipRecordSaving: true,
+            convertFinalSimplifiedToTraditional:
+              !enhanceResult.wasAnomalous && convertFinalEnhancedOutput,
           });
           if (!pasteText) return;
 
