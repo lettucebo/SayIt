@@ -29,6 +29,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { ACTIVE_PROMPTS, MINIMAL_PROMPTS } from "../../src/i18n/prompts";
+import { buildEnhancementMessages } from "../../src/lib/enhancer";
 import {
   buildFetchParams,
   getProviderIdForModel,
@@ -65,8 +66,8 @@ function resolveSystemPrompt(): { label: string; text: string } {
 
 /**
  * 送一次整理請求。
- * 訊息結構刻意與 `enhancer.ts` 的無 context 路徑一致：system = prompt、
- * user = 逐字稿、temperature 0.1，確保實測結果能對應到 app 的真實行為。
+ * 訊息結構直接走 `enhancer.ts` 匯出的 prompt assembly，確保實測結果能對應到
+ * app 的真實行為。
  */
 async function enhanceOnce(
   systemPrompt: string,
@@ -77,10 +78,7 @@ async function enhanceOnce(
     providerId,
     {
       model: MODEL_ID,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: transcript },
-      ],
+      messages: buildEnhancementMessages(transcript, systemPrompt),
       temperature: 0.1,
       maxTokens: 4096,
     },
@@ -143,6 +141,7 @@ describe("prompt eval — live runner wiring", () => {
   it("[P1] imported helpers still exist with the expected shape", () => {
     expect(typeof getProviderIdForModel).toBe("function");
     expect(typeof buildFetchParams).toBe("function");
+    expect(typeof buildEnhancementMessages).toBe("function");
     expect(typeof parseProviderResponse).toBe("function");
     expect(typeof applyTranscriptTextTransforms).toBe("function");
     expect(typeof ACTIVE_PROMPTS["zh-TW"]).toBe("string");
@@ -171,6 +170,15 @@ describe("prompt eval — live runner wiring", () => {
     );
     expect(url).toMatch(/^https:\/\//);
     expect(init.method).toBe("POST");
+  });
+
+  it("[P1] runner uses production no-context transcript wrapper", () => {
+    const messages = buildEnhancementMessages("逐字稿", "prompt");
+
+    expect(messages).toEqual([
+      { role: "system", content: "prompt" },
+      { role: "user", content: "<transcript>\n逐字稿\n</transcript>" },
+    ]);
   });
 });
 
