@@ -1,98 +1,100 @@
 # SayIt
 
-> 按住說話，放開貼上 — 語音轉書面語桌面工具
+> Hold to speak, release to paste — a desktop speech-to-writing tool
 
-SayIt 是一款跨平台桌面語音輸入工具。在任何應用程式中按住快捷鍵說話，放開後語音經 Groq Whisper API 轉錄，再由 Groq LLM 自動將口語轉為通順的繁體中文書面語，直接貼入游標位置。
+**English** | [繁體中文](README.zh-TW.md)
 
-## 特色
+SayIt is a cross-platform desktop voice input tool. Hold the hotkey to speak in any application, then release it to transcribe your speech with the Groq Whisper API. Groq LLM automatically turns the spoken words into polished Traditional Chinese and pastes the result at the cursor.
 
-- **口語到書面語** — AI 自動去除贅詞、重組句構、修正標點，說完即可用
-- **全域快捷鍵** — 在任何應用程式中觸發，支援 Hold / Toggle 雙模式
-- **低延遲** — 基於 Groq 推論引擎，端到端 < 3 秒（含 AI 整理）
-- **自訂詞彙字典** — 確保專有名詞、技術術語正確轉錄
-- **歷史記錄與統計** — 自動保存所有轉錄，Dashboard 一覽使用狀況
-- **極簡設定** — 只需設定 API Key 即可使用
+## Features
 
-## 安裝
+- **Speech to polished writing** — AI removes filler words, restructures sentences, and fixes punctuation so your words are ready to use
+- **Global hotkey** — Trigger it from any application with both Hold and Toggle modes
+- **Low latency** — Powered by the Groq inference engine, with end-to-end processing in under 3 seconds, including AI cleanup
+- **Custom vocabulary** — Keep proper names and technical terms accurate during transcription
+- **History and statistics** — Automatically save every transcription and review usage in the Dashboard
+- **Minimal setup** — Configure an API key and start using it
 
-### 下載
+## Installation
 
-| 平台 | 下載連結 |
-|------|---------|
+### Downloads
+
+| Platform | Download |
+|----------|----------|
 | macOS (Apple Silicon) | [SayIt-mac-arm64.dmg](https://github.com/lettucebo/SayIt/releases/latest/download/SayIt-mac-arm64.dmg) |
 | macOS (Intel) | [SayIt-mac-x64.dmg](https://github.com/lettucebo/SayIt/releases/latest/download/SayIt-mac-x64.dmg) |
 | Windows | [SayIt-windows-x64.exe](https://github.com/lettucebo/SayIt/releases/latest/download/SayIt-windows-x64.exe) |
 
-> ⚠️ **Windows 安裝檔目前未做程式碼簽署**：SmartScreen 可能顯示「Windows 已保護你的電腦」。請點 **其他資訊 → 仍要執行**。每個安裝檔旁附有 `.sha256` 檔，可用 `Get-FileHash`／`shasum -a 256` 比對驗證完整性。
+> ⚠️ **The Windows installer is currently unsigned**: SmartScreen may display “Windows protected your PC.” Select **More info → Run anyway**. Each installer is accompanied by a `.sha256` file that you can verify with `Get-FileHash` or `shasum -a 256`.
 
-### 前置需求
+### Prerequisites
 
-- [Groq API Key](https://console.groq.com/keys)（免費申請）
+- [Groq API key](https://console.groq.com/keys) (free to create)
 
-### 快速開始
+### Quick start
 
-1. 下載並安裝
-2. 開啟 SayIt → 設定頁面 → 貼上 Groq API Key
-3. 在任何應用程式中按住 `Fn` 鍵說話，放開後文字自動貼上
+1. Download and install SayIt.
+2. Open SayIt, go to Settings, and paste your Groq API key.
+3. Hold the `Fn` key and speak in any application. Release it to paste the text automatically.
 
-### 使用 Azure OpenAI / Microsoft Foundry（選用）
+### Using Azure OpenAI / Microsoft Foundry (optional)
 
-除了 Groq，SayIt 也可接 Azure OpenAI / Microsoft Foundry，並支援三種驗證方式：
-API Key、Entra ID Secret（服務主體）、以及 **Entra ID 登入**（用你自己的公司帳號、免密鑰，適合
-公司政策禁用長期共享密鑰的環境）。
+In addition to Groq, SayIt can connect to Azure OpenAI / Microsoft Foundry and supports three authentication methods: API key, Entra ID secret (service principal), and **Entra ID sign-in** (using your own company account without a client secret, which is useful when company policy prohibits long-lived shared secrets).
 
-設定步驟見 [使用 Entra ID 登入 Azure OpenAI / Foundry](docs/azure-entra-user-sign-in.md)。
+See [Sign in to Azure OpenAI / Foundry with Entra ID](docs/azure-entra-user-sign-in.md) for setup instructions.
 
-## 技術架構
+## Architecture
 
 ```
 Tauri v2 (Rust) + Vue 3 + TypeScript
 
   ┌──────────────────────────────────┐
   │        Tauri Backend (Rust)      │
-  │  全域熱鍵 · 剪貼簿 · 音量控制    │
+  │  Global hotkey · Clipboard · Audio│
+  │             controls              │
   └───────┬──────────────┬───────────┘
           │ invoke()     │ emit()
   ┌───────▼──┐    ┌──────▼───────────┐
   │   HUD    │    │    Dashboard     │
-  │ 狀態浮窗  │    │ 設定/歷史/統計   │
+  │ Status HUD│    │ Settings/History │
+  │           │    │ /Statistics      │
   └──────────┘    └──────────────────┘
 ```
 
 - **Frontend** — Vue 3 + TypeScript + shadcn-vue + Tailwind CSS
 - **Backend** — Rust (Tauri v2)
-- **AI** — Groq Whisper (語音轉文字) + Groq LLM (文字整理)
-- **Storage** — SQLite (歷史記錄) + tauri-plugin-store (設定)
+- **AI** — Groq Whisper (speech-to-text) + Groq LLM (text polishing)
+- **Storage** — SQLite (history) + tauri-plugin-store (settings)
 
-## 開發
+## Development
 
-### 環境需求
+### Requirements
 
 - Node.js 24+
 - pnpm 10+
 - Rust stable
 - Xcode Command Line Tools (macOS)
 
-### 指令
+### Commands
 
 ```bash
-# 安裝依賴
+# Install dependencies
 pnpm install
 
-# 開發模式
+# Development mode
 pnpm tauri dev
 
-# 建構
+# Build
 pnpm tauri build
 
-# 測試
+# Tests
 pnpm test
 
-# 型別檢查
+# Type checking
 npx vue-tsc --noEmit
 ```
 
-### 發版
+### Release
 
 ```powershell
 .\scripts\release.ps1 1.1.0
@@ -102,12 +104,12 @@ npx vue-tsc --noEmit
 ./scripts/release.sh 1.1.0
 ```
 
-兩者都會：
+Both commands:
 
 ```text
-# → 自動更新版本號、commit、tag、push
-# → GitHub Actions 建構 macOS + Windows 安裝檔
-# → Release workflow 完成後自動公開 GitHub Release
+# → Update the version, commit, tag, and push automatically
+# → Build macOS and Windows installers with GitHub Actions
+# → Publish a GitHub Release after the release workflow completes
 ```
 
 ## License

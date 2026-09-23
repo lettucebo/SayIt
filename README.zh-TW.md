@@ -1,0 +1,117 @@
+# SayIt
+
+> 按住說話，放開貼上 — 語音轉書面語桌面工具
+
+[English](README.md) | **繁體中文**
+
+SayIt 是一款跨平台桌面語音輸入工具。在任何應用程式中按住快捷鍵說話，放開後語音經 Groq Whisper API 轉錄，再由 Groq LLM 自動將口語轉為通順的繁體中文書面語，直接貼入游標位置。
+
+## 特色
+
+- **口語到書面語** — AI 自動去除贅詞、重組句構、修正標點，說完即可用
+- **全域快捷鍵** — 在任何應用程式中觸發，支援 Hold / Toggle 雙模式
+- **低延遲** — 基於 Groq 推論引擎，端到端 < 3 秒（含 AI 整理）
+- **自訂詞彙字典** — 確保專有名詞、技術術語正確轉錄
+- **歷史記錄與統計** — 自動保存所有轉錄，Dashboard 一覽使用狀況
+- **極簡設定** — 只需設定 API Key 即可使用
+
+## 安裝
+
+### 下載
+
+| 平台 | 下載連結 |
+|------|---------|
+| macOS (Apple Silicon) | [SayIt-mac-arm64.dmg](https://github.com/lettucebo/SayIt/releases/latest/download/SayIt-mac-arm64.dmg) |
+| macOS (Intel) | [SayIt-mac-x64.dmg](https://github.com/lettucebo/SayIt/releases/latest/download/SayIt-mac-x64.dmg) |
+| Windows | [SayIt-windows-x64.exe](https://github.com/lettucebo/SayIt/releases/latest/download/SayIt-windows-x64.exe) |
+
+> ⚠️ **Windows 安裝檔目前未做程式碼簽署**：SmartScreen 可能顯示「Windows 已保護你的電腦」。請點 **其他資訊 → 仍要執行**。每個安裝檔旁附有 `.sha256` 檔，可用 `Get-FileHash`／`shasum -a 256` 比對驗證完整性。
+
+### 前置需求
+
+- [Groq API Key](https://console.groq.com/keys)（免費申請）
+
+### 快速開始
+
+1. 下載並安裝
+2. 開啟 SayIt → 設定頁面 → 貼上 Groq API Key
+3. 在任何應用程式中按住 `Fn` 鍵說話，放開後文字自動貼上
+
+### 使用 Azure OpenAI / Microsoft Foundry（選用）
+
+除了 Groq，SayIt 也可接 Azure OpenAI / Microsoft Foundry，並支援三種驗證方式：
+API Key、Entra ID Secret（服務主體）、以及 **Entra ID 登入**（用你自己的公司帳號、免密鑰，適合
+公司政策禁用長期共享密鑰的環境）。
+
+設定步驟見 [使用 Entra ID 登入 Azure OpenAI / Foundry](docs/azure-entra-user-sign-in.md)。
+
+## 技術架構
+
+```
+Tauri v2 (Rust) + Vue 3 + TypeScript
+
+  ┌──────────────────────────────────┐
+  │        Tauri Backend (Rust)      │
+  │  全域熱鍵 · 剪貼簿 · 音量控制    │
+  └───────┬──────────────┬───────────┘
+          │ invoke()     │ emit()
+  ┌───────▼──┐    ┌──────▼───────────┐
+  │   HUD    │    │    Dashboard     │
+  │ 狀態浮窗  │    │ 設定/歷史/統計   │
+  └──────────┘    └──────────────────┘
+```
+
+- **Frontend** — Vue 3 + TypeScript + shadcn-vue + Tailwind CSS
+- **Backend** — Rust (Tauri v2)
+- **AI** — Groq Whisper (語音轉文字) + Groq LLM (文字整理)
+- **Storage** — SQLite (歷史記錄) + tauri-plugin-store (設定)
+
+## 開發
+
+### 環境需求
+
+- Node.js 24+
+- pnpm 10+
+- Rust stable
+- Xcode Command Line Tools (macOS)
+
+### 指令
+
+```bash
+# 安裝依賴
+pnpm install
+
+# 開發模式
+pnpm tauri dev
+
+# 建構
+pnpm tauri build
+
+# 測試
+pnpm test
+
+# 型別檢查
+npx vue-tsc --noEmit
+```
+
+### 發版
+
+```powershell
+.\scripts\release.ps1 1.1.0
+```
+
+```bash
+./scripts/release.sh 1.1.0
+```
+
+兩者都會：
+
+```text
+# → 自動更新版本號、commit、tag、push
+# → GitHub Actions 建構 macOS + Windows 安裝檔
+# → Release workflow 完成後自動公開 GitHub Release
+```
+
+## License
+
+[MIT](LICENSE)
