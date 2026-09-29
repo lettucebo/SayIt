@@ -22,6 +22,10 @@ import { getMinimalPromptForLocale } from "../i18n/prompts";
 import type { SupportedLocale } from "../i18n/languageConfig";
 import i18n from "../i18n";
 import { detectEnhancementAnomaly } from "./hallucinationDetector";
+import {
+  parseRateLimitInfo,
+  type RateLimitInfo,
+} from "./enhancementRateLimit";
 
 const MAX_VOCABULARY_TERMS = 50;
 const MAX_CONTEXT_TEXT_CHARS = 500;
@@ -42,10 +46,31 @@ export class EnhancerApiError extends Error {
     public statusCode: number,
     statusText: string,
     public body: string,
+    public provider?: LlmProviderId,
+    public model?: string,
+    public rateLimit?: RateLimitInfo,
+    public retried = false,
   ) {
     super(`Enhancement API error: ${statusCode} ${statusText}`);
     this.name = "EnhancerApiError";
   }
+}
+
+function waitForRetry(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) {
+    return Promise.reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+  }
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal?.reason ?? new DOMException("Aborted", "AbortError"));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 export class EnhancerEmptyOutputError extends Error {
@@ -146,6 +171,7 @@ export interface EnhanceOptions {
   signal?: AbortSignal;
   /** 同一語音整理流程的絕對 deadline，供內部空輸出重試共用。 */
   deadlineAtMs?: number;
+  rateLimitRetryState?: { used: boolean };
   maxTokens?: number;
   // azure 時由呼叫端明確指定 provider 與連線設定（不經 model 反查）
   provider?: LlmProviderId;
@@ -437,20 +463,20 @@ export async function enhanceText(
   let finalText!: string;
   let attempt = 0;
   let didRetryTemperature = false;
+  let didRetryRateLimit = false;
   let azureRequestOptions = options?.azure;
+  const deadlineAtMs =
+    options?.deadlineAtMs ?? performance.now() + getProviderTimeout(providerId, options?.azure);
 
   while (true) {
     const providerTimeoutMs = getProviderTimeout(
       providerId,
       options?.azure,
     );
-    const remainingDeadlineMs =
-      options?.deadlineAtMs === undefined
-        ? providerTimeoutMs
-        : Math.min(
-            providerTimeoutMs,
-            Math.floor(options.deadlineAtMs - performance.now()),
-          );
+    const remainingDeadlineMs = Math.min(
+      providerTimeoutMs,
+      Math.floor(deadlineAtMs - performance.now()),
+    );
     if (remainingDeadlineMs <= 0) {
       throw createEnhancementTimeoutError(usage);
     }
@@ -505,6 +531,38 @@ export async function enhanceText(
     }
 
     if (errorBody !== undefined) {
+      if (response.status === 429) {
+        const rateLimit = parseRateLimitInfo(providerId, response.headers ?? new Headers(), errorBody);
+        const retryDelay = rateLimit.retryAfterMs;
+        if (
+          !didRetryRateLimit &&
+          !options?.rateLimitRetryState?.used &&
+          retryDelay !== undefined &&
+          Number.isFinite(retryDelay) &&
+          retryDelay >= 0 &&
+          retryDelay <= 2000 &&
+          rateLimit.kind !== "rpd" &&
+          rateLimit.kind !== "tpd" &&
+          performance.now() + retryDelay + 100 < deadlineAtMs
+        ) {
+          didRetryRateLimit = true;
+          if (options?.rateLimitRetryState) options.rateLimitRetryState.used = true;
+          await waitForRetry(retryDelay, options?.signal);
+          continue;
+        }
+        throw attachEnhancementUsage(
+          new EnhancerApiError(
+            429,
+            response.statusText,
+            "",
+            providerId,
+            modelId,
+            rateLimit,
+            didRetryRateLimit,
+          ),
+          usage,
+        );
+      }
       if (
         providerId === "azure" &&
         azureRequestOptions &&
@@ -605,7 +663,11 @@ export async function enhanceWithAnomalyGuard(
   options?: EnhanceOptions,
   maxRetries = DEFAULT_ENHANCEMENT_RETRY_COUNT,
 ): Promise<EnhanceWithGuardResult> {
-  let enhanceResult = await enhanceText(rawText, apiKey, options);
+  const guardOptions: EnhanceOptions = {
+    ...options,
+    rateLimitRetryState: options?.rateLimitRetryState ?? { used: false },
+  };
+  let enhanceResult = await enhanceText(rawText, apiKey, guardOptions);
   let cumulativeUsage = enhanceResult.usage;
 
   let retryCount = 0;
@@ -616,7 +678,7 @@ export async function enhanceWithAnomalyGuard(
   ) {
     retryCount++;
     try {
-      enhanceResult = await enhanceText(rawText, apiKey, options);
+      enhanceResult = await enhanceText(rawText, apiKey, guardOptions);
     } catch (err) {
       if (err instanceof Error) {
         throw attachEnhancementUsage(

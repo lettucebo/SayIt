@@ -89,6 +89,54 @@ describe("scrubBreadcrumb", () => {
 });
 
 describe("scrubEvent", () => {
+  it("[P0] retains only validated rate-limit diagnostics, not arbitrary model or identifier strings", () => {
+    const result = scrubEvent({
+      fingerprint: ["enhancement-http", "groq", "429"],
+      extra: {
+        provider: "groq",
+        model: "qwen/qwen3.8-27b",
+        status: 429,
+        limitType: "tpm",
+        retryAfterMs: 1500,
+        retried: true,
+        remainingTokens: 120,
+        remainingRequests: 998,
+        limitTokens: 8000,
+        limitRequests: 1000,
+        organization: "org_private",
+        transcript: "敏感逐字稿",
+      },
+    });
+
+    expect(result.fingerprint).toEqual(["enhancement-http", "groq", "429"]);
+    expect(result.extra).toEqual({
+      provider: "groq",
+      model: "qwen/qwen3.8-27b",
+      status: 429,
+      limitType: "tpm",
+      retryAfterMs: 1500,
+      retried: true,
+      remainingTokens: 120,
+      remainingRequests: 998,
+      limitTokens: 8000,
+      limitRequests: 1000,
+    });
+  });
+  it("[P0] rejects untrusted rate-limit values before Sentry serialization", () => {
+    const result = scrubEvent({
+      fingerprint: ["enhancement-http", "org_private", "429"],
+      extra: {
+        provider: "org_private",
+        model: "org_private",
+        status: "429 org_private",
+        limitType: "org_private",
+        retryAfterMs: Number.POSITIVE_INFINITY,
+        retried: "true",
+      },
+    });
+    expect(result.fingerprint).toBeUndefined();
+    expect(result.extra).toEqual({});
+  });
   it("[P0] extra 只保留白名單鍵，移除轉錄文字 / 字典詞等敏感鍵", () => {
     const event: Event = {
       extra: {

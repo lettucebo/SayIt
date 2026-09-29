@@ -57,7 +57,7 @@ const { waveformLevelList, startWaveformAnimation, stopWaveformAnimation } =
 const WAVEFORM_ELEMENT_COUNT = 6;
 const MIN_BAR_HEIGHT = 4;
 const MAX_BAR_HEIGHT = 28;
-const ERROR_WITH_MESSAGE_HEIGHT = 72;
+const ERROR_WITH_MESSAGE_HEIGHT = 96;
 
 interface NotchShapeParams {
   width: number;
@@ -852,9 +852,13 @@ html.dark .notch-hud {
   color: #f97316;
   font-size: 12px;
   font-weight: 500;
-  white-space: nowrap;
+  line-height: 15px;
+  text-align: center;
+  overflow-wrap: anywhere;
   overflow: hidden;
-  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
 }
 
 @keyframes errorMessageFadeIn {

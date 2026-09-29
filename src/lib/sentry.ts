@@ -7,6 +7,8 @@ import {
   scrubBreadcrumb,
   scrubEvent,
 } from "./sentryScrubbing";
+import { EnhancerApiError } from "./enhancer";
+import { findLlmModelConfig } from "./modelRegistry";
 
 declare const __APP_VERSION__: string;
 
@@ -46,6 +48,15 @@ function isSentryEnabled(): boolean {
   return import.meta.env.PROD && isValidSentryDsn(getSentryDsn());
 }
 
+export function filterSentryIntegrations<T extends { name: string }>(
+  integrations: T[],
+): T[] {
+  return integrations.filter(
+    (integration) =>
+      integration.name !== "BrowserSession" && integration.name !== "Dedupe",
+  );
+}
+
 export async function initSentryForHud(app: App): Promise<void> {
   if (!isSentryEnabled()) return;
 
@@ -60,8 +71,7 @@ export async function initSentryForHud(app: App): Promise<void> {
     beforeBreadcrumb: (breadcrumb) => scrubBreadcrumb(breadcrumb),
     // Rust Application-mode session 為 release health 的單一來源；
     // 移除前端 BrowserSession,避免雙視窗各自起 session 造成重複計數。
-    integrations: (defaults) =>
-      defaults.filter((integration) => integration.name !== "BrowserSession"),
+    integrations: filterSentryIntegrations,
     initialScope: {
       tags: { window: "hud" },
     },
@@ -87,9 +97,7 @@ export async function initSentryForDashboard(
     beforeBreadcrumb: (breadcrumb) => scrubBreadcrumb(breadcrumb),
     // Rust Application-mode session 為 release health 的單一來源；移除前端 BrowserSession。
     integrations: (defaults) => {
-      const base = defaults.filter(
-        (integration) => integration.name !== "BrowserSession",
-      );
+      const base = filterSentryIntegrations(defaults);
       return tracesSampleRate > 0
         ? [...base, Sentry.browserTracingIntegration({ router })]
         : base;
@@ -115,7 +123,26 @@ export function captureError(
     .then((Sentry) => {
       if (context) {
         Sentry.withScope((scope) => {
-          scope.setExtras(context);
+          if (error instanceof EnhancerApiError && error.statusCode === 429) {
+            const provider = error.provider ?? "unknown";
+            scope.setExtras({
+              ...context,
+              provider,
+              model: error.model && findLlmModelConfig(error.model)
+                ? error.model : "custom",
+              status: 429,
+              limitType: error.rateLimit?.kind ?? "unknown",
+              retryAfterMs: error.rateLimit?.retryAfterMs,
+              limitTokens: error.rateLimit?.limitTokens,
+              limitRequests: error.rateLimit?.limitRequests,
+              remainingTokens: error.rateLimit?.remainingTokens,
+              remainingRequests: error.rateLimit?.remainingRequests,
+              retried: error.retried,
+            });
+            scope.setFingerprint(["enhancement-http", provider, "429"]);
+          } else {
+            scope.setExtras(context);
+          }
           Sentry.captureException(error);
         });
         return;

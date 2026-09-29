@@ -18,7 +18,7 @@ import {
   getLocalDayUtcRangeForSqlite,
   getLocalMonthUtcRangeForSqlite,
 } from "../lib/usageTrend";
-import { extractErrorMessage } from "../lib/errorUtils";
+import { extractErrorMessage, getEnhancementErrorMessage, getEnhancementRateLimitLog } from "../lib/errorUtils";
 import { captureError } from "../lib/sentry";
 import {
   calculateChatCostCeiling,
@@ -26,8 +26,11 @@ import {
 } from "../lib/apiPricing";
 import {
   enhanceWithAnomalyGuard,
+  EnhancerApiError,
   type EnhanceWithGuardResult,
 } from "../lib/enhancer";
+import { getProviderTimeout } from "../lib/llmProvider";
+import { logErrorLine } from "../lib/logger";
 import { detectHallucination } from "../lib/hallucinationDetector";
 import { observeSemanticDrift } from "../lib/semanticDriftObserver";
 import {
@@ -48,6 +51,7 @@ export interface HistoryRetryResult {
   ok: boolean;
   record?: TranscriptionRecord;
   errorKey?: string;
+  errorMessage?: string;
 }
 
 const PAGE_SIZE = 20;
@@ -867,11 +871,19 @@ export const useHistoryStore = defineStore("history", () => {
           modelId: llmCfg.modelId,
           provider: llmCfg.provider,
           azure: llmCfg.azure,
+          deadlineAtMs: llmCfg.provider === "groq"
+            ? startTime + getProviderTimeout(llmCfg.provider)
+            : undefined,
         },
       );
     } catch (err) {
+      if (err instanceof EnhancerApiError && err.statusCode === 429) {
+        logErrorLine(`useHistoryStore: re-enhancement failed: ${getEnhancementErrorMessage(err)}${getEnhancementRateLimitLog(err)}`);
+      }
       captureError(err, { source: "history", step: "reenhance" });
-      return { ok: false, errorKey: "history.reEnhanceFailed" };
+      return err instanceof EnhancerApiError && err.statusCode === 429
+        ? { ok: false, errorMessage: getEnhancementErrorMessage(err) }
+        : { ok: false, errorKey: "history.reEnhanceFailed" };
     }
 
     const enhancementDurationMs = Math.round(performance.now() - startTime);

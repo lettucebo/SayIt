@@ -165,6 +165,10 @@ vi.mock("../../src/lib/enhancer", () => {
       public statusCode: number,
       statusText: string,
       public body: string,
+      public provider = "groq",
+      public model = "qwen/qwen3.8-27b",
+      public rateLimit = { kind: "tpm", retryAfterMs: 1500, remainingTokens: 100 },
+      public retried = false,
     ) {
       super(`Enhancement API error: ${statusCode} ${statusText}`);
       this.name = "EnhancerApiError";
@@ -1849,6 +1853,7 @@ describe("useVoiceFlowStore", () => {
         expect(mockInvoke).toHaveBeenCalledWith("start_recording", {
           deviceName: "",
         });
+
       });
 
       triggerHotkeyEvent("hotkey:released");
@@ -1865,6 +1870,36 @@ describe("useVoiceFlowStore", () => {
         status: "success",
         message: "voiceFlow.pasteSuccessUnenhanced",
       });
+    });
+
+    it("[P0] Groq 429 fallback retains raw text, reports rate-limit feedback and a total deadline", async () => {
+      const rawText = "這是一段超過十個字的測試轉錄文字內容";
+      mockInvoke.mockImplementation(createMockInvokeHandler({
+        transcribeResult: { rawText, transcriptionDurationMs: 400, noSpeechProbability: 0.01 },
+      }));
+      const { EnhancerApiError } = await import("../../src/lib/enhancer");
+      mockEnhanceText.mockRejectedValueOnce(new EnhancerApiError(429, "Too Many Requests", ""));
+      const store = useVoiceFlowStore();
+      await store.initialize();
+      const timerSpy = vi.spyOn(globalThis, "setTimeout");
+      triggerHotkeyEvent("hotkey:pressed");
+      await vi.waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("start_recording", { deviceName: "" }));
+      triggerHotkeyEvent("hotkey:released");
+      await vi.waitFor(() => expect(mockInvoke).toHaveBeenCalledWith(
+        "paste_text", { text: rawText, restoreClipboard: false },
+      ));
+      expect(store.status).toBe("error");
+      expect(store.message).toBe("voiceFlow.pasteSuccessRateLimited");
+      expect(mockEmit).toHaveBeenCalledWith("voice-flow:state-changed", {
+        status: "error",
+        message: "voiceFlow.pasteSuccessRateLimited",
+      });
+      expect(timerSpy).toHaveBeenCalledWith(expect.any(Function), 6000);
+      expect(mockEnhanceText).toHaveBeenCalledWith(
+        rawText,
+        expect.any(String),
+        expect.objectContaining({ deadlineAtMs: expect.any(Number) }),
+      );
     });
 
     it("[P1] main fallback 路徑套用 afterAI 並維持 rawText/charCount 一致", async () => {

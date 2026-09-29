@@ -18,6 +18,31 @@ describe("getMicrophoneErrorMessage", () => {
     expect(getMicrophoneErrorMessage(error)).toBe("未偵測到麥克風裝置");
   });
 
+  describe("429 enhancement feedback", () => {
+    it("[P0] describes the short Groq TPM wait and an actionable alternative", async () => {
+      const { EnhancerApiError } = await import("../../src/lib/enhancer");
+      const error = new EnhancerApiError(
+        429, "Too Many Requests", "", "groq", "qwen/qwen3.8-27b",
+        { kind: "tpm", retryAfterMs: 1500 },
+      );
+      const text = getEnhancementErrorMessage(error);
+      expect(text).toContain("2 秒");
+      expect(text).toContain("每分鐘 Token");
+      expect(text).toContain("Groq");
+      expect(text.indexOf("可在設定中改用其他模型")).toBeLessThan(text.indexOf("每分鐘 Token"));
+    });
+
+    it("[P1] avoids a false wait estimate for unknown 429 signals", async () => {
+      const { EnhancerApiError } = await import("../../src/lib/enhancer");
+      const text = getEnhancementErrorMessage(
+        new EnhancerApiError(429, "Too Many Requests", "", "groq", "qwen/qwen3.8-27b", { kind: "unknown" }),
+      );
+      expect(text).not.toMatch(/\d+ 秒/);
+      expect(text).toContain("稍後");
+      expect(text.indexOf("可在設定中改用其他模型")).toBeLessThan(text.indexOf("速率限制"));
+    });
+  });
+
   it("[P0] NotReadableError 應映射為裝置被佔用訊息", () => {
     const error = new DOMException("Device busy", "NotReadableError");
     expect(getMicrophoneErrorMessage(error)).toBe("麥克風被其他程式佔用");

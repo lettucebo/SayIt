@@ -32,7 +32,7 @@ const sentinelRef = ref<HTMLElement | null>(null);
 const playingRecordId = ref<string | null>(null);
 const retryingId = ref<string | null>(null);
 const retryingAction = ref<"transcribe" | "enhance" | null>(null);
-const retryError = ref<{ id: string; key: string } | null>(null);
+const retryError = ref<{ id: string; key: string; message?: string } | null>(null);
 let currentAudio: HTMLAudioElement | null = null;
 let currentBlobUrl: string | null = null;
 
@@ -184,6 +184,7 @@ async function handleReEnhance(record: TranscriptionRecord) {
       retryError.value = {
         id: record.id,
         key: result.errorKey ?? "history.reEnhanceFailed",
+        message: result.errorMessage,
       };
     }
   } catch (err) {
@@ -372,7 +373,7 @@ onBeforeUnmount(() => {
               class="px-5 pb-2 text-xs text-destructive"
               data-testid="retry-error"
             >
-              {{ $t(retryError.key) }}
+              {{ retryError.message ?? $t(retryError.key) }}
             </p>
 
             <!-- 展開詳細 -->
