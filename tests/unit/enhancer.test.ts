@@ -1165,6 +1165,93 @@ describe("enhancer.ts", () => {
 
       expect(error).toBeInstanceOf(Error);
     });
+
+    describe("429 retry", () => {
+      const rateLimited = (retryAfter: string, body = '{"error":{"message":"Rate limit reached on tokens per minute (TPM): Limit 8000, Used 7900, Requested 200."}}') => ({
+        ok: false,
+        status: 429,
+        statusText: "Too Many Requests",
+        headers: new Headers({ "retry-after": retryAfter, "x-ratelimit-remaining-tokens": "100" }),
+        text: vi.fn().mockResolvedValue(body),
+      });
+
+      it("[P0] retries a short 429 once, preserving the total deadline", async () => {
+        vi.useFakeTimers();
+        try {
+          mockFetch.mockResolvedValueOnce(rateLimited("1")).mockResolvedValueOnce(createSuccessResponse("整理成功"));
+          const { enhanceText } = await import("../../src/lib/enhancer");
+          const resultPromise = enhanceText("待整理的文字", TEST_API_KEY, {
+            deadlineAtMs: performance.now() + 3000,
+          });
+          await vi.advanceTimersByTimeAsync(1000);
+          expect((await resultPromise).text).toBe("整理成功");
+          expect(mockFetch).toHaveBeenCalledTimes(2);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it("[P0] rejects without retry for unknown delay and attaches safe diagnostics", async () => {
+        mockFetch.mockResolvedValue(rateLimited("invalid"));
+        const { enhanceText } = await import("../../src/lib/enhancer");
+        await expect(enhanceText("待整理的文字", TEST_API_KEY)).rejects.toMatchObject({
+          statusCode: 429,
+          provider: "groq",
+          rateLimit: { kind: "tpm", remainingTokens: 100 },
+        });
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+      });
+
+      it("[P0] does not retry daily quota even when the delay is short", async () => {
+        mockFetch.mockResolvedValue(rateLimited("1", '{"error":{"message":"Rate limit reached on requests per day (RPD): Limit 1000, Used 1000, Requested 1."}}'));
+        const { enhanceText } = await import("../../src/lib/enhancer");
+        await expect(enhanceText("待整理的文字", TEST_API_KEY)).rejects.toMatchObject({
+          rateLimit: { kind: "rpd" },
+        });
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+      });
+
+      it("[P0] skips retry when waiting would exhaust the deadline, retaining the 429", async () => {
+        mockFetch.mockResolvedValue(rateLimited("1"));
+        const { enhanceText } = await import("../../src/lib/enhancer");
+        await expect(enhanceText("待整理的文字", TEST_API_KEY, {
+          deadlineAtMs: performance.now() + 500,
+        })).rejects.toMatchObject({ statusCode: 429 });
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+      });
+
+      it("[P0] cancellation during backoff aborts without sending another request", async () => {
+        vi.useFakeTimers();
+        try {
+          mockFetch.mockResolvedValueOnce(rateLimited("1"));
+          const { enhanceText } = await import("../../src/lib/enhancer");
+          const controller = new AbortController();
+          const promise = enhanceText("待整理的文字", TEST_API_KEY, { signal: controller.signal });
+          await vi.advanceTimersByTimeAsync(10);
+          controller.abort(new Error("cancelled"));
+          await expect(promise).rejects.toThrow("cancelled");
+          expect(mockFetch).toHaveBeenCalledTimes(1);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it("[P0] shares the single 429 retry across calls in one enhancement flow", async () => {
+        const responses = [
+          rateLimited("0"),
+          createSuccessResponse("第一次成功"),
+          rateLimited("0"),
+          createSuccessResponse("不應到達"),
+        ];
+        for (const response of responses) mockFetch.mockResolvedValueOnce(response);
+        const { enhanceText } = await import("../../src/lib/enhancer");
+        const rateLimitRetryState = { used: false };
+        await enhanceText("第一次", TEST_API_KEY, { rateLimitRetryState });
+        await expect(enhanceText("第二次", TEST_API_KEY, { rateLimitRetryState }))
+          .rejects.toMatchObject({ statusCode: 429 });
+        expect(mockFetch).toHaveBeenCalledTimes(3);
+      });
+    });
   });
 });
 

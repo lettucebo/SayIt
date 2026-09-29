@@ -1,10 +1,13 @@
 import type { Breadcrumb, Event } from "@sentry/vue";
+import { findLlmModelConfig } from "./modelRegistry";
 
 // 隱私硬規則：以下敏感資料絕不可進入任何 Sentry event / breadcrumb
 // （轉錄/LLM 文字、字典詞、API key·Azure 憑證·Entra token、其他 App 文字、剪貼簿）。
 // 採 default-deny：extra 只保留已知安全鍵，其餘一律移除；可樣式化的祕密再額外遮罩。
 
 const SAFE_EXTRA_KEYS = new Set(["source", "step", "window", "info"]);
+const PROVIDERS = new Set(["groq", "openai", "anthropic", "gemini", "azure", "unknown"]);
+const LIMIT_TYPES = new Set(["tpm", "rpm", "rpd", "tpd", "unknown"]);
 
 const REDACTION = "[redacted]";
 
@@ -80,12 +83,41 @@ export function scrubEvent<T extends Event>(event: T): T {
   if (event.extra) {
     const safeExtra: Record<string, unknown> = {};
     for (const key of Object.keys(event.extra)) {
-      if (!SAFE_EXTRA_KEYS.has(key)) continue;
       const value = event.extra[key];
-      safeExtra[key] =
-        typeof value === "string" ? redactSensitiveString(value) : value;
+      if (SAFE_EXTRA_KEYS.has(key)) {
+        safeExtra[key] = typeof value === "string" ? redactSensitiveString(value) : value;
+      } else if (key === "provider" && typeof value === "string" && PROVIDERS.has(value)) {
+        safeExtra[key] = value;
+      } else if (key === "model" && typeof value === "string" &&
+        (value === "custom" || findLlmModelConfig(value))) {
+        safeExtra[key] = value;
+      } else if (key === "status" && value === 429) {
+        safeExtra[key] = value;
+      } else if (key === "limitType" && typeof value === "string" && LIMIT_TYPES.has(value)) {
+        safeExtra[key] = value;
+      } else if (key === "retryAfterMs" && typeof value === "number" &&
+        Number.isFinite(value) && value >= 0 && value <= 86_400_000) {
+        safeExtra[key] = value;
+      } else if (
+        ["limitTokens", "limitRequests", "remainingTokens", "remainingRequests"].includes(key) &&
+        typeof value === "number" && Number.isFinite(value) &&
+        value >= 0 && value <= 1_000_000_000
+      ) {
+        safeExtra[key] = value;
+      } else if (key === "retried" && typeof value === "boolean") {
+        safeExtra[key] = value;
+      }
     }
     event.extra = safeExtra;
+  }
+  if (
+    event.fingerprint &&
+    (event.fingerprint.length !== 3 ||
+      event.fingerprint[0] !== "enhancement-http" ||
+      !PROVIDERS.has(event.fingerprint[1]) ||
+      event.fingerprint[2] !== "429")
+  ) {
+    delete event.fingerprint;
   }
 
   // Vue 元件 props 可能含轉錄文字 → 移除。

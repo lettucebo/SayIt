@@ -121,6 +121,18 @@ describe("NotchHud", () => {
     );
   });
 
+  it("[P0] 429 降級貼上時展開足夠空間顯示限制及建議", () => {
+    const message = "已貼上原文（未整理）：AI 整理受每分鐘 Token 限制，約 2 秒後再試。可改用其他模型。";
+    const wrapper = mountNotchHud({
+      status: "error",
+      recordingElapsedSeconds: 0,
+      message,
+    });
+
+    expect(wrapper.find(".error-message").text()).toBe(message);
+    expect(wrapper.find(".notch-hud").attributes("style")).toContain("height: 96px");
+  });
+
   it("[P0] idle 狀態應隱藏整個 HUD", () => {
     const wrapper = mountNotchHud({
       status: "idle",

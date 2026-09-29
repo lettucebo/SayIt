@@ -56,6 +56,14 @@ vi.mock("../../src/composables/useTauriEvents", () => ({
 vi.mock("../../src/lib/sentry", () => ({ captureError: vi.fn() }));
 vi.mock("../../src/lib/enhancer", () => ({
   enhanceWithAnomalyGuard: h.mockEnhanceGuard,
+  EnhancerApiError: class EnhancerApiError extends Error {
+    constructor(statusCode: number, statusText: string, public body: string) {
+      super(`Enhancement API error: ${statusCode} ${statusText}`);
+    }
+    statusCode = 429;
+    provider = "groq";
+    rateLimit = { kind: "tpm", retryAfterMs: 1500 };
+  },
 }));
 vi.mock("../../src/stores/useSettingsStore", () => ({
   useSettingsStore: () => h.settingsStub,
@@ -264,6 +272,19 @@ describe("useHistoryStore retry", () => {
   });
 
   describe("reEnhanceRecord", () => {
+    it("[P0] history 429 returns actionable feedback while preserving the record", async () => {
+      const { EnhancerApiError } = await import("../../src/lib/enhancer");
+      h.mockEnhanceGuard.mockRejectedValue(
+        new EnhancerApiError(429, "Too Many Requests", ""),
+      );
+      const store = useHistoryStore();
+      const record = createRecord({ status: "success", rawText: "原始內容" });
+      store.transcriptionList.push(record);
+      const result = await store.reEnhanceRecord(record);
+      expect(result.ok).toBe(false);
+      expect(result.errorMessage).toContain("2 秒");
+      expect(store.transcriptionList[0].processedText).toBeNull();
+    });
     it("[P1] 成功整理 → 寫入 processed_text、標記 was_enhanced", async () => {
       h.mockEnhanceGuard.mockResolvedValue({
         text: "整理後的書面語句子。",

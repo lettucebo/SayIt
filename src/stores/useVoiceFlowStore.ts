@@ -7,6 +7,7 @@ import { computed, ref } from "vue";
 import {
   extractErrorMessage,
   getEnhancementErrorMessage,
+  getEnhancementRateLimitLog,
   getHotkeyErrorMessage,
   getMicrophoneErrorMessage,
   getTranscriptionErrorMessage,
@@ -18,6 +19,7 @@ import {
   enhanceWithAnomalyGuard,
   buildSystemPrompt,
   combineChatUsage,
+  EnhancerApiError,
   EnhancerEmptyOutputError,
   getEnhancementErrorUsage,
   type EnhanceOptions,
@@ -49,7 +51,7 @@ import {
   GEMINI_TRANSCRIPTION_MODEL,
   getEffectiveAzureChatModelFamilyId,
 } from "../lib/modelRegistry";
-import { getAzureOperationMaxTokens } from "../lib/llmProvider";
+import { getAzureOperationMaxTokens, getProviderTimeout } from "../lib/llmProvider";
 import type { StopRecordingResult, TranscriptionResult } from "../types/audio";
 import {
   HOTKEY_ERROR,
@@ -457,7 +459,11 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
     };
   }
 
-  function transitionTo(nextStatus: HudStatus, nextMessage = "") {
+  function transitionTo(
+    nextStatus: HudStatus,
+    nextMessage = "",
+    displayDurationMs?: number,
+  ) {
     clearAutoHideTimer();
     clearCollapseHideTimer();
     status.value = nextStatus;
@@ -513,7 +519,7 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
       });
       autoHideTimer = setTimeout(() => {
         transitionTo("idle");
-      }, SUCCESS_DISPLAY_DURATION_MS);
+      }, displayDurationMs ?? SUCCESS_DISPLAY_DURATION_MS);
       return;
     }
 
@@ -540,9 +546,8 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
           step: "showHud-enableCursor",
         });
       });
-      const errorDuration = canRetry.value
-        ? ERROR_WITH_RETRY_DISPLAY_DURATION_MS
-        : ERROR_DISPLAY_DURATION_MS;
+      const errorDuration = displayDurationMs ??
+        (canRetry.value ? ERROR_WITH_RETRY_DISPLAY_DURATION_MS : ERROR_DISPLAY_DURATION_MS);
       autoHideTimer = setTimeout(() => {
         transitionTo("idle");
       }, errorDuration);
@@ -905,6 +910,8 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
   async function completePasteFlow(params: {
     text: string;
     successMessage: string;
+    rateLimited?: boolean;
+    displayDurationMs?: number;
     record: TranscriptionRecord;
     chatUsage: ChatUsageData | null;
     transcriptionUsage?: TranscriptionUsageSnapshot | null;
@@ -939,7 +946,7 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
         restoreClipboard: !settingsStore.isCopyTranscriptionToClipboardEnabled,
       });
       isRecording.value = false;
-      transitionTo("success", params.successMessage);
+      transitionTo(params.rateLimited ? "error" : "success", params.successMessage, params.displayDurationMs);
       startQualityMonitorAfterPaste();
       // api_usage FK 依賴 transcriptions — 必須等 transcription 寫入後才存 usage
       // retry 路徑使用 updateTranscriptionOnRetrySuccess，不走 INSERT
@@ -1617,6 +1624,7 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
             provider: llmCfg.provider,
             azure: llmCfg.azure,
             signal: abortController?.signal,
+            rateLimitRetryState: { used: false },
             ...contextOptions,
           };
           const convertFinalEnhancedOutput =
@@ -1629,7 +1637,10 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
               )
             : undefined;
           const enhancementDeadlineMs =
-            azureFamily?.totalDeadlineMs ?? Number.POSITIVE_INFINITY;
+            azureFamily?.totalDeadlineMs ??
+            (llmCfg.provider === "groq"
+              ? getProviderTimeout(llmCfg.provider)
+              : Number.POSITIVE_INFINITY);
           const enhancementDeadlineAtMs = Number.isFinite(
             enhancementDeadlineMs,
           )
@@ -1740,7 +1751,7 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
             performance.now() - enhancementStartTime;
           const enhanceErrorDetail = getEnhancementErrorMessage(enhanceError);
           writeErrorLog(
-            `useVoiceFlowStore: AI enhancement failed: ${enhanceErrorDetail}`,
+            `useVoiceFlowStore: AI enhancement failed: ${enhanceErrorDetail}${getEnhancementRateLimitLog(enhanceError)}`,
           );
           captureError(enhanceError, {
             source: "voice-flow",
@@ -1762,10 +1773,16 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
           await completePasteFlow({
             text: result.rawText,
             successMessage: t(
-              enhanceError instanceof EnhancerEmptyOutputError
-                ? "voiceFlow.pasteSuccessNoOutput"
-                : "voiceFlow.pasteSuccessUnenhanced",
+              enhanceError instanceof EnhancerApiError && enhanceError.statusCode === 429
+                ? "voiceFlow.pasteSuccessRateLimited"
+                : enhanceError instanceof EnhancerEmptyOutputError
+                  ? "voiceFlow.pasteSuccessNoOutput"
+                  : "voiceFlow.pasteSuccessUnenhanced",
+              { detail: enhanceErrorDetail },
             ),
+            rateLimited: enhanceError instanceof EnhancerApiError && enhanceError.statusCode === 429,
+            displayDurationMs: enhanceError instanceof EnhancerApiError &&
+              enhanceError.statusCode === 429 ? ERROR_WITH_RETRY_DISPLAY_DURATION_MS : undefined,
             record: fallbackRecord,
             chatUsage: combineChatUsage(
               cumulativeChatUsage,
@@ -2062,7 +2079,9 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
             : undefined;
           const enhancementDeadlineAtMs = azureFamily
             ? enhancementStartTime + azureFamily.totalDeadlineMs
-            : undefined;
+            : llmCfg.provider === "groq"
+              ? enhancementStartTime + getProviderTimeout(llmCfg.provider)
+              : undefined;
           const enhanceResult = await enhanceWithAnomalyGuard(
             result.rawText,
             llmCfg.apiKey,
@@ -2146,7 +2165,7 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
           const fallbackEnhancementDurationMs =
             performance.now() - enhancementStartTime;
           writeErrorLog(
-            `useVoiceFlowStore: retry AI enhancement failed: ${getEnhancementErrorMessage(enhanceError)}`,
+            `useVoiceFlowStore: retry AI enhancement failed: ${getEnhancementErrorMessage(enhanceError)}${getEnhancementRateLimitLog(enhanceError)}`,
           );
           captureError(enhanceError, {
             source: "voice-flow",
@@ -2168,7 +2187,14 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
 
           const pasteText = await completePasteFlow({
             text: result.rawText,
-            successMessage: t("voiceFlow.pasteSuccessUnenhanced"),
+            successMessage: enhanceError instanceof EnhancerApiError && enhanceError.statusCode === 429
+              ? t("voiceFlow.pasteSuccessRateLimited", {
+                  detail: getEnhancementErrorMessage(enhanceError),
+                })
+              : t("voiceFlow.pasteSuccessUnenhanced"),
+            rateLimited: enhanceError instanceof EnhancerApiError && enhanceError.statusCode === 429,
+            displayDurationMs: enhanceError instanceof EnhancerApiError &&
+              enhanceError.statusCode === 429 ? ERROR_WITH_RETRY_DISPLAY_DURATION_MS : undefined,
             record: fallbackRecord,
             chatUsage: failedChatUsage,
             skipRecordSaving: true,

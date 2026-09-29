@@ -1,5 +1,6 @@
 import i18n from "../i18n";
 import { EnhancerApiError } from "./enhancer";
+import { findLlmModelConfig } from "./modelRegistry";
 import {
   isInteractionRequiredError,
   isNotSignedInError,
@@ -131,6 +132,14 @@ export function getTranscriptionErrorMessage(error: unknown): string {
   });
 }
 
+export function getEnhancementRateLimitLog(error: unknown): string {
+  if (!(error instanceof EnhancerApiError) || error.statusCode !== 429) return "";
+  const rate = error.rateLimit;
+  const provider = error.provider ?? "unknown";
+  const model = error.model && findLlmModelConfig(error.model) ? error.model : "custom";
+  return ` provider=${provider} model=${model} status=429 limitType=${rate?.kind ?? "unknown"} retryAfterMs=${rate?.retryAfterMs ?? "unknown"} limitTokens=${rate?.limitTokens ?? "unknown"} limitRequests=${rate?.limitRequests ?? "unknown"} remainingTokens=${rate?.remainingTokens ?? "unknown"} remainingRequests=${rate?.remainingRequests ?? "unknown"} used=${rate?.used ?? "unknown"} requested=${rate?.requested ?? "unknown"} retried=${error.retried}`;
+}
+
 export function getEnhancementErrorMessage(error: unknown): string {
   if (error instanceof TypeError) {
     return t("errors.network");
@@ -147,7 +156,28 @@ export function getEnhancementErrorMessage(error: unknown): string {
     }
     const status = error.statusCode;
     if (status === 401) return t("errors.enhancement.invalidApiKey");
-    if (status === 429) return t("errors.enhancement.rateLimited");
+    if (status === 429) {
+      const kind = error.rateLimit?.kind ?? "unknown";
+      const daily = kind === "rpd" || kind === "tpd";
+      const delay = error.rateLimit?.retryAfterMs;
+      const type = t(`errors.enhancement.rateLimitTypes.${kind}`);
+      const hint = t(
+        error.provider === "groq"
+          ? "errors.enhancement.rateLimitedGroqHint"
+          : "errors.enhancement.rateLimitedHint",
+      );
+      if (daily) {
+        return t("errors.enhancement.rateLimitedDaily", { type, hint });
+      }
+      if (delay !== undefined && Number.isFinite(delay) && delay >= 0) {
+        return t("errors.enhancement.rateLimitedWait", {
+          type,
+          seconds: Math.ceil(delay / 1000),
+          hint,
+        });
+      }
+      return t("errors.enhancement.rateLimited", { hint });
+    }
     if (error.body.includes("context_length_exceeded")) {
       return t("errors.enhancement.contextLengthExceeded");
     }

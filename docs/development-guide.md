@@ -218,6 +218,10 @@ sqlite3 %APPDATA%\com.sayit.app\app.db
 
 已採用官方 `tauri-plugin-log`：Rust 用 `log::info!`/`log::warn!`/`log::error!`，前端 `console.*` 由 `src/lib/logger.ts` 的 `installConsoleForwarding()` 轉送到同一 pipeline。輸出目標為 Stdout（dev 永遠開）＋ `LogDir`（`app_log_dir()/sayit*.log`）。是否寫檔由 `set_file_logging_enabled` command 控制的 `FILE_LOG_ENABLED` 旗標 + builder `.filter` 決定（設定頁「除錯記錄」開關，預設關閉）。舊的自訂 `debug_log` command 已移除。Log 資料夾可由 `open_log_folder` command 開啟，舊檔由 `cleanup_old_logs(days)` 依保留天數清理（與錄音清理獨立）。
 
+### 5.6 AI 整理 429 排查
+
+失敗 log 僅記安全的 `provider`、已知模型 ID（自訂部署顯示 `custom`）、`status=429`、`limitType`、`retryAfterMs`、`remainingTokens`、`remainingRequests` 及 `retried`；不記回應 body、組織識別字、逐字稿或金鑰。Groq 的 `x-ratelimit-remaining-tokens` 是每分鐘 Token 配額，`x-ratelimit-remaining-requests` 是每日請求配額；限制種類仍應以 429 回應訊息解析結果為準。有限且不超過 2 秒的短暫限流只重試一次，整個 Groq 整理流程共用 5 秒時限；每日額度或無法判定等待時間時不重試。Sentry 僅在 production/staging 上報，因此 dev log 次數不等於 Sentry 事件次數；切勿根據兩者差距直接推斷 SDK 丟事件。
+
 ---
 
 ## 六、Copilot Hook 與選用檢查腳本
