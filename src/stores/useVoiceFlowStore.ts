@@ -107,6 +107,28 @@ function t(key: string, params?: Record<string, unknown>): string {
   return i18n.global.t(key, params ?? {});
 }
 
+function getEnhancementFallbackFeedback(
+  error: unknown,
+  retry: boolean,
+): { successMessage: string; rateLimited: boolean; displayDurationMs?: number } {
+  const isRateLimited = error instanceof EnhancerApiError && error.statusCode === 429;
+  const isOutputLimited = error instanceof EnhancerEmptyOutputError &&
+    error.finishReason === "length";
+  const successMessage = isRateLimited
+    ? t("voiceFlow.pasteSuccessRateLimited", { detail: getEnhancementErrorMessage(error) })
+    : isOutputLimited
+      ? t("voiceFlow.pasteSuccessOutputLimited")
+      : !retry && error instanceof EnhancerEmptyOutputError
+        ? t("voiceFlow.pasteSuccessNoOutput")
+        : t("voiceFlow.pasteSuccessUnenhanced");
+  const showWarning = isRateLimited || isOutputLimited;
+  return {
+    successMessage,
+    rateLimited: showWarning,
+    displayDurationMs: showWarning ? ERROR_WITH_RETRY_DISPLAY_DURATION_MS : undefined,
+  };
+}
+
 async function withSoftTimeout<T>(
   promise: Promise<T>,
   ms: number,
@@ -1772,17 +1794,7 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
 
           await completePasteFlow({
             text: result.rawText,
-            successMessage: t(
-              enhanceError instanceof EnhancerApiError && enhanceError.statusCode === 429
-                ? "voiceFlow.pasteSuccessRateLimited"
-                : enhanceError instanceof EnhancerEmptyOutputError
-                  ? "voiceFlow.pasteSuccessNoOutput"
-                  : "voiceFlow.pasteSuccessUnenhanced",
-              { detail: enhanceErrorDetail },
-            ),
-            rateLimited: enhanceError instanceof EnhancerApiError && enhanceError.statusCode === 429,
-            displayDurationMs: enhanceError instanceof EnhancerApiError &&
-              enhanceError.statusCode === 429 ? ERROR_WITH_RETRY_DISPLAY_DURATION_MS : undefined,
+            ...getEnhancementFallbackFeedback(enhanceError, false),
             record: fallbackRecord,
             chatUsage: combineChatUsage(
               cumulativeChatUsage,
@@ -2187,14 +2199,7 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
 
           const pasteText = await completePasteFlow({
             text: result.rawText,
-            successMessage: enhanceError instanceof EnhancerApiError && enhanceError.statusCode === 429
-              ? t("voiceFlow.pasteSuccessRateLimited", {
-                  detail: getEnhancementErrorMessage(enhanceError),
-                })
-              : t("voiceFlow.pasteSuccessUnenhanced"),
-            rateLimited: enhanceError instanceof EnhancerApiError && enhanceError.statusCode === 429,
-            displayDurationMs: enhanceError instanceof EnhancerApiError &&
-              enhanceError.statusCode === 429 ? ERROR_WITH_RETRY_DISPLAY_DURATION_MS : undefined,
+            ...getEnhancementFallbackFeedback(enhanceError, true),
             record: fallbackRecord,
             chatUsage: failedChatUsage,
             skipRecordSaving: true,

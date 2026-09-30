@@ -597,6 +597,7 @@
     "pasteSuccessTemperatureAdjusted": "已貼上 ✓（已調整模型參數）",
     "pasteSuccessUnenhanced": "已貼上（未整理）",
     "pasteSuccessRateLimited": "已貼上原文（未整理）：{detail}",
+    "pasteSuccessOutputLimited": "已貼上原文（未整理）：AI 整理結果達到輸出上限，未使用截斷內容；可改用其他模型或調整額度",
     "pasteSuccessNoOutput": "模型未產生整理結果，已貼上原始文字",
     "enhancing": "整理中...",
     "pasteFailed": "貼上失敗",
