@@ -176,6 +176,9 @@ vi.mock("../../src/lib/enhancer", () => {
   }
   class EnhancerEmptyOutputError extends Error {
     readonly code = "ENHANCEMENT_EMPTY_OUTPUT";
+    constructor(public readonly finishReason?: string) {
+      super("Reasoning model produced no final answer");
+    }
   }
   return {
     enhanceText: mockEnhanceText,
@@ -1902,6 +1905,46 @@ describe("useVoiceFlowStore", () => {
       );
     });
 
+    it("[P0] output length fallback pastes raw text and shows the output-limit warning for six seconds", async () => {
+      const rawText = "這是一段超過十個字的測試轉錄文字內容";
+      mockInvoke.mockImplementation(createMockInvokeHandler({
+        transcribeResult: { rawText, transcriptionDurationMs: 400, noSpeechProbability: 0.01 },
+      }));
+      const { EnhancerEmptyOutputError } = await import("../../src/lib/enhancer");
+      mockEnhanceText.mockRejectedValueOnce(new EnhancerEmptyOutputError("length"));
+      const store = useVoiceFlowStore();
+      await store.initialize();
+      const timerSpy = vi.spyOn(globalThis, "setTimeout");
+      triggerHotkeyEvent("hotkey:pressed");
+      await vi.waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("start_recording", { deviceName: "" }));
+      triggerHotkeyEvent("hotkey:released");
+      await vi.waitFor(() => expect(mockInvoke).toHaveBeenCalledWith(
+        "paste_text", { text: rawText, restoreClipboard: false },
+      ));
+      expect(store.status).toBe("error");
+      expect(store.message).toBe("voiceFlow.pasteSuccessOutputLimited");
+      expect(timerSpy).toHaveBeenCalledWith(expect.any(Function), 6000);
+    });
+
+    it("[P1] unrelated empty output keeps the existing success message", async () => {
+      const rawText = "這是一段超過十個字的測試轉錄文字內容";
+      mockInvoke.mockImplementation(createMockInvokeHandler({
+        transcribeResult: { rawText, transcriptionDurationMs: 400, noSpeechProbability: 0.01 },
+      }));
+      const { EnhancerEmptyOutputError } = await import("../../src/lib/enhancer");
+      mockEnhanceText.mockRejectedValueOnce(new EnhancerEmptyOutputError("content_filter"));
+      const store = useVoiceFlowStore();
+      await store.initialize();
+      triggerHotkeyEvent("hotkey:pressed");
+      await vi.waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("start_recording", { deviceName: "" }));
+      triggerHotkeyEvent("hotkey:released");
+      await vi.waitFor(() => expect(mockInvoke).toHaveBeenCalledWith(
+        "paste_text", { text: rawText, restoreClipboard: false },
+      ));
+      expect(store.status).toBe("success");
+      expect(store.message).toBe("voiceFlow.pasteSuccessNoOutput");
+    });
+
     it("[P1] main fallback 路徑套用 afterAI 並維持 rawText/charCount 一致", async () => {
       const longText = "這是一段超過十個字的測試轉錄文字內容";
       const replaced = "這是一段超過十個字的測試轉錄最終內容";
@@ -3259,6 +3302,34 @@ describe("useVoiceFlowStore", () => {
       expect(updateParams.rawText).toBe(replaced);
       expect(updateParams.processedText).toBeNull();
       expect(updateParams.charCount).toBe(replaced.length);
+      expect(store.status).toBe("success");
+      expect(store.message).toBe("voiceFlow.pasteSuccessUnenhanced");
+    });
+
+    it("[P0] retry output length fallback pastes raw text and shows the output-limit warning", async () => {
+      const store = useVoiceFlowStore();
+      await store.initialize();
+      await setupFailedTranscription(store);
+      const rawText = "這是一段夠長需要整理的重送逐字稿內容";
+      mockInvoke.mockImplementation(createMockInvokeHandler({
+        retranscribeResult: {
+          rawText, transcriptionDurationMs: 350, noSpeechProbability: 0.02,
+        },
+      }));
+      const { EnhancerEmptyOutputError } = await import("../../src/lib/enhancer");
+      mockEnhanceText.mockRejectedValueOnce(new EnhancerEmptyOutputError("length"));
+      const timerSpy = vi.spyOn(globalThis, "setTimeout");
+
+      await store.handleRetryTranscription();
+
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "paste_text", { text: rawText, restoreClipboard: false },
+      );
+      expect(store.status).toBe("error");
+      expect(store.message).toBe("voiceFlow.pasteSuccessOutputLimited");
+      expect(timerSpy).toHaveBeenCalledWith(expect.any(Function), 6000);
+      await vi.waitFor(() =>
+        expect(mockUpdateTranscriptionOnRetrySuccess).toHaveBeenCalledTimes(1));
     });
 
     it("[P0] 重送失敗（空轉錄）不再提供重送按鈕", async () => {

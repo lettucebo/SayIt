@@ -597,6 +597,7 @@
     "pasteSuccessTemperatureAdjusted": "Pasted (model parameters adjusted)",
     "pasteSuccessUnenhanced": "Pasted (unenhanced)",
     "pasteSuccessRateLimited": "Pasted original (not enhanced). {detail}",
+    "pasteSuccessOutputLimited": "Pasted original (not enhanced): output limit reached, so the incomplete result was discarded. Try another model or adjust your limits.",
     "pasteSuccessNoOutput": "The model returned no final answer; pasted the original text",
     "enhancing": "Enhancing...",
     "pasteFailed": "Paste failed",

@@ -597,6 +597,7 @@
     "pasteSuccessTemperatureAdjusted": "貼り付け完了 ✓（モデルのパラメーターを調整）",
     "pasteSuccessUnenhanced": "貼り付け完了（未整理）",
     "pasteSuccessRateLimited": "元の文字を貼り付けました（未整理）：{detail}",
+    "pasteSuccessOutputLimited": "元の文字を貼り付けました（未整理）：出力上限に達したため、不完全な結果は使用していません。別のモデルを使うか上限を調整してください。",
     "pasteSuccessNoOutput": "モデルが最終結果を返さなかったため、元のテキストを貼り付けました",
     "enhancing": "整理中...",
     "pasteFailed": "貼り付け失敗",
