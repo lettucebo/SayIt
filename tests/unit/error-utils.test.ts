@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildDiagnosticCode,
+  getEnhancementRateLimitLog,
   getEnhancementErrorMessage,
   getHotkeyErrorMessage,
   getMicrophoneErrorMessage,
@@ -19,6 +20,16 @@ describe("getMicrophoneErrorMessage", () => {
   });
 
   describe("429 enhancement feedback", () => {
+    it("[P0] explains an unfixable OTPM request rather than asking to wait or shorten the prompt", async () => {
+      const { EnhancerApiError } = await import("../../src/lib/enhancer");
+      const error = new EnhancerApiError(
+        429, "Too Many Requests", "", "groq", "qwen/qwen3.8-27b",
+        { kind: "otpm", limit: 1000, requested: 1491 },
+      );
+      expect(getEnhancementErrorMessage(error)).toContain("輸出");
+      expect(getEnhancementErrorMessage(error)).not.toContain("稍後");
+      expect(getEnhancementRateLimitLog(error)).toContain("limit=1000");
+    });
     it("[P0] describes the short Groq TPM wait and an actionable alternative", async () => {
       const { EnhancerApiError } = await import("../../src/lib/enhancer");
       const error = new EnhancerApiError(

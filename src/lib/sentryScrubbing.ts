@@ -7,7 +7,7 @@ import { findLlmModelConfig } from "./modelRegistry";
 
 const SAFE_EXTRA_KEYS = new Set(["source", "step", "window", "info"]);
 const PROVIDERS = new Set(["groq", "openai", "anthropic", "gemini", "azure", "unknown"]);
-const LIMIT_TYPES = new Set(["tpm", "rpm", "rpd", "tpd", "unknown"]);
+const LIMIT_TYPES = new Set(["itpm", "otpm", "tpm", "rpm", "rpd", "tpd", "unknown"]);
 
 const REDACTION = "[redacted]";
 
@@ -99,10 +99,14 @@ export function scrubEvent<T extends Event>(event: T): T {
         Number.isFinite(value) && value >= 0 && value <= 86_400_000) {
         safeExtra[key] = value;
       } else if (
-        ["limitTokens", "limitRequests", "remainingTokens", "remainingRequests"].includes(key) &&
+        ["limit", "limitTokens", "limitRequests", "remainingTokens", "remainingRequests"].includes(key) &&
         typeof value === "number" && Number.isFinite(value) &&
         value >= 0 && value <= 1_000_000_000
       ) {
+        safeExtra[key] = value;
+      } else if (key === "errorType" && value === "tokens") {
+        safeExtra[key] = value;
+      } else if (key === "errorCode" && value === "rate_limit_exceeded") {
         safeExtra[key] = value;
       } else if (key === "retried" && typeof value === "boolean") {
         safeExtra[key] = value;

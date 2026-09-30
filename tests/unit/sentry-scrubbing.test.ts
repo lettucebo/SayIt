@@ -89,6 +89,22 @@ describe("scrubBreadcrumb", () => {
 });
 
 describe("scrubEvent", () => {
+  it("[P0] retains numeric OTPM limit and known error codes but drops untrusted diagnostics", () => {
+    const result = scrubEvent({
+      extra: {
+        limitType: "otpm",
+        limit: 1000,
+        errorType: "tokens",
+        errorCode: "rate_limit_exceeded",
+        requested: 1491,
+        message: "org_private",
+      },
+    });
+    expect(result.extra).toEqual({
+      limitType: "otpm", limit: 1000,
+      errorType: "tokens", errorCode: "rate_limit_exceeded",
+    });
+  });
   it("[P0] retains only validated rate-limit diagnostics, not arbitrary model or identifier strings", () => {
     const result = scrubEvent({
       fingerprint: ["enhancement-http", "groq", "429"],

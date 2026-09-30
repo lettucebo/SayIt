@@ -1,6 +1,6 @@
 import type { LlmProviderId } from "./modelRegistry";
 
-export type RateLimitKind = "tpm" | "rpm" | "rpd" | "tpd" | "unknown";
+export type RateLimitKind = "itpm" | "otpm" | "tpm" | "rpm" | "rpd" | "tpd" | "unknown";
 
 export interface RateLimitInfo {
   kind: RateLimitKind;
@@ -12,6 +12,8 @@ export interface RateLimitInfo {
   limitRequests?: number;
   remainingTokens?: number;
   remainingRequests?: number;
+  errorType?: "tokens";
+  errorCode?: "rate_limit_exceeded";
 }
 
 function nonNegativeNumber(value: string | null): number | undefined {
@@ -57,6 +59,10 @@ export function parseRateLimitInfo(
       const error = parsed.error;
       if (typeof error === "object" && error !== null && "message" in error) {
         message = typeof error.message === "string" ? error.message : undefined;
+        if ("type" in error && error.type === "tokens") info.errorType = "tokens";
+        if ("code" in error && error.code === "rate_limit_exceeded") {
+          info.errorCode = "rate_limit_exceeded";
+        }
       }
     }
   } catch {
@@ -64,7 +70,7 @@ export function parseRateLimitInfo(
   }
   if (!message) return info;
 
-  const kindMatch = message.match(/\b(TPM|RPM|RPD|TPD)\b/i);
+  const kindMatch = message.match(/\b(ITPM|OTPM|TPM|RPM|RPD|TPD)\b/i);
   if (kindMatch) info.kind = kindMatch[1].toLowerCase() as RateLimitKind;
   for (const [key, label] of [
     ["limit", "Limit"],

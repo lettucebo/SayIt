@@ -137,7 +137,7 @@ export function getEnhancementRateLimitLog(error: unknown): string {
   const rate = error.rateLimit;
   const provider = error.provider ?? "unknown";
   const model = error.model && findLlmModelConfig(error.model) ? error.model : "custom";
-  return ` provider=${provider} model=${model} status=429 limitType=${rate?.kind ?? "unknown"} retryAfterMs=${rate?.retryAfterMs ?? "unknown"} limitTokens=${rate?.limitTokens ?? "unknown"} limitRequests=${rate?.limitRequests ?? "unknown"} remainingTokens=${rate?.remainingTokens ?? "unknown"} remainingRequests=${rate?.remainingRequests ?? "unknown"} used=${rate?.used ?? "unknown"} requested=${rate?.requested ?? "unknown"} retried=${error.retried}`;
+  return ` provider=${provider} model=${model} status=429 limitType=${rate?.kind ?? "unknown"} limit=${rate?.limit ?? "unknown"} errorType=${rate?.errorType ?? "unknown"} errorCode=${rate?.errorCode ?? "unknown"} retryAfterMs=${rate?.retryAfterMs ?? "unknown"} limitTokens=${rate?.limitTokens ?? "unknown"} limitRequests=${rate?.limitRequests ?? "unknown"} remainingTokens=${rate?.remainingTokens ?? "unknown"} remainingRequests=${rate?.remainingRequests ?? "unknown"} used=${rate?.used ?? "unknown"} requested=${rate?.requested ?? "unknown"} retried=${error.retried}`;
 }
 
 export function getEnhancementErrorMessage(error: unknown): string {
@@ -158,6 +158,12 @@ export function getEnhancementErrorMessage(error: unknown): string {
     if (status === 401) return t("errors.enhancement.invalidApiKey");
     if (status === 429) {
       const kind = error.rateLimit?.kind ?? "unknown";
+      if (kind === "otpm" &&
+        error.rateLimit?.limit !== undefined &&
+        error.rateLimit.requested !== undefined &&
+        error.rateLimit.requested > error.rateLimit.limit) {
+        return t("errors.enhancement.outputLimitExceeded");
+      }
       const daily = kind === "rpd" || kind === "tpd";
       const delay = error.rateLimit?.retryAfterMs;
       const type = t(`errors.enhancement.rateLimitTypes.${kind}`);
@@ -197,6 +203,9 @@ export function getEnhancementErrorMessage(error: unknown): string {
       (error as Error & { code?: string }).code ===
       "ENHANCEMENT_EMPTY_OUTPUT"
     ) {
+      if ("finishReason" in error && error.finishReason === "length") {
+        return t("errors.enhancement.outputTruncated");
+      }
       return t("errors.enhancement.emptyOutput");
     }
   }

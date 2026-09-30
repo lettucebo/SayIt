@@ -1175,6 +1175,43 @@ describe("enhancer.ts", () => {
         text: vi.fn().mockResolvedValue(body),
       });
 
+      it("[P0] learns Groq OTPM per account/model and immediately retries without capping another account", async () => {
+        const otpExceeded = {
+          ok: false,
+          status: 429,
+          statusText: "Too Many Requests",
+          headers: new Headers(),
+          text: vi.fn().mockResolvedValue('{"error":{"message":"Rate limit reached on output tokens per minute (OTPM): Limit 1000, Requested 1491."}}'),
+        };
+        mockFetch.mockResolvedValueOnce(otpExceeded)
+          .mockResolvedValueOnce(createSuccessResponse("整理成功"))
+          .mockResolvedValueOnce(createSuccessResponse("再次成功"))
+          .mockResolvedValueOnce(createSuccessResponse("其他帳號成功"));
+        const { enhanceText } = await import("../../src/lib/enhancer");
+        expect((await enhanceText("測試", TEST_API_KEY)).text).toBe("整理成功");
+        expect((await enhanceText("測試二", TEST_API_KEY)).text).toBe("再次成功");
+        expect((await enhanceText("測試三", "other-test-key")).text).toBe("其他帳號成功");
+        expect(mockFetch.mock.calls.map(([, init]) => JSON.parse(init.body).max_tokens))
+          .toEqual([8192, 1000, 1000, 8192]);
+      });
+
+      it("[P0] never returns truncated output after lowering Groq OTPM max_tokens", async () => {
+        mockFetch.mockResolvedValueOnce({
+          ok: false,
+          status: 429,
+          statusText: "Too Many Requests",
+          headers: new Headers(),
+          text: vi.fn().mockResolvedValue('{"error":{"message":"OTPM: Limit 1000, Requested 1491."}}'),
+        }).mockResolvedValueOnce({
+          ok: true,
+          json: vi.fn().mockResolvedValue({
+            choices: [{ message: { content: "不完整文字" }, finish_reason: "length" }],
+          }),
+        });
+        const { enhanceText, EnhancerEmptyOutputError } = await import("../../src/lib/enhancer");
+        await expect(enhanceText("完整原文", TEST_API_KEY)).rejects.toBeInstanceOf(EnhancerEmptyOutputError);
+      });
+
       it("[P0] retries a short 429 once, preserving the total deadline", async () => {
         vi.useFakeTimers();
         try {

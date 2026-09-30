@@ -38,6 +38,20 @@ describe("parseRateLimitInfo", () => {
     ).toMatchObject({ kind: "rpd", retryAfterMs: 1000 });
   });
 
+  it("[P0] recognizes an OTPM request larger than the account output limit", () => {
+    expect(parseRateLimitInfo(
+      "groq",
+      new Headers({ "x-ratelimit-remaining-tokens": "8000" }),
+      '{"error":{"message":"Rate limit reached for organization org_private on output tokens per minute (OTPM): Limit 1000, Requested 1491.","type":"tokens","code":"rate_limit_exceeded"}}',
+    )).toMatchObject({
+      kind: "otpm",
+      limit: 1000,
+      requested: 1491,
+      errorType: "tokens",
+      errorCode: "rate_limit_exceeded",
+    });
+  });
+
   it("[P1] rejects malformed retry hints and never parses arbitrary provider body text", () => {
     expect(
       parseRateLimitInfo(
