@@ -47,7 +47,8 @@ const MAI_TRANSCRIPTION_MODELS: [&str; 2] = ["mai-transcribe-1.5", "mai-transcri
 const MAI_TRANSCRIPTION_API_VERSION: &str = "2025-10-15";
 const MAI_MAX_CANDIDATE_LOCALES: usize = 1;
 const MAI_CANDIDATE_LOCALES: [&str; 5] = ["zh-TW", "zh-CN", "en-US", "ja-JP", "ko-KR"];
-const MAI_MAX_PHRASE_LIST_TERMS: usize = 500;
+const MAI_V1_5_MAX_PHRASE_LIST_TERMS: usize = 500;
+const MAI_V2_MAX_PHRASE_LIST_TERMS: usize = 50;
 
 /// 已解析的 MAI-Transcribe 模型。兩代的 request definition 形狀不同，
 /// 因此必須是列舉而非字串——漏掉分支會在編譯期被抓出來。
@@ -653,6 +654,13 @@ fn normalize_mai_candidate_locales(
     Ok(normalized)
 }
 
+fn mai_phrase_list_term_limit(model: MaiModel) -> usize {
+    match model {
+        MaiModel::V1_5 => MAI_V1_5_MAX_PHRASE_LIST_TERMS,
+        MaiModel::V2 => MAI_V2_MAX_PHRASE_LIST_TERMS,
+    }
+}
+
 fn parse_mai_transcribe_style(style: Option<&str>) -> Result<bool, TranscriptionError> {
     match style.map(str::trim) {
         None | Some("") | Some("default") => Ok(false),
@@ -712,7 +720,7 @@ fn build_mai_definition(
             (term.chars().count() <= MAX_WHISPER_TERM_CHARS && !term.is_empty())
                 .then(|| term.to_string())
         })
-        .take(MAI_MAX_PHRASE_LIST_TERMS)
+        .take(mai_phrase_list_term_limit(model))
         .collect();
     if !phrases.is_empty() {
         definition.insert(
@@ -2536,6 +2544,52 @@ mod tests {
                 serde_json::json!("mai-transcribe-1.5")
             );
         }
+    }
+
+    #[test]
+    fn test_mai_phrase_list_filters_before_model_cap() {
+        assert_eq!(mai_phrase_list_term_limit(MaiModel::V1_5), 500);
+        assert_eq!(mai_phrase_list_term_limit(MaiModel::V2), 50);
+
+        let mut raw_terms: Vec<String> = (0..60).map(|i| format!(" term-{i:02} ")).collect();
+        raw_terms[2] = "   ".to_string();
+        raw_terms[10] = "x".repeat(MAX_WHISPER_TERM_CHARS + 1);
+        raw_terms[22] = "\t".to_string();
+        raw_terms[41] = "y".repeat(MAX_WHISPER_TERM_CHARS + 5);
+
+        let expected_eligible: Vec<String> = raw_terms
+            .iter()
+            .filter_map(|term| {
+                let term = term.trim();
+                (term.chars().count() <= MAX_WHISPER_TERM_CHARS && !term.is_empty())
+                    .then(|| term.to_string())
+            })
+            .collect();
+        assert!(expected_eligible.len() > 50);
+
+        let v2_definition = build_mai_definition(MaiModel::V2, &[], Some(&raw_terms), false);
+        let v2_phrases = v2_definition["phraseList"]["phrases"].as_array().unwrap();
+        assert_eq!(v2_phrases.len(), 50);
+        assert_eq!(
+            v2_phrases,
+            &expected_eligible
+                .iter()
+                .take(50)
+                .cloned()
+                .map(serde_json::Value::String)
+                .collect::<Vec<_>>()
+        );
+
+        let v1_5_definition = build_mai_definition(MaiModel::V1_5, &[], Some(&raw_terms), false);
+        let v1_5_phrases = v1_5_definition["phraseList"]["phrases"].as_array().unwrap();
+        assert_eq!(
+            v1_5_phrases,
+            &expected_eligible
+                .iter()
+                .cloned()
+                .map(serde_json::Value::String)
+                .collect::<Vec<_>>()
+        );
     }
 
     #[test]
