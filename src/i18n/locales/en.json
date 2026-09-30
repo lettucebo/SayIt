@@ -724,9 +724,8 @@
     },
     "upgradeNotice": {
       "title": "SayIt Update Summary",
-      "item1": "Groq rate limits — when AI cleanup hits a short-lived limit, SayIt retries once within its five-second deadline. If cleanup still fails, it pastes the original text and shows the limit, wait time, and a suggestion to switch models.",
-      "item2": "Traditional Chinese cleanup — standard zh-TW output now converts simplified characters before pasting. Custom prompts and edit mode keep their existing behavior.",
-      "item3": "Azure Whisper deployments — with Entra ID and a Whisper resource matching the Foundry project, you can load and select deployments in Settings. Manual entry remains available when the list cannot be used.",
+      "item1": "Groq output limits: if a cleanup request exceeds your account's output tokens per minute, SayIt lowers the output cap and retries at most once within the existing deadline. It remembers the cap for that account and model during the current app session.",
+      "item2": "Clearer warnings for truncated output: when AI cleanup reaches its output cap, SayIt pastes the original text instead of the truncated result. The HUD shows a six-second warning suggesting another model or an allowance adjustment.",
       "dismiss": "Got it"
     }
   },
