@@ -40,6 +40,7 @@ const UNTRUSTED_CONTEXT_CLOSE = "</untrusted_context>";
  */
 const CONTEXT_LEAK_MIN_RUN = 24;
 const DEFAULT_ENHANCEMENT_RETRY_COUNT = 3;
+const groqOutputLimits = new Map<string, Map<string, number>>();
 
 export class EnhancerApiError extends Error {
   constructor(
@@ -458,12 +459,18 @@ export async function enhanceText(
   if (azureFamily) {
     maxTokens = Math.min(maxTokens, azureFamily.maxCompletionTokens);
   }
+  const groqLimitsByModel = providerId === "groq" ? groqOutputLimits.get(apiKey) : undefined;
+  const knownGroqOutputLimit = groqLimitsByModel?.get(modelId);
+  if (knownGroqOutputLimit !== undefined) {
+    maxTokens = Math.min(maxTokens, knownGroqOutputLimit);
+  }
 
   let usage: ChatUsageData | null = null;
   let finalText!: string;
   let attempt = 0;
   let didRetryTemperature = false;
   let didRetryRateLimit = false;
+  let didRetryOutputLimit = false;
   let azureRequestOptions = options?.azure;
   const deadlineAtMs =
     options?.deadlineAtMs ?? performance.now() + getProviderTimeout(providerId, options?.azure);
@@ -533,9 +540,33 @@ export async function enhanceText(
     if (errorBody !== undefined) {
       if (response.status === 429) {
         const rateLimit = parseRateLimitInfo(providerId, response.headers ?? new Headers(), errorBody);
+        if (
+          providerId === "groq" &&
+          rateLimit.kind === "otpm" &&
+          rateLimit.limit !== undefined &&
+          rateLimit.limit > 0 &&
+          rateLimit.requested !== undefined &&
+          rateLimit.requested > rateLimit.limit &&
+          rateLimit.limit < maxTokens
+        ) {
+          const limits = groqOutputLimits.get(apiKey) ?? new Map<string, number>();
+          limits.set(modelId, rateLimit.limit);
+          groqOutputLimits.set(apiKey, limits);
+          if (
+            !didRetryOutputLimit &&
+            !options?.rateLimitRetryState?.used &&
+            performance.now() + 100 < deadlineAtMs
+          ) {
+            didRetryOutputLimit = true;
+            if (options?.rateLimitRetryState) options.rateLimitRetryState.used = true;
+            maxTokens = rateLimit.limit;
+            continue;
+          }
+        }
         const retryDelay = rateLimit.retryAfterMs;
         if (
           !didRetryRateLimit &&
+          !didRetryOutputLimit &&
           !options?.rateLimitRetryState?.used &&
           retryDelay !== undefined &&
           Number.isFinite(retryDelay) &&
@@ -558,7 +589,7 @@ export async function enhanceText(
             providerId,
             modelId,
             rateLimit,
-            didRetryRateLimit,
+            didRetryRateLimit || didRetryOutputLimit,
           ),
           usage,
         );
@@ -603,6 +634,10 @@ export async function enhanceText(
     const result = parseProviderResponse(providerId, json);
     usage = combineChatUsage(usage, toChatUsage(result.usage));
     finalText = stripReasoningTags(result.text);
+    if (providerId === "groq" && (knownGroqOutputLimit !== undefined || didRetryOutputLimit) &&
+      result.finishReason === "length") {
+      throw new EnhancerEmptyOutputError("length", usage);
+    }
     if (finalText) break;
 
     const isReasoningAzure = providerId === "azure" && azureFamily?.isReasoning;

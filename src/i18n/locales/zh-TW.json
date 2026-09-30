@@ -649,6 +649,7 @@
       "timeout": "AI 整理逾時，已貼原始文字",
       "contextLengthExceeded": "輸入內容超過模型可處理的長度，已貼上原始文字",
       "emptyOutput": "模型未產生最終整理結果，已貼原始文字",
+      "outputTruncated": "模型輸出達到長度上限，未使用截斷結果，已貼原始文字",
       "modelDecommissioned": "此模型已下架，請至設定更換模型",
       "invalidApiKey": "API Key 無效或已過期",
       "rateLimited": "{hint}；AI 整理受到速率限制，稍後再試。",
@@ -656,7 +657,10 @@
       "rateLimitedDaily": "{hint}；AI 整理已達{type}額度，請在額度重置後再試。",
       "rateLimitedHint": "可在設定中改用其他模型",
       "rateLimitedGroqHint": "可在設定中改用其他模型，或查看 Groq 方案額度",
+      "outputLimitExceeded": "Groq 模型的每分鐘輸出 Token 上限不足以完成這次整理；已保留原始文字，可改用其他模型或查看方案額度。",
       "rateLimitTypes": {
+        "itpm": "每分鐘輸入 Token",
+        "otpm": "每分鐘輸出 Token",
         "tpm": "每分鐘 Token",
         "rpm": "每分鐘請求",
         "rpd": "每日請求",

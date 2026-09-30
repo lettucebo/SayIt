@@ -220,7 +220,7 @@ sqlite3 %APPDATA%\com.sayit.app\app.db
 
 ### 5.6 AI 整理 429 排查
 
-失敗 log 僅記安全的 `provider`、已知模型 ID（自訂部署顯示 `custom`）、`status=429`、`limitType`、`retryAfterMs`、`remainingTokens`、`remainingRequests` 及 `retried`；不記回應 body、組織識別字、逐字稿或金鑰。Groq 的 `x-ratelimit-remaining-tokens` 是每分鐘 Token 配額，`x-ratelimit-remaining-requests` 是每日請求配額；限制種類仍應以 429 回應訊息解析結果為準。有限且不超過 2 秒的短暫限流只重試一次，整個 Groq 整理流程共用 5 秒時限；每日額度或無法判定等待時間時不重試。Sentry 僅在 production/staging 上報，因此 dev log 次數不等於 Sentry 事件次數；切勿根據兩者差距直接推斷 SDK 丟事件。
+失敗 log 僅記安全的 `provider`、已知模型 ID（自訂部署顯示 `custom`）、`status=429`、`limitType`、`limit`、白名單內的 `errorType`／`errorCode`、`retryAfterMs`、`remainingTokens`、`remainingRequests` 及 `retried`；不記回應 body、組織識別字、逐字稿或金鑰。Groq 的 `x-ratelimit-remaining-tokens` 是總每分鐘 Token 配額，`x-ratelimit-remaining-requests` 是每日請求配額；另外可能有獨立的 ITPM／OTPM，限制種類以 429 回應訊息解析結果為準，不能用總 TPM 剩餘量排除 OTPM。OTPM 的 `Requested > Limit` 且服務端限值小於目前 `max_tokens` 時，依帳號金鑰與模型記住限值，於原有 deadline 內降低輸出上限立即重試一次；不預設壓低付費帳號限額，截斷輸出不會貼上。其他有限且不超過 2 秒的短暫限流只重試一次，整個 Groq 整理流程共用 5 秒時限；每日額度或無法判定等待時間時不重試。Sentry 僅在 production/staging 上報，因此 dev log 次數不等於 Sentry 事件次數；切勿根據兩者差距直接推斷 SDK 丟事件。
 
 ---
 
