@@ -724,8 +724,7 @@
     },
     "upgradeNotice": {
       "title": "SayIt Update Summary",
-      "item1": "Groq output limits: if a cleanup request exceeds your account's output tokens per minute, SayIt lowers the output cap and retries at most once within the existing deadline. It remembers the cap for that account and model during the current app session.",
-      "item2": "Clearer warnings for truncated output: when AI cleanup reaches its output cap, SayIt pastes the original text instead of the truncated result. The HUD shows a six-second warning suggesting another model or an allowance adjustment.",
+      "item1": "Custom Prompt script settings: live cleanup, resends and history cleanup now send AI the Traditional or Simplified Chinese requirement from your text output language setting, overriding conflicting script instructions in the Prompt. Your saved Prompt stays unchanged, and AI is instructed to preserve English and technical names. No forced local conversion was added.",
       "dismiss": "Got it"
     }
   },
