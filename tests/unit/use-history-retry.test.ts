@@ -30,6 +30,7 @@ const h = vi.hoisted(() => {
     refreshLlmApiKey: vi.fn(),
     getLlmRequestConfig: vi.fn(),
     getAiPrompt: () => "prompt",
+    getAiPromptForEnhancement: () => "runtime-script-policy-prompt",
     getEffectiveChatModel: () => "qwen/qwen3.6-27b",
     selectedTranscriptionLocale: "auto",
     selectedLocale: "en",
@@ -300,6 +301,13 @@ describe("useHistoryStore retry", () => {
       store.transcriptionList.push(record);
       const res = await store.reEnhanceRecord(record);
       expect(res.ok).toBe(true);
+      expect(h.mockEnhanceGuard).toHaveBeenCalledWith(
+        record.rawText,
+        "llm-key",
+        expect.objectContaining({
+          systemPrompt: "runtime-script-policy-prompt",
+        }),
+      );
       expect(store.transcriptionList[0].processedText).toBe(
         "整理後的書面語句子。",
       );

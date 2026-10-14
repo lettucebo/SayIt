@@ -1639,7 +1639,7 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
             settingsStore.contextInjectionEnabled,
           );
           const enhanceOptions = {
-            systemPrompt: settingsStore.getAiPrompt(),
+            systemPrompt: settingsStore.getAiPromptForEnhancement(),
             vocabularyTermList:
               enhancementTermList.length > 0 ? enhancementTermList : undefined,
             modelId: llmCfg.modelId,
@@ -2098,7 +2098,7 @@ export const useVoiceFlowStore = defineStore("voice-flow", () => {
             result.rawText,
             llmCfg.apiKey,
             {
-              systemPrompt: settingsStore.getAiPrompt(),
+              systemPrompt: settingsStore.getAiPromptForEnhancement(),
               vocabularyTermList:
                 enhancementTermList.length > 0 ? enhancementTermList : undefined,
               modelId: llmCfg.modelId,

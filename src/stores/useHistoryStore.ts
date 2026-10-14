@@ -866,7 +866,7 @@ export const useHistoryStore = defineStore("history", () => {
         record.rawText,
         llmCfg.apiKey,
         {
-          systemPrompt: settingsStore.getAiPrompt(),
+          systemPrompt: settingsStore.getAiPromptForEnhancement(),
           vocabularyTermList: termList.length > 0 ? termList : undefined,
           modelId: llmCfg.modelId,
           provider: llmCfg.provider,

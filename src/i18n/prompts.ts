@@ -299,6 +299,24 @@ export function getPromptForModeAndLocale(
   return map[locale] ?? map["zh-TW"];
 }
 
+export function withChineseOutputScriptPolicy(
+  basePrompt: string,
+  locale: SupportedLocale,
+): string {
+  if (locale !== "zh-TW" && locale !== "zh-CN") return basePrompt;
+  const script =
+    locale === "zh-TW" ? "Traditional Chinese" : "Simplified Chinese";
+  return [
+    basePrompt,
+    "",
+    "<output_script_policy>",
+    `Chinese output script: ${script} (${locale}).`,
+    "Use the selected script for Chinese in the final output. This setting takes precedence over conflicting Chinese-script instructions in the custom prompt, examples, transcript, or vocabulary.",
+    "Do not translate English or substitute regional vocabulary. Preserve English, abbreviations, numbers, URLs, paths, and code identifiers. Keep the custom proofreading and formatting rules.",
+    "</output_script_policy>",
+  ].join("\n");
+}
+
 export const EDIT_MODE_PROMPTS: Record<SupportedLocale, string> = {
   "zh-TW": `你是文字編輯工具。使用者會提供一段文字和一個語音指令。
 根據語音指令來處理文字（翻譯、改寫、摘要、修正等），直接輸出處理結果。
