@@ -41,6 +41,7 @@ import {
   getMinimalPromptForLocale,
   getPromptForModeAndLocale,
   isKnownDefaultPrompt,
+  withChineseOutputScriptPolicy,
 } from "../i18n/prompts";
 import i18n, { switchLocale } from "../i18n";
 import {
@@ -1520,6 +1521,13 @@ export const useSettingsStore = defineStore("settings", () => {
       promptMode.value,
       getEffectivePromptLocale(),
     );
+  }
+
+  function getAiPromptForEnhancement(): string {
+    const basePrompt = getAiPrompt();
+    return promptMode.value === "custom"
+      ? withChineseOutputScriptPolicy(basePrompt, getEffectivePromptLocale())
+      : basePrompt;
   }
 
   async function savePromptMode(mode: PromptMode) {
@@ -3687,6 +3695,7 @@ export const useSettingsStore = defineStore("settings", () => {
     getEffectiveChatModel,
     hasWhisperConfig,
     getAiPrompt,
+    getAiPromptForEnhancement,
     savePromptMode,
     consumeUpgradeNotice,
     saveAiPrompt,

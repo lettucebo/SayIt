@@ -762,6 +762,8 @@ describe("useSettingsStore", () => {
       mockStoreData.set("groqApiKey", "  gsk_sync  ");
       mockStoreData.set("aiPrompt", "  同步後 prompt  ");
       mockStoreData.set("promptMode", "custom");
+      mockStoreData.set("selectedLocale", "zh-TW");
+      mockStoreData.set("selectedTranscriptionLocale", "zh-CN");
       mockStoreData.set("enhancementThresholdEnabled", true);
       mockStoreData.set("enhancementThresholdCharCount", 42);
       mockStoreData.set("llmModelId", "openai/gpt-oss-120b");
@@ -783,6 +785,9 @@ describe("useSettingsStore", () => {
       expect(store.customTriggerKeyDomCode).toBe("F13");
       expect(store.getApiKey()).toBe("gsk_sync");
       expect(store.getAiPrompt()).toBe("同步後 prompt");
+      expect(store.getAiPromptForEnhancement()).toContain(
+        "Chinese output script: Simplified Chinese (zh-CN).",
+      );
       expect(store.isEnhancementThresholdEnabled).toBe(true);
       expect(store.enhancementThresholdCharCount).toBe(42);
       expect(store.selectedLlmModelId).toBe("openai/gpt-oss-120b");

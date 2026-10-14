@@ -255,6 +255,7 @@ vi.mock("../../src/stores/useSettingsStore", () => ({
     whisperProviderId: "groq",
     hasWhisperConfig: true,
     getAiPrompt: () => mockSettingsState.aiPrompt,
+    getAiPromptForEnhancement: () => "runtime-script-policy-prompt",
     get promptMode() {
       return mockSettingsState.promptMode;
     },
@@ -1356,7 +1357,7 @@ describe("useVoiceFlowStore", () => {
         longText,
         "test-api-key-123",
         expect.objectContaining({
-          systemPrompt: "自訂 prompt 內容",
+          systemPrompt: "runtime-script-policy-prompt",
         }),
       );
       expect(store.status).toBe("success");
@@ -2140,7 +2141,7 @@ describe("useVoiceFlowStore", () => {
         longText,
         "test-api-key-123",
         expect.objectContaining({
-          systemPrompt: "自訂 prompt 內容",
+          systemPrompt: "runtime-script-policy-prompt",
         }),
       );
     });

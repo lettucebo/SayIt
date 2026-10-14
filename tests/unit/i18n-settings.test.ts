@@ -341,6 +341,99 @@ describe("i18n 設定功能", () => {
       expect(store.getAiPrompt()).toBe(customPrompt);
     });
 
+    it("[P0] 自訂整理 Prompt 應附加輸出語言政策但不改寫原始 Prompt", async () => {
+      const customPrompt = "只校對與排版，使用繁體中文，保留 API。";
+      mockStoreData.set("selectedLocale", "zh-TW");
+      mockStoreData.set("selectedTranscriptionLocale", "zh-CN");
+      mockStoreData.set("promptMode", "custom");
+      mockStoreData.set("aiPrompt", customPrompt);
+
+      const { useSettingsStore } = await import(
+        "../../src/stores/useSettingsStore"
+      );
+      const store = useSettingsStore();
+      await store.loadSettings();
+      mockStoreSet.mockClear();
+      mockStoreSave.mockClear();
+
+      expect(store.getAiPrompt()).toBe(customPrompt);
+      const enhancementPrompt = store.getAiPromptForEnhancement();
+      expect(enhancementPrompt).toContain(
+        "Chinese output script: Simplified Chinese (zh-CN).",
+      );
+      expect(enhancementPrompt).toContain(customPrompt);
+      expect(store.getAiPromptForEnhancement()).toBe(enhancementPrompt);
+      expect(mockStoreSet).not.toHaveBeenCalled();
+      expect(mockStoreSave).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["zh-TW", "Traditional Chinese"],
+      ["zh-CN", "Simplified Chinese"],
+    ] as const)(
+      "[P0] 自訂整理 Prompt 的繁簡政策應跟隨輸出語言 %s",
+      async (locale, script) => {
+        mockStoreData.set("selectedLocale", locale === "zh-TW" ? "zh-CN" : "zh-TW");
+        mockStoreData.set("selectedTranscriptionLocale", locale);
+        mockStoreData.set("promptMode", "custom");
+        mockStoreData.set("aiPrompt", "只校對文字，繁簡依照逐字稿。保留 API。");
+
+        const { useSettingsStore } = await import(
+          "../../src/stores/useSettingsStore"
+        );
+        const store = useSettingsStore();
+        await store.loadSettings();
+
+        const prompt = store.getAiPromptForEnhancement();
+        expect(prompt).toContain(`Chinese output script: ${script} (${locale}).`);
+        expect(prompt).toContain(
+          "This setting takes precedence over conflicting Chinese-script instructions",
+        );
+        expect(prompt).toContain(
+          "Preserve English, abbreviations, numbers, URLs, paths, and code identifiers.",
+        );
+        expect(prompt).toContain("只校對文字，繁簡依照逐字稿。保留 API。");
+      },
+    );
+
+    it("[P1] 自訂整理 Prompt 的 auto 語言依 UI 語言且非中文不附加繁簡政策", async () => {
+      mockStoreData.set("selectedLocale", "zh-CN");
+      mockStoreData.set("selectedTranscriptionLocale", "auto");
+      mockStoreData.set("promptMode", "custom");
+      mockStoreData.set("aiPrompt", "Proofread only. Preserve API.");
+
+      const { useSettingsStore } = await import(
+        "../../src/stores/useSettingsStore"
+      );
+      const store = useSettingsStore();
+      await store.loadSettings();
+      expect(store.getAiPromptForEnhancement()).toContain(
+        "Chinese output script: Simplified Chinese (zh-CN).",
+      );
+
+      await store.saveTranscriptionLocale("en");
+      expect(store.getAiPromptForEnhancement()).toBe(
+        "Proofread only. Preserve API.",
+      );
+    });
+
+    it.each(["minimal", "active"] as const)(
+      "[P1] %s 模式的執行 Prompt 與既有 Prompt 完全一致",
+      async (mode) => {
+        mockStoreData.set("selectedLocale", "zh-TW");
+        mockStoreData.set("selectedTranscriptionLocale", "zh-CN");
+        mockStoreData.set("promptMode", mode);
+
+        const { useSettingsStore } = await import(
+          "../../src/stores/useSettingsStore"
+        );
+        const store = useSettingsStore();
+        await store.loadSettings();
+
+        expect(store.getAiPromptForEnhancement()).toBe(store.getAiPrompt());
+      },
+    );
+
     it("[P0] 轉錄語言為特定語言時，切換 UI 語言不應改變 prompt", async () => {
       mockStoreData.set("selectedLocale", "zh-TW");
 

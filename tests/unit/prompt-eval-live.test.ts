@@ -28,7 +28,11 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
-import { ACTIVE_PROMPTS, MINIMAL_PROMPTS } from "../../src/i18n/prompts";
+import {
+  ACTIVE_PROMPTS,
+  MINIMAL_PROMPTS,
+  withChineseOutputScriptPolicy,
+} from "../../src/i18n/prompts";
 import { buildEnhancementMessages } from "../../src/lib/enhancer";
 import {
   buildFetchParams,
@@ -146,6 +150,7 @@ describe("prompt eval — live runner wiring", () => {
     expect(typeof applyTranscriptTextTransforms).toBe("function");
     expect(typeof ACTIVE_PROMPTS["zh-TW"]).toBe("string");
     expect(typeof MINIMAL_PROMPTS["zh-TW"]).toBe("string");
+    expect(typeof withChineseOutputScriptPolicy).toBe("function");
     expect(typeof DEFAULT_LLM_MODEL_ID).toBe("string");
   });
 
@@ -285,3 +290,70 @@ describe.skipIf(!API_KEY)("prompt eval — live model run", () => {
     30 * 60 * 1000,
   );
 });
+
+describe.skipIf(!API_KEY)(
+  "prompt eval — custom prompt Chinese output script",
+  () => {
+    const cases = [
+      {
+        locale: "zh-CN",
+        transcript: "請確認這個開關已經開啟。",
+        mustContain: ["请", "确认", "这个", "已经", "开启"],
+        mustNotContain: ["請", "這", "個", "經", "開", "啟"],
+      },
+      {
+        locale: "zh-CN",
+        transcript:
+          "請確認這個 API 已經開啟，保留 EnglishName 與 Node.js 24。",
+        mustContain: ["请", "确认", "这个", "已经", "开启"],
+        mustNotContain: ["請", "這", "個", "經", "開", "啟", "與"],
+        preserveEnglish: true,
+      },
+      {
+        locale: "zh-TW",
+        transcript: "请确认这个开关已经开启。",
+        mustContain: ["請", "確認", "這個", "已經", "開啟"],
+        mustNotContain: ["请", "这", "个", "经", "开", "启"],
+      },
+      {
+        locale: "zh-TW",
+        transcript: "请确认这个 API 已经开启，保留 EnglishName 与 Node.js 24。",
+        mustContain: ["請", "確認", "這個", "已經", "開啟"],
+        mustNotContain: ["请", "这", "个", "经", "开", "启", "与"],
+        preserveEnglish: true,
+      },
+    ] as const;
+
+    it("[P1] custom output follows configured script and preserves English, 3 runs each", async () => {
+      for (const testCase of cases) {
+        const customPrompt =
+          testCase.locale === "zh-CN"
+            ? "只校對與排版。輸出必須使用繁體中文。不要翻譯，不要改動英文、縮寫、數字和技術名稱。"
+            : "只校对与排版。输出必须使用简体中文。不要翻译，不要改动英文、缩写、数字和技术名称。";
+        const systemPrompt = withChineseOutputScriptPolicy(
+          customPrompt,
+          testCase.locale,
+        );
+
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          const actual = await enhanceOnce(systemPrompt, testCase.transcript);
+          for (const marker of testCase.mustContain) {
+            expect(actual, `${testCase.locale} output marker ${marker}`).toContain(
+              marker,
+            );
+          }
+          for (const marker of testCase.mustNotContain) {
+            expect(actual, `${testCase.locale} unexpected marker ${marker}`).not.toContain(
+              marker,
+            );
+          }
+          if (testCase.preserveEnglish) {
+            for (const marker of ["API", "EnglishName", "Node.js", "24"]) {
+              expect(actual, `preserve ${marker}`).toContain(marker);
+            }
+          }
+        }
+      }
+    }, 30 * 60 * 1000);
+  },
+);
