@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   EXPORT_FORMAT,
   EXPORT_VERSION,
-  MAX_TERM_LENGTH,
   buildExportFile,
   parseImportContent,
 } from "../../src/lib/vocabularyTransfer";
@@ -78,6 +77,16 @@ describe("parseImportContent — SayIt JSON", () => {
     const result = parseImportContent("bom.json", json);
     expect(result).toEqual([{ term: "Rust", weight: 1, source: "manual" }]);
   });
+
+  it("[P1] JSON 長詞條正規化空白後不截斷，保留來源與權重", () => {
+    const term = "a".repeat(101);
+    const json = JSON.stringify({
+      terms: [{ term: `  ${term}  `, weight: 8, source: "ai" }],
+    });
+    expect(parseImportContent("long.json", json)).toEqual([
+      { term, weight: 8, source: "ai" },
+    ]);
+  });
 });
 
 describe("parseImportContent — 純文字 / CSV（Typeless 遷移）", () => {
@@ -97,6 +106,15 @@ describe("parseImportContent — 純文字 / CSV（Typeless 遷移）", () => {
     expect(result.map((e) => e.term)).toEqual(["sequel", "react"]);
   });
 
+  it("[P1] TXT 與無副檔名純文字保留逗號及整行詞條", () => {
+    for (const filename of ["terms.txt", "terms"]) {
+      expect(parseImportContent(filename, "\uFEFFInc, ACME\n  Foo, Bar  ")).toEqual([
+        { term: "Inc, ACME", weight: 1, source: "manual" },
+        { term: "Foo, Bar", weight: 1, source: "manual" },
+      ]);
+    }
+  });
+
   it("跳過空行與多餘空白", () => {
     const txt = "  Tauri  \n\n\n  Vue  \n";
     const result = parseImportContent("d.txt", txt);
@@ -109,9 +127,11 @@ describe("parseImportContent — 純文字 / CSV（Typeless 遷移）", () => {
     expect(result.map((e) => e.term)).toEqual(["Tauri", "Vue"]);
   });
 
-  it("超長詞條截斷至上限", () => {
-    const long = "a".repeat(MAX_TERM_LENGTH + 50);
-    const result = parseImportContent("d.txt", long);
-    expect(result[0].term).toHaveLength(MAX_TERM_LENGTH);
+  it("[P1] TXT 長詞條完整保留且相同前綴的不同詞不被誤去重", () => {
+    const prefix = "a".repeat(100);
+    const first = `${prefix}x`;
+    const second = `${prefix}y`;
+    const result = parseImportContent("d.txt", `${first}\n${second}`);
+    expect(result.map((entry) => entry.term)).toEqual([first, second]);
   });
 });

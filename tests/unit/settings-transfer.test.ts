@@ -19,7 +19,7 @@ import {
   type BackupFile,
   type SettingsPayload,
 } from "../../src/lib/settingsTransfer";
-import { buildExportFile } from "../../src/lib/vocabularyTransfer";
+import { buildExportFile, parseImportContent } from "../../src/lib/vocabularyTransfer";
 import type { VocabularyExportFile } from "../../src/types/vocabulary";
 import type { ReplacementRule } from "../../src/types/replacement";
 import { createReplacementRule } from "../support/factories";
@@ -303,6 +303,23 @@ describe("parseBackup（明文）", () => {
     const parsed = parseBackup(json);
     expect(parsed.encryption).toBeNull();
     expect(parsed.payload?.settings).toEqual(sampleSettings);
+  });
+
+  it("[P1] 備份字典長詞 round-trip 匯入不截斷或合併不同詞條", () => {
+    const prefix = "a".repeat(100);
+    const terms = [`${prefix}x`, `${prefix}y`];
+    const dictionary = buildExportFile(
+      terms.map((term) => ({ term, weight: 12, source: "ai" as const })),
+      "2026-06-23T00:00:00.000Z",
+    );
+    const backup = parseBackup(serializeBackup(buildPlainBackup(null, dictionary)));
+    const imported = parseImportContent(
+      "dictionary.json",
+      JSON.stringify(backup.payload?.dictionary),
+    );
+    expect(imported).toEqual(
+      terms.map((term) => ({ term, weight: 12, source: "ai" })),
+    );
   });
 
   it("非 JSON → INVALID_JSON", () => {

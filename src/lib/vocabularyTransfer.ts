@@ -8,9 +8,6 @@ import type {
 export const EXPORT_FORMAT = "sayit-dictionary" as const;
 export const EXPORT_VERSION = 1 as const;
 
-/** 單一詞條長度上限，避免匯入超大字串塞爆 DB */
-export const MAX_TERM_LENGTH = 100;
-
 const VALID_SOURCES: VocabularySource[] = ["manual", "ai"];
 
 function normalizeWeight(value: unknown): number {
@@ -29,7 +26,7 @@ function normalizeSource(value: unknown): VocabularySource {
 function normalizeTerm(value: unknown): string {
   if (typeof value !== "string") return "";
   // 去除前後空白與換行；折疊內部多餘空白
-  return value.trim().replace(/\s+/g, " ").slice(0, MAX_TERM_LENGTH);
+  return value.trim().replace(/\s+/g, " ");
 }
 
 /**
@@ -93,16 +90,14 @@ function parseSayItJson(content: string): ImportedTerm[] {
 }
 
 /**
- * 解析純文字 / CSV：一行一個詞，遇逗號時取第一欄。
+ * 解析純文字 / CSV：一行一個詞，只有 CSV 遇逗號時取第一欄。
  * 用於從 Typeless 等沒有匯出功能的工具遷移 —— 使用者自行整理成文字檔即可。
  * 所有詞條以 source='manual'、weight=1 匯入。
  */
-function parsePlainText(content: string): ImportedTerm[] {
+function parsePlainText(content: string, isCsv: boolean): ImportedTerm[] {
   const result: ImportedTerm[] = [];
   for (const line of content.split(/\r?\n/)) {
-    // 取第一欄（支援 "念法,正確寫法" 這類兩欄資料：SayIt 只存詞條本身）
-    const firstField = line.split(",")[0];
-    const term = normalizeTerm(firstField);
+    const term = normalizeTerm(isCsv ? line.split(",")[0] : line);
     if (!term) continue;
     result.push({ term, weight: 1, source: "manual" });
   }
@@ -129,6 +124,6 @@ export function parseImportContent(
   const isJson = /\.json$/i.test(filename) || looksLikeJson(normalized);
   const entries = isJson
     ? parseSayItJson(normalized)
-    : parsePlainText(normalized);
+    : parsePlainText(normalized, /\.csv$/i.test(filename));
   return dedupe(entries);
 }
