@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { setDockVisibility } from "@tauri-apps/api/app";
 import { load } from "@tauri-apps/plugin-store";
 import type { TriggerMode } from "../types";
+import type { AudioInputDeviceInfo } from "../types/audio";
 import {
   type HotkeyConfig,
   type TriggerKey,
@@ -3056,6 +3057,27 @@ export const useSettingsStore = defineStore("settings", () => {
     }
   }
 
+  async function getAudioInputDeviceList(): Promise<{
+    devices: AudioInputDeviceInfo[];
+    defaultDeviceName: string | null;
+  }> {
+    try {
+      const devices = await invoke<AudioInputDeviceInfo[]>("list_audio_input_devices");
+      const defaultDeviceName = await invoke<string | null>("get_default_input_device_name");
+      return { devices, defaultDeviceName };
+    } catch (err) {
+      console.error(
+        "[useSettingsStore] getAudioInputDeviceList failed:",
+        extractErrorMessage(err),
+      );
+      captureError(err, {
+        source: "settings",
+        step: "list-audio-input-devices",
+      });
+      throw err;
+    }
+  }
+
   async function saveAudioInputDevice(deviceName: string) {
     try {
       const store = await load(STORE_NAME);
@@ -3816,6 +3838,7 @@ export const useSettingsStore = defineStore("settings", () => {
     debugLogRetentionDays,
     saveDebugLog,
     selectedAudioInputDeviceName,
+    getAudioInputDeviceList,
     saveAudioInputDevice,
     isCopyTranscriptionToClipboardEnabled,
     saveCopyTranscriptionToClipboard,
