@@ -1302,6 +1302,33 @@ describe("enhanceWithAnomalyGuard", () => {
     vi.restoreAllMocks();
   });
 
+  it.each(["", "<think>只有思考內容</think>", "  \n  "])(
+    "[P0] empty final response %j is flagged, without losing successful HTTP usage",
+    async (content) => {
+      mockFetch.mockResolvedValue(createSuccessResponse(content, {
+        prompt_tokens: 4, completion_tokens: 2, total_tokens: 6,
+        prompt_time: 0.1, completion_time: 0.1, total_time: 0.2,
+      }));
+      const { enhanceText, enhanceWithAnomalyGuard } = await import("../../src/lib/enhancer");
+      const direct = await enhanceText("有效原文", TEST_API_KEY);
+      const guarded = await enhanceWithAnomalyGuard("有效原文", TEST_API_KEY);
+      expect(direct).toMatchObject({ text: "有效原文", isRawFallback: true });
+      expect(guarded).toMatchObject({
+        text: "有效原文", wasEmptyResponse: true, wasAnomalous: false,
+        usage: { totalTokens: 6 },
+      });
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it("[P0] valid identical output is not an empty-response fallback", async () => {
+    mockFetch.mockResolvedValue(createSuccessResponse("有效原文"));
+    const { enhanceWithAnomalyGuard } = await import("../../src/lib/enhancer");
+    expect(await enhanceWithAnomalyGuard("有效原文", TEST_API_KEY)).toMatchObject({
+      text: "有效原文", wasEmptyResponse: false, wasAnomalous: false,
+    });
+  });
+
   it("[P1] 正常整理（無長度爆炸）→ wasAnomalous=false 並採用整理結果", async () => {
     mockFetch.mockResolvedValue(
       createSuccessResponse("這是一段整理後的書面語文字。"),
