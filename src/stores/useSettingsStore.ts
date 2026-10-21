@@ -38,6 +38,7 @@ import { captureError } from "../lib/sentry";
 import { setFileLoggingEnabled } from "../lib/logger";
 import { getDefaultSystemPrompt } from "../lib/enhancer";
 import {
+  getAutoLanguagePrompt,
   getMinimalPromptForLocale,
   getPromptForModeAndLocale,
   isKnownDefaultPrompt,
@@ -1517,6 +1518,9 @@ export const useSettingsStore = defineStore("settings", () => {
 
   function getAiPrompt(): string {
     if (promptMode.value === "custom") return aiPrompt.value;
+    if (selectedTranscriptionLocale.value === "auto") {
+      return getAutoLanguagePrompt(promptMode.value, selectedLocale.value);
+    }
     return getPromptForModeAndLocale(
       promptMode.value,
       getEffectivePromptLocale(),

@@ -434,6 +434,34 @@ describe("i18n 設定功能", () => {
       },
     );
 
+    it.each(
+      (["minimal", "active"] as const).flatMap((mode) =>
+        (["zh-TW", "zh-CN", "en", "ja", "ko"] as const).map(
+          (locale) => [mode, locale] as const,
+        ),
+      ),
+    )(
+      "[P0] %s + auto + %s UI 執行時保留原語言且不寫入自訂 prompt",
+      async (mode, locale) => {
+        mockStoreData.set("selectedLocale", locale);
+        mockStoreData.set("selectedTranscriptionLocale", "auto");
+        mockStoreData.set("promptMode", mode);
+        const { useSettingsStore } = await import(
+          "../../src/stores/useSettingsStore"
+        );
+        const { getAutoLanguagePrompt } = await import(
+          "../../src/i18n/prompts"
+        );
+        const store = useSettingsStore();
+        await store.loadSettings();
+        mockStoreSet.mockClear();
+
+        expect(store.getAiPrompt()).toBe(getAutoLanguagePrompt(mode, locale));
+        expect(store.getAiPromptForEnhancement()).toBe(store.getAiPrompt());
+        expect(mockStoreSet).not.toHaveBeenCalled();
+      },
+    );
+
     it("[P0] 轉錄語言為特定語言時，切換 UI 語言不應改變 prompt", async () => {
       mockStoreData.set("selectedLocale", "zh-TW");
 
@@ -465,17 +493,17 @@ describe("i18n 設定功能", () => {
       const store = useSettingsStore();
       await store.loadSettings();
 
-      const { getMinimalPromptForLocale } = await import(
+      const { getAutoLanguagePrompt } = await import(
         "../../src/i18n/prompts"
       );
-      const zhDefault = getMinimalPromptForLocale("zh-TW");
+      const zhDefault = getAutoLanguagePrompt("minimal", "zh-TW");
       expect(store.getAiPrompt()).toBe(zhDefault);
 
       // 轉錄語言為 auto，切換 UI 語言 → prompt 跟著切換
       mockStoreSet.mockClear();
       await store.saveLocale("en");
 
-      const enDefault = getMinimalPromptForLocale("en");
+      const enDefault = getAutoLanguagePrompt("minimal", "en");
       expect(store.getAiPrompt()).toBe(enDefault);
 
       // prompt 不應被自動寫入 store
