@@ -222,7 +222,13 @@ sqlite3 %APPDATA%\com.sayit.app\app.db
 
 失敗 log 僅記安全的 `provider`、已知模型 ID（自訂部署顯示 `custom`）、`status=429`、`limitType`、`limit`、白名單內的 `errorType`／`errorCode`、`retryAfterMs`、`remainingTokens`、`remainingRequests` 及 `retried`；不記回應 body、組織識別字、逐字稿或金鑰。Groq 的 `x-ratelimit-remaining-tokens` 是總每分鐘 Token 配額，`x-ratelimit-remaining-requests` 是每日請求配額；另外可能有獨立的 ITPM／OTPM，限制種類以 429 回應訊息解析結果為準，不能用總 TPM 剩餘量排除 OTPM。OTPM 的 `Requested > Limit` 且服務端限值小於目前 `max_tokens` 時，依帳號金鑰與模型記住限值，於原有 deadline 內降低輸出上限立即重試一次；不預設壓低付費帳號限額，截斷輸出不會貼上。整理結果若因輸出長度上限而截斷，正常／重送轉錄均貼原文，HUD 顯示輸出上限警示 6 秒；其他空輸出維持原有提示。其他有限且不超過 2 秒的短暫限流只重試一次，整個 Groq 整理流程共用 5 秒時限；每日額度或無法判定等待時間時不重試。Sentry 僅在 production/staging 上報，因此 dev log 次數不等於 Sentry 事件次數；切勿根據兩者差距直接推斷 SDK 丟事件。
 
-### 5.7 自訂 Prompt 與文字輸出語言
+### 5.7 字典提示候選優先序
+
+轉錄與文字整理共用 `getTopTermListByWeight(50)`：候選先排 `source="manual"` 的詞，再依同來源的 weight、created_at 降序選取。手動新增與來源為 manual 的匯入詞同等處理，不改寫已儲存權重，也不改字典頁的顯示排序；手動詞超過名額時，AI 詞可能不會入選。
+
+Whisper formatter 沿用現有 50 詞、200 估算 token 及長詞保護，選取後反轉讓高優先序詞落在提示尾端。不額外擴大預算，也不保證各 provider 一定採用候選詞。
+
+### 5.8 自訂 Prompt 與文字輸出語言
 
 `getAiPrompt()` 提供未加工的 Prompt，供設定畫面編輯與儲存；一般 AI 整理請求使用 `getAiPromptForEnhancement()`。自訂模式會在執行時附加由「文字輸出語言」設定導出的繁體／簡體字形政策，不改寫已儲存的 Prompt，也不翻譯英文或替換地區用語。精簡與積極模式維持原有 Prompt。
 

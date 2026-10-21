@@ -22,6 +22,9 @@ interface RawVocabularyRow {
   created_at: string;
 }
 
+export const TOP_TERM_LIST_SQL =
+  "SELECT term FROM vocabulary ORDER BY CASE WHEN source = 'manual' THEN 0 ELSE 1 END, weight DESC, created_at DESC LIMIT $1";
+
 function mapRowToEntry(row: RawVocabularyRow): VocabularyEntry {
   return {
     id: row.id,
@@ -261,7 +264,7 @@ export const useVocabularyStore = defineStore("vocabulary", () => {
     try {
       const db = getDatabase();
       const rows = await db.select<{ term: string }[]>(
-        "SELECT term FROM vocabulary ORDER BY weight DESC, created_at DESC LIMIT $1",
+        TOP_TERM_LIST_SQL,
         [limit],
       );
       return rows.map((row) => row.term);

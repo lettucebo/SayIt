@@ -219,10 +219,10 @@ fn estimate_whisper_tokens(text: &str) -> usize {
     ascii.div_ceil(3) + non_ascii
 }
 
-/// 組出 Whisper 的 `prompt`：詞彙已由前端依 weight 由高到低排序。
+/// 組出 Whisper 的 `prompt`：詞彙已由前端依手動來源優先、同來源 weight／建立時間降序排列。
 /// - 略過超過 `MAX_WHISPER_TERM_CHARS` 的異常長詞（避免巨型 request，Whisper 亦無益）。
 /// - 在 `MAX_WHISPER_PROMPT_TOKENS`（估算）預算內納入，超出即停止。
-/// - **反轉輸出**讓高權重詞落在 prompt 尾端：Whisper 超限時只保留尾端 tokens，
+/// - **反轉輸出**讓高優先序詞落在 prompt 尾端：Whisper 超限時只保留尾端 tokens，
 ///   反轉可確保最重要的詞不被靜默丟棄。
 /// - 無任何可納入的詞時回 `None`（呼叫端不送出空前綴 prompt）。
 fn format_whisper_prompt(term_list: &[String]) -> Option<String> {
@@ -239,7 +239,7 @@ fn format_whisper_prompt(term_list: &[String]) -> Option<String> {
         if !selected.is_empty() {
             addition += estimate_whisper_tokens(SEPARATOR);
         }
-        // 詞已依權重由高到低排列；達預算即停止（不為塞低權重詞而繼續）
+        // 詞已依優先序排列；達預算即停止（不為塞後續詞而繼續）
         if used + addition > MAX_WHISPER_PROMPT_TOKENS {
             break;
         }
@@ -249,7 +249,7 @@ fn format_whisper_prompt(term_list: &[String]) -> Option<String> {
     if selected.is_empty() {
         return None;
     }
-    // 反轉讓高權重詞落在 prompt 尾端（Whisper 保留尾端 tokens）
+    // 反轉讓高優先序詞落在 prompt 尾端（Whisper 保留尾端 tokens）
     selected.reverse();
     Some(format!("{PREFIX}{}", selected.join(SEPARATOR)))
 }
