@@ -134,7 +134,7 @@ describe("useVocabularyStore", () => {
   // ==========================================================================
 
   describe("getTopTermListByWeight", () => {
-    it("應回傳按 weight DESC 排序的前 N 個詞", async () => {
+    it("[P1] 應以 manual 優先、再依 weight 與建立時間排序選出前 N 個詞", async () => {
       mockDbSelect.mockResolvedValueOnce([
         { term: "Tauri" },
         { term: "Vue.js" },
@@ -150,7 +150,9 @@ describe("useVocabularyStore", () => {
 
       expect(result).toEqual(["Tauri", "Vue.js", "Groq"]);
       const [sql, params] = mockDbSelect.mock.calls[0];
-      expect(sql).toContain("ORDER BY weight DESC");
+      expect(sql).toContain("ORDER BY CASE WHEN source = 'manual' THEN 0 ELSE 1 END");
+      expect(sql).toContain("weight DESC");
+      expect(sql).toContain("created_at DESC");
       expect(sql).toContain("LIMIT $1");
       expect(params).toEqual([3]);
     });
