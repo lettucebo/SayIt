@@ -222,7 +222,13 @@ sqlite3 %APPDATA%\com.sayit.app\app.db
 
 失敗 log 僅記安全的 `provider`、已知模型 ID（自訂部署顯示 `custom`）、`status=429`、`limitType`、`limit`、白名單內的 `errorType`／`errorCode`、`retryAfterMs`、`remainingTokens`、`remainingRequests` 及 `retried`；不記回應 body、組織識別字、逐字稿或金鑰。Groq 的 `x-ratelimit-remaining-tokens` 是總每分鐘 Token 配額，`x-ratelimit-remaining-requests` 是每日請求配額；另外可能有獨立的 ITPM／OTPM，限制種類以 429 回應訊息解析結果為準，不能用總 TPM 剩餘量排除 OTPM。OTPM 的 `Requested > Limit` 且服務端限值小於目前 `max_tokens` 時，依帳號金鑰與模型記住限值，於原有 deadline 內降低輸出上限立即重試一次；不預設壓低付費帳號限額，截斷輸出不會貼上。整理結果若因輸出長度上限而截斷，正常／重送轉錄均貼原文，HUD 顯示輸出上限警示 6 秒；其他空輸出維持原有提示。其他有限且不超過 2 秒的短暫限流只重試一次，整個 Groq 整理流程共用 5 秒時限；每日額度或無法判定等待時間時不重試。Sentry 僅在 production/staging 上報，因此 dev log 次數不等於 Sentry 事件次數；切勿根據兩者差距直接推斷 SDK 丟事件。
 
-### 5.7 自訂 Prompt 與文字輸出語言
+### 5.7 字典匯入的文字保真
+
+外部字典匯入以副檔名區分純文字與 CSV：TXT 每行是一個完整詞條，逗號保留；CSV 維持只取第一欄，不是完整 RFC 4180 parser。JSON、TXT 與備份內的詞條不再靜默截成 100 字元，因此共同前綴但尾字不同的長詞不會被誤合併。UTF-8 BOM、空白正規化、大小寫去重及原生 8 MiB 讀取上限維持不變。
+
+已在舊版被截短的內容無法自動還原，必要時請使用原始檔重新匯入；不要刪除既有字典。保留完整詞條也不代表轉錄 provider 一定採用，轉錄端的長詞／提示預算保護仍然有效。
+
+### 5.8 自訂 Prompt 與文字輸出語言
 
 `getAiPrompt()` 提供未加工的 Prompt，供設定畫面編輯與儲存；一般 AI 整理請求使用 `getAiPromptForEnhancement()`。自訂模式會在執行時附加由「文字輸出語言」設定導出的繁體／簡體字形政策，不改寫已儲存的 Prompt，也不翻譯英文或替換地區用語。精簡與積極模式維持原有 Prompt。
 
