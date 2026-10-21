@@ -3,7 +3,6 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { invoke } from "@tauri-apps/api/core";
 import { save, open } from "@tauri-apps/plugin-dialog";
-import type { UnlistenFn } from "@tauri-apps/api/event";
 import {
   useSettingsStore,
   DEFAULT_ENHANCEMENT_THRESHOLD_ENABLED,
@@ -11,6 +10,7 @@ import {
 } from "../stores/useSettingsStore";
 import { extractErrorMessage } from "../lib/errorUtils";
 import { useFeedbackMessage } from "../composables/useFeedbackMessage";
+import { useHotkeyRecordingSession } from "../composables/useHotkeyRecordingSession";
 import {
   useReplacementTableSort,
   type ReplacementSortKey,
@@ -30,11 +30,6 @@ import {
 } from "../lib/settingsTransfer";
 import { buildExportFile, parseImportContent } from "../lib/vocabularyTransfer";
 import { captureError } from "../lib/sentry";
-import {
-  listenToEvent,
-  HOTKEY_RECORDING_CAPTURED,
-  HOTKEY_RECORDING_REJECTED,
-} from "../composables/useTauriEvents";
 import {
   isSignInCancelledError,
   isPolicyDeniedError,
@@ -216,12 +211,32 @@ const hotkeyRecordingFeedback = useFeedbackMessage();
 
 // ── 兩層模式切換 ──────────────────────────────────────────
 const isCustomMode = ref(false);
-const isRecording = ref(false);
 const recordingWarning = ref("");
 const recordingHint = ref("");
-let recordingTimeoutId: ReturnType<typeof setTimeout> | undefined;
-
-const RECORDING_TIMEOUT_MS = 10_000;
+let recordingViewActive = true;
+const {
+  isRecording,
+  isCleaningUp,
+  start: startKeyRecording,
+  stop: stopKeyRecording,
+} = useHotkeyRecordingSession({
+  onCaptured: handleRecordingCaptured,
+  onRejected: handleRecordingRejected,
+  onTimeout: () => {
+    if (recordingViewActive) {
+      hotkeyRecordingFeedback.show("error", settingsStore.getHotkeyRecordingTimeoutMessage());
+    }
+  },
+  onStartFailed: (error) => {
+    if (recordingViewActive) hotkeyRecordingFeedback.show("error", extractErrorMessage(error));
+  },
+  onCleanupFailed: (error) => {
+    if (recordingViewActive) {
+      (isCustomMode.value ? hotkeyRecordingFeedback : hotkeyKeyFeedback)
+        .show("error", extractErrorMessage(error));
+    }
+  },
+});
 
 const currentCustomKeyDisplay = computed(() => {
   const key = settingsStore.hotkeyConfig?.triggerKey;
@@ -240,15 +255,12 @@ const currentPresetKey = computed(() => {
   return key;
 });
 
-let recordingUnlisteners: UnlistenFn[] = [];
-
 async function handleRecordingCaptured(payload: RecordingCapturedPayload) {
   const { keycode, modifiers } = payload;
   recordingWarning.value = "";
   recordingHint.value = "";
 
   const currentMode = settingsStore.triggerMode;
-  stopKeyRecording();
 
   const domCode = getDomCodeByKeycode(keycode);
 
@@ -266,12 +278,14 @@ async function handleRecordingCaptured(payload: RecordingCapturedPayload) {
     };
     try {
       await settingsStore.saveComboTriggerKey(comboKey, domCode ?? "", currentMode);
-      hotkeyRecordingFeedback.show(
-        "success",
-        t("settings.hotkey.keySet", { key: settingsStore.getTriggerKeyDisplayName(comboKey) }),
-      );
+      if (recordingViewActive) {
+        hotkeyRecordingFeedback.show(
+          "success",
+          t("settings.hotkey.keySet", { key: settingsStore.getTriggerKeyDisplayName(comboKey) }),
+        );
+      }
     } catch (err) {
-      hotkeyRecordingFeedback.show("error", extractErrorMessage(err));
+      if (recordingViewActive) hotkeyRecordingFeedback.show("error", extractErrorMessage(err));
     }
   } else {
     // Single key
@@ -293,70 +307,28 @@ async function handleRecordingCaptured(payload: RecordingCapturedPayload) {
       const displayName = domCode
         ? settingsStore.getKeyDisplayName(domCode)
         : getKeyDisplayNameByKeycode(keycode);
-      hotkeyRecordingFeedback.show(
-        "success",
-        t("settings.hotkey.keySet", { key: displayName }),
-      );
+      if (recordingViewActive) {
+        hotkeyRecordingFeedback.show(
+          "success",
+          t("settings.hotkey.keySet", { key: displayName }),
+        );
+      }
     } catch (err) {
-      hotkeyRecordingFeedback.show("error", extractErrorMessage(err));
+      if (recordingViewActive) hotkeyRecordingFeedback.show("error", extractErrorMessage(err));
     }
   }
 }
 
 function handleRecordingRejected(payload: RecordingRejectedPayload) {
-  stopKeyRecording();
   if (payload.reason === "esc_reserved") {
     hotkeyRecordingFeedback.show("error", settingsStore.getEscapeReservedMessage());
   }
 }
 
-async function startRecording() {
-  isRecording.value = true;
+function startRecording() {
   recordingWarning.value = "";
   recordingHint.value = "";
-
-  // Tell Rust to enter recording mode
-  try {
-    await invoke("start_hotkey_recording");
-  } catch (err) {
-    hotkeyRecordingFeedback.show("error", extractErrorMessage(err));
-    isRecording.value = false;
-    return;
-  }
-
-  // Listen for Rust recording events
-  const [unlistenCaptured, unlistenRejected] = await Promise.all([
-    listenToEvent<RecordingCapturedPayload>(
-      HOTKEY_RECORDING_CAPTURED,
-      (event) => void handleRecordingCaptured(event.payload),
-    ),
-    listenToEvent<RecordingRejectedPayload>(
-      HOTKEY_RECORDING_REJECTED,
-      (event) => handleRecordingRejected(event.payload),
-    ),
-  ]);
-  recordingUnlisteners = [unlistenCaptured, unlistenRejected];
-
-  // 10s timeout
-  recordingTimeoutId = setTimeout(() => {
-    if (isRecording.value) {
-      hotkeyRecordingFeedback.show("error", settingsStore.getHotkeyRecordingTimeoutMessage());
-      stopKeyRecording();
-    }
-  }, RECORDING_TIMEOUT_MS);
-}
-
-function stopKeyRecording() {
-  if (!isRecording.value) return;
-  isRecording.value = false;
-  clearTimeout(recordingTimeoutId);
-  // Cancel Rust recording mode
-  void invoke("cancel_hotkey_recording").catch(() => {});
-  // Clean up event listeners
-  for (const unlisten of recordingUnlisteners) {
-    unlisten();
-  }
-  recordingUnlisteners = [];
+  void startKeyRecording();
 }
 
 function switchToCustom() {
@@ -2400,6 +2372,7 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  recordingViewActive = false;
   void stopPreview();
   stopKeyRecording();
   clearTimeout(deleteConfirmTimeoutId);
@@ -2496,6 +2469,7 @@ onBeforeUnmount(() => {
             </button>
             <button
               type="button"
+              data-testid="hotkey-custom-mode"
               class="px-4 py-2 text-sm font-medium transition-colors"
               :class="
                 isCustomMode
@@ -2547,11 +2521,14 @@ onBeforeUnmount(() => {
               </span>
               <span v-else class="text-sm text-muted-foreground">{{ $t("settings.hotkey.notSet") }}</span>
               <Button
+                data-testid="hotkey-record-button"
                 :variant="isRecording ? 'destructive' : 'outline'"
                 size="sm"
                 :class="{ 'animate-pulse': isRecording }"
+                :disabled="isCleaningUp"
                 @click="isRecording ? stopKeyRecording() : startRecording()"
               >
+                <LoaderCircle v-if="isCleaningUp" class="size-4 animate-spin" />
                 {{ isRecording ? $t('settings.hotkey.pressKey') : $t('settings.hotkey.record') }}
               </Button>
             </div>

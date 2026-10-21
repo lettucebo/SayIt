@@ -7,6 +7,8 @@ import type { Page } from "@playwright/test";
  * （例如 azureEnabled）渲染 Settings，production 程式碼完全不需要為測試開後門。
  */
 export interface TauriMockOptions {
+  hotkeyCaptureOnStart?: { keycode: number; modifiers: string[] };
+  hotkeyStartError?: string;
   /** 預先寫入 tauri-plugin-store 的鍵值，對應 `useSettingsStore` 讀取的欄位。 */
   storeValues?: Record<string, unknown>;
   httpResponses?: Array<{
@@ -23,6 +25,8 @@ const MOCKED_SCHEMA_VERSION = 9;
 const MOCKED_TABLE_SET = new Set(["api_usage", "schema_version", "transcriptions", "vocabulary"]);
 
 interface TauriMockState {
+  emitTauriEvent: (name: string, payload: unknown) => void;
+  getHotkeyCommands: () => string[];
   getStoreSetCount: (key: string) => number;
   getHttpRequestList: () => Array<{
     url: string;
@@ -41,6 +45,8 @@ export async function installTauriMock(
       storeValues: Record<string, unknown>;
       schemaVersion: number;
       tableList: string[];
+      hotkeyCaptureOnStart?: { keycode: number; modifiers: string[] };
+      hotkeyStartError?: string;
       httpResponses: Array<{
         status?: number;
         statusText?: string;
@@ -54,6 +60,8 @@ export async function installTauriMock(
       );
       const callbackRegistry = new Map<number, (payload: unknown) => void>();
       const eventCallbackIdMap = new Map<number, number>();
+      const eventNameMap = new Map<number, string>();
+      const hotkeyCommands: string[] = [];
       const storeSetCountMap = new Map<string, number>();
       const httpRequestList: Array<{
         url: string;
@@ -78,6 +86,16 @@ export async function installTauriMock(
       let nextCallbackId = 0;
       let nextListenerId = 0;
       let nextHttpRid = 0;
+      const emitTauriEvent = (name: string, payload: unknown) => {
+        for (const [id, eventName] of eventNameMap) {
+          if (eventName === name) {
+            const callbackId = eventCallbackIdMap.get(id);
+            if (callbackId !== undefined) {
+              callbackRegistry.get(callbackId)?.({ event: name, id, payload });
+            }
+          }
+        }
+      };
 
       const selectRows = (query: string, values: unknown[]): unknown[] => {
         if (query.includes("SELECT version FROM schema_version")) {
@@ -223,16 +241,28 @@ export async function installTauriMock(
         if (cmd === "plugin:event|listen") {
           const eventId = ++nextListenerId;
           eventCallbackIdMap.set(eventId, Number(args.handler));
+          eventNameMap.set(eventId, String(args.event));
           return eventId;
         }
         if (cmd === "plugin:event|unlisten") {
           eventCallbackIdMap.delete(Number(args.eventId));
+          eventNameMap.delete(Number(args.eventId));
           return null;
         }
         if (cmd === "plugin:event|emit" || cmd === "plugin:event|emit_to") {
           return null;
         }
         if (cmd === "plugin:autostart|is_enabled") return false;
+        if (cmd === "start_hotkey_recording" || cmd === "cancel_hotkey_recording") {
+          hotkeyCommands.push(cmd);
+          if (cmd === "start_hotkey_recording") {
+            if (init.hotkeyStartError) throw new Error(init.hotkeyStartError);
+            if (init.hotkeyCaptureOnStart) {
+              emitTauriEvent("hotkey:recording-captured", init.hotkeyCaptureOnStart);
+            }
+          }
+          return null;
+        }
         if (cmd === "get_os_theme") return "light";
         if (cmd === "get_azure_entra_token") {
           return { accessToken: "e2e-access-token", expiresIn: 3600 };
@@ -278,6 +308,7 @@ export async function installTauriMock(
         unregisterListener: (_event: string, eventId: number) => {
           const callbackId = eventCallbackIdMap.get(eventId);
           eventCallbackIdMap.delete(eventId);
+          eventNameMap.delete(eventId);
           if (callbackId !== undefined) {
             callbackRegistry.delete(callbackId);
             delete globalScope[`_${callbackId}`];
@@ -285,6 +316,8 @@ export async function installTauriMock(
         },
       };
       globalScope.__SAYIT_E2E_TAURI_MOCK__ = {
+        emitTauriEvent,
+        getHotkeyCommands: () => [...hotkeyCommands],
         getStoreSetCount: (key: string) => storeSetCountMap.get(key) ?? 0,
         getHttpRequestList: () => httpRequestList,
         resolveHttpResponse: (key: string) => {
@@ -300,8 +333,23 @@ export async function installTauriMock(
       schemaVersion: MOCKED_SCHEMA_VERSION,
       tableList: [...MOCKED_TABLE_SET],
       httpResponses: options.httpResponses ?? [],
+      hotkeyCaptureOnStart: options.hotkeyCaptureOnStart,
+      hotkeyStartError: options.hotkeyStartError,
     },
   );
+}
+
+export async function emitMockTauriEvent(page: Page, name: string, payload: unknown): Promise<void> {
+  await page.evaluate(({ eventName, eventPayload }) => {
+    const mock = (window as unknown as { __SAYIT_E2E_TAURI_MOCK__: TauriMockState }).__SAYIT_E2E_TAURI_MOCK__;
+    mock.emitTauriEvent(eventName, eventPayload);
+  }, { eventName: name, eventPayload: payload });
+}
+
+export async function getHotkeyCommands(page: Page): Promise<string[]> {
+  return page.evaluate(() =>
+    (window as unknown as { __SAYIT_E2E_TAURI_MOCK__: TauriMockState })
+      .__SAYIT_E2E_TAURI_MOCK__.getHotkeyCommands());
 }
 
 export async function getStoreSetCount(page: Page, key: string): Promise<number> {
