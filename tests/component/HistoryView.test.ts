@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import i18n from "../../src/i18n";
 import HistoryView from "../../src/views/HistoryView.vue";
 import type { TranscriptionRecord } from "../../src/types/transcription";
+import { reactive } from "vue";
 
 vi.mock("../../src/composables/useTauriEvents", () => ({
   listenToEvent: vi.fn().mockResolvedValue(vi.fn()),
@@ -44,8 +45,10 @@ function createRecord(
 }
 
 function makeHistory(records: TranscriptionRecord[]): Record<string, unknown> {
-  return {
+  return reactive({
     transcriptionList: records,
+    retryingId: null as string | null,
+    retryingAction: null as "transcribe" | "enhance" | null,
     isLoading: false,
     hasMore: false,
     searchQuery: "",
@@ -53,7 +56,7 @@ function makeHistory(records: TranscriptionRecord[]): Record<string, unknown> {
     loadMore: vi.fn().mockResolvedValue(undefined),
     retranscribeRecord: vi.fn().mockResolvedValue({ ok: true }),
     reEnhanceRecord: vi.fn().mockResolvedValue({ ok: true }),
-  };
+  });
 }
 
 const ButtonStub = {
@@ -84,6 +87,37 @@ describe("HistoryView 重試按鈕", () => {
       disconnect() {}
     }
     vi.stubGlobal("IntersectionObserver", IOStub);
+  });
+
+  it("[P0] edit-mode disables both retries even with audio and nonempty raw text", async () => {
+    const wrapper = await mountExpanded(createRecord({
+      isEditMode: true, rawText: "翻譯上一句", processedText: "已完成的編輯",
+    }));
+    expect(wrapper.find('[data-testid="retranscribe-button"]').attributes("disabled")).toBeDefined();
+    expect(wrapper.find('[data-testid="reenhance-button"]').attributes("disabled")).toBeDefined();
+    wrapper.unmount();
+  });
+
+  it("[P0] remount retains store lock and disables retries on another record", async () => {
+    const first = await mountExpanded(createRecord({ id: "first" }));
+    let resolveRetry!: (value: { ok: boolean }) => void;
+    historyState.retranscribeRecord = vi.fn(() => {
+      historyState.retryingId = "first";
+      historyState.retryingAction = "transcribe";
+      return new Promise<{ ok: boolean }>((resolve) => { resolveRetry = resolve; });
+    });
+    await first.find('[data-testid="retranscribe-button"]').trigger("click");
+    first.unmount();
+    historyState.transcriptionList = [createRecord({ id: "second" })];
+    const second = mount(HistoryView, {
+      global: { plugins: [i18n], stubs: { Button: ButtonStub } },
+    });
+    await second.vm.$nextTick();
+    expect(second.find('[data-testid="retranscribe-button"]').attributes("disabled")).toBeDefined();
+    expect(second.find('[data-testid="reenhance-button"]').attributes("disabled")).toBeDefined();
+    expect(historyState.retranscribeRecord).toHaveBeenCalledTimes(1);
+    resolveRetry({ ok: true });
+    second.unmount();
   });
 
   it("[P1] 每筆紀錄都顯示兩顆重試按鈕（含已整理的成功紀錄）", async () => {
@@ -164,7 +198,11 @@ describe("HistoryView 重試按鈕", () => {
     const recordB = createRecord({ id: "rec-B", audioFilePath: "C:/b.wav" });
     historyState = makeHistory([recordA, recordB]);
     historyState.retranscribeRecord = vi.fn(
-      () => new Promise<{ ok: boolean }>((r) => (resolveRetry = r)),
+      () => {
+        historyState.retryingId = recordA.id;
+        historyState.retryingAction = "transcribe";
+        return new Promise<{ ok: boolean }>((r) => (resolveRetry = r));
+      },
     );
     const wrapper = mount(HistoryView, {
       global: { plugins: [i18n], stubs: { Button: ButtonStub } },

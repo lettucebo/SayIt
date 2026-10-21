@@ -68,6 +68,8 @@ export interface ChatUsageData {
 export interface EnhanceResult {
   text: string;
   usage: ChatUsageData | null;
+  /** 無有效最終輸出時回到原文；與恰好等於原文的有效輸出不同。 */
+  isRawFallback?: boolean;
   /** Azure 因明確拒絕 temperature 而移除參數重試成功。 */
   temperatureAdjusted?: boolean;
 }

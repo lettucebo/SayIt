@@ -145,6 +145,70 @@ describe("useHistoryStore retry", () => {
   });
 
   describe("retranscribeRecord", () => {
+    it("[P0] edit-mode record is rejected before settings, vocabulary, API and DB", async () => {
+      const store = useHistoryStore();
+      const record = createRecord({
+        isEditMode: true,
+        rawText: "刪掉前一句",
+        processedText: "已編輯內容",
+        status: "success",
+      });
+      store.transcriptionList.push(record);
+
+      expect((await store.retranscribeRecord(record)).ok).toBe(false);
+      expect(store.transcriptionList[0].processedText).toBe("已編輯內容");
+      expect(h.settingsStub.getWhisperRequestConfig).not.toHaveBeenCalled();
+      expect(h.mockGetTopTerms).not.toHaveBeenCalled();
+      expect(h.mockInvoke).not.toHaveBeenCalled();
+      expect(h.mockDbExecute).not.toHaveBeenCalled();
+    });
+
+    it("[P0] pending retranscription locks both retry actions across store references", async () => {
+      let resolveInvoke!: (value: typeof GOOD_TRANSCRIBE_RESULT) => void;
+      h.mockInvoke.mockReturnValue(new Promise((resolve) => { resolveInvoke = resolve; }));
+      const store = useHistoryStore();
+      const recordA = createRecord({ id: "rec-A" });
+      const recordB = createRecord({ id: "rec-B", rawText: "待整理原文" });
+      const pending = store.retranscribeRecord(recordA);
+      await vi.waitFor(() => expect(h.mockInvoke).toHaveBeenCalledTimes(1));
+      expect(useHistoryStore().retryingId).toBe(recordA.id);
+      expect(useHistoryStore().retryingAction).toBe("transcribe");
+      expect((await useHistoryStore().reEnhanceRecord(recordB)).ok).toBe(false);
+      expect((await useHistoryStore().retranscribeRecord(recordB)).ok).toBe(false);
+      expect(h.mockEnhanceGuard).not.toHaveBeenCalled();
+      expect(h.mockInvoke).toHaveBeenCalledTimes(1);
+      resolveInvoke(GOOD_TRANSCRIBE_RESULT);
+      await pending;
+      expect(store.retryingId).toBeNull();
+      expect(store.retryingAction).toBeNull();
+    });
+
+    it("[P1] failed settings lookup and DB write both release the retry lock", async () => {
+      const store = useHistoryStore();
+      const record = createRecord();
+      h.settingsStub.getWhisperRequestConfig.mockRejectedValueOnce(new Error("settings"));
+      await expect(store.retranscribeRecord(record)).rejects.toThrow("settings");
+      expect(store.retryingId).toBeNull();
+      h.mockInvoke.mockResolvedValue(GOOD_TRANSCRIBE_RESULT);
+      h.mockDbExecute.mockImplementation((sql: string) =>
+        sql.includes("UPDATE transcriptions")
+          ? Promise.reject(new Error("database"))
+          : Promise.resolve({ rowsAffected: 1, lastInsertId: 0 }),
+      );
+      await expect(store.retranscribeRecord(record)).rejects.toThrow("database");
+      expect(store.retryingId).toBeNull();
+      expect(store.retryingAction).toBeNull();
+    });
+
+    it("[P1] failed transcription API releases the retry lock", async () => {
+      h.mockInvoke.mockRejectedValueOnce(new Error("offline"));
+      const store = useHistoryStore();
+      const result = await store.retranscribeRecord(createRecord());
+      expect(result).toMatchObject({ ok: false, errorKey: "history.retranscribeFailed" });
+      expect(store.retryingId).toBeNull();
+      expect(store.retryingAction).toBeNull();
+    });
+
     it("[P1] 成功重新辨識 → flip success、更新原文、清空整理結果", async () => {
       h.mockInvoke.mockResolvedValue(GOOD_TRANSCRIBE_RESULT);
       const store = useHistoryStore();
@@ -273,6 +337,68 @@ describe("useHistoryStore retry", () => {
   });
 
   describe("reEnhanceRecord", () => {
+    it("[P0] edit-mode record is rejected before settings, vocabulary, API and DB", async () => {
+      const store = useHistoryStore();
+      const record = createRecord({
+        isEditMode: true,
+        rawText: "翻譯上一段",
+        processedText: "原有編輯結果",
+        status: "success",
+      });
+      store.transcriptionList.push(record);
+      expect((await store.reEnhanceRecord(record)).ok).toBe(false);
+      expect(store.transcriptionList[0].processedText).toBe("原有編輯結果");
+      expect(h.settingsStub.refreshLlmApiKey).not.toHaveBeenCalled();
+      expect(h.mockGetTopTerms).not.toHaveBeenCalled();
+      expect(h.mockEnhanceGuard).not.toHaveBeenCalled();
+      expect(h.mockDbExecute).not.toHaveBeenCalled();
+    });
+
+    it("[P0] empty-response fallback keeps prior output and records successful HTTP usage", async () => {
+      h.mockEnhanceGuard.mockResolvedValue({
+        text: "原始口語內容",
+        usage: { promptTokens: 12, completionTokens: 2, totalTokens: 14 },
+        wasAnomalous: false,
+        wasEmptyResponse: true,
+      });
+      const store = useHistoryStore();
+      const record = createRecord({ status: "success", rawText: "原始口語內容", processedText: "既有整理", wasEnhanced: true });
+      store.transcriptionList.push(record);
+
+      const result = await store.reEnhanceRecord(record);
+      expect(result).toMatchObject({ ok: false, errorKey: "history.reEnhanceFailed" });
+      expect(store.transcriptionList[0].processedText).toBe("既有整理");
+      expect(h.mockDbExecute.mock.calls.some(([sql]) => String(sql).includes("UPDATE transcriptions"))).toBe(false);
+      await vi.waitFor(() => expect(h.mockDbExecute.mock.calls.some(([sql]) => String(sql).includes("INSERT INTO api_usage"))).toBe(true));
+    });
+
+    it("[P0] valid output identical to the original is allowed", async () => {
+      h.mockEnhanceGuard.mockResolvedValue({
+        text: "原始口語內容",
+        usage: null,
+        wasAnomalous: false,
+        wasEmptyResponse: false,
+      });
+      const store = useHistoryStore();
+      const record = createRecord({ status: "success", rawText: "原始口語內容", processedText: "舊整理" });
+      store.transcriptionList.push(record);
+      expect((await store.reEnhanceRecord(record)).ok).toBe(true);
+      expect(store.transcriptionList[0].processedText).toBe("原始口語內容");
+    });
+
+    it("[P1] failed LLM configuration and DB write release retry lock", async () => {
+      const store = useHistoryStore();
+      const record = createRecord({ rawText: "原始口語內容" });
+      h.settingsStub.getLlmRequestConfig.mockRejectedValueOnce(new Error("settings"));
+      await expect(store.reEnhanceRecord(record)).rejects.toThrow("settings");
+      expect(store.retryingId).toBeNull();
+      h.mockEnhanceGuard.mockResolvedValue({ text: "整理結果", usage: null, wasAnomalous: false });
+      h.mockDbExecute.mockRejectedValueOnce(new Error("database"));
+      await expect(store.reEnhanceRecord(record)).rejects.toThrow("database");
+      expect(store.retryingId).toBeNull();
+      expect(store.retryingAction).toBeNull();
+    });
+
     it("[P0] history 429 returns actionable feedback while preserving the record", async () => {
       const { EnhancerApiError } = await import("../../src/lib/enhancer");
       h.mockEnhanceGuard.mockRejectedValue(
@@ -285,6 +411,8 @@ describe("useHistoryStore retry", () => {
       expect(result.ok).toBe(false);
       expect(result.errorMessage).toContain("2 秒");
       expect(store.transcriptionList[0].processedText).toBeNull();
+      expect(store.retryingId).toBeNull();
+      expect(store.retryingAction).toBeNull();
     });
     it("[P1] 成功整理 → 寫入 processed_text、標記 was_enhanced", async () => {
       h.mockEnhanceGuard.mockResolvedValue({

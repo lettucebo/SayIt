@@ -30,8 +30,6 @@ const copiedRecordId = ref<string | null>(null);
 const copiedRawRecordId = ref<string | null>(null);
 const sentinelRef = ref<HTMLElement | null>(null);
 const playingRecordId = ref<string | null>(null);
-const retryingId = ref<string | null>(null);
-const retryingAction = ref<"transcribe" | "enhance" | null>(null);
 const retryError = ref<{ id: string; key: string; message?: string } | null>(null);
 let currentAudio: HTMLAudioElement | null = null;
 let currentBlobUrl: string | null = null;
@@ -152,9 +150,7 @@ async function handlePlayRecording(record: TranscriptionRecord) {
 }
 
 async function handleRetranscribe(record: TranscriptionRecord) {
-  if (retryingId.value) return;
-  retryingId.value = record.id;
-  retryingAction.value = "transcribe";
+  if (record.isEditMode || historyStore.retryingId !== null) return;
   retryError.value = null;
   try {
     const result = await historyStore.retranscribeRecord(record);
@@ -167,16 +163,11 @@ async function handleRetranscribe(record: TranscriptionRecord) {
   } catch (err) {
     captureError(err, { source: "history-view", step: "retranscribe" });
     retryError.value = { id: record.id, key: "history.retranscribeFailed" };
-  } finally {
-    retryingId.value = null;
-    retryingAction.value = null;
   }
 }
 
 async function handleReEnhance(record: TranscriptionRecord) {
-  if (retryingId.value) return;
-  retryingId.value = record.id;
-  retryingAction.value = "enhance";
+  if (record.isEditMode || historyStore.retryingId !== null) return;
   retryError.value = null;
   try {
     const result = await historyStore.reEnhanceRecord(record);
@@ -190,9 +181,6 @@ async function handleReEnhance(record: TranscriptionRecord) {
   } catch (err) {
     captureError(err, { source: "history-view", step: "reenhance" });
     retryError.value = { id: record.id, key: "history.reEnhanceFailed" };
-  } finally {
-    retryingId.value = null;
-    retryingAction.value = null;
   }
 }
 
@@ -338,11 +326,11 @@ onBeforeUnmount(() => {
                     size="icon"
                     class="h-7 w-7"
                     data-testid="retranscribe-button"
-                    :disabled="!record.audioFilePath || retryingId !== null"
-                    :title="retryingId === record.id && retryingAction === 'transcribe' ? $t('history.retranscribing') : (record.audioFilePath ? $t('history.retranscribe') : $t('history.noRecordingFile'))"
+                    :disabled="record.isEditMode || !record.audioFilePath || historyStore.retryingId !== null"
+                    :title="historyStore.retryingId === record.id && historyStore.retryingAction === 'transcribe' ? $t('history.retranscribing') : (record.audioFilePath ? $t('history.retranscribe') : $t('history.noRecordingFile'))"
                     @click.stop="handleRetranscribe(record)"
                   >
-                    <Loader2 v-if="retryingId === record.id && retryingAction === 'transcribe'" class="h-3.5 w-3.5 animate-spin" />
+                    <Loader2 v-if="historyStore.retryingId === record.id && historyStore.retryingAction === 'transcribe'" class="h-3.5 w-3.5 animate-spin" />
                     <RefreshCw v-else class="h-3.5 w-3.5" />
                   </Button>
                   <Button
@@ -350,11 +338,11 @@ onBeforeUnmount(() => {
                     size="icon"
                     class="h-7 w-7"
                     data-testid="reenhance-button"
-                    :disabled="!record.rawText.trim() || retryingId !== null"
-                    :title="retryingId === record.id && retryingAction === 'enhance' ? $t('history.reEnhancing') : $t('history.reEnhance')"
+                    :disabled="record.isEditMode || !record.rawText.trim() || historyStore.retryingId !== null"
+                    :title="historyStore.retryingId === record.id && historyStore.retryingAction === 'enhance' ? $t('history.reEnhancing') : $t('history.reEnhance')"
                     @click.stop="handleReEnhance(record)"
                   >
-                    <Loader2 v-if="retryingId === record.id && retryingAction === 'enhance'" class="h-3.5 w-3.5 animate-spin" />
+                    <Loader2 v-if="historyStore.retryingId === record.id && historyStore.retryingAction === 'enhance'" class="h-3.5 w-3.5 animate-spin" />
                     <Sparkles v-else class="h-3.5 w-3.5" />
                   </Button>
                   <ChevronDown

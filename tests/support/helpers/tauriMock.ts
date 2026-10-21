@@ -7,6 +7,7 @@ import type { Page } from "@playwright/test";
  * （例如 azureEnabled）渲染 Settings，production 程式碼完全不需要為測試開後門。
  */
 export interface TauriMockOptions {
+  historyRows?: Record<string, unknown>[];
   /** 預先寫入 tauri-plugin-store 的鍵值，對應 `useSettingsStore` 讀取的欄位。 */
   storeValues?: Record<string, unknown>;
   httpResponses?: Array<{
@@ -48,6 +49,7 @@ export async function installTauriMock(
         delayUntil?: string;
         body: unknown;
       }>;
+      historyRows: Record<string, unknown>[];
     }) => {
       const storeState = new Map<string, unknown>(
         Object.entries(init.storeValues),
@@ -89,6 +91,9 @@ export async function installTauriMock(
         }
         if (query.includes("SELECT 1 AS n")) {
           return [{ n: 1 }];
+        }
+        if (query.includes("FROM transcriptions") && !query.includes("COUNT(")) {
+          return init.historyRows;
         }
         return [];
       };
@@ -134,7 +139,7 @@ export async function installTauriMock(
               (args.values as unknown[]) ?? [],
             );
           case "plugin:sql|execute":
-            return [0, null];
+            return [String(args.query ?? "").includes("UPDATE transcriptions") ? 1 : 0, null];
           case "plugin:sql|close":
             return null;
           default:
@@ -300,6 +305,7 @@ export async function installTauriMock(
       schemaVersion: MOCKED_SCHEMA_VERSION,
       tableList: [...MOCKED_TABLE_SET],
       httpResponses: options.httpResponses ?? [],
+      historyRows: options.historyRows ?? [],
     },
   );
 }

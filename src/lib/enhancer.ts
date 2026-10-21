@@ -651,7 +651,7 @@ export async function enhanceText(
       if (isReasoningAzure) {
         throw new EnhancerEmptyOutputError(result.finishReason, usage);
       }
-      return { text: rawText, usage };
+      return { text: rawText, usage, isRawFallback: true };
     }
 
     attempt += 1;
@@ -685,6 +685,8 @@ export interface EnhanceWithGuardResult {
   usage: ChatUsageData | null;
   /** true 表示重試後仍偵測到長度爆炸異常，text 已 fallback 回 rawText。 */
   wasAnomalous: boolean;
+  /** true 表示模型未產生有效最終輸出，text 已 fallback 回 rawText。 */
+  wasEmptyResponse: boolean;
 }
 
 /**
@@ -732,12 +734,18 @@ export async function enhanceWithAnomalyGuard(
   });
 
   if (finalAnomaly.isAnomaly) {
-    return { text: rawText, usage: cumulativeUsage, wasAnomalous: true };
+    return {
+      text: rawText,
+      usage: cumulativeUsage,
+      wasAnomalous: true,
+      wasEmptyResponse: enhanceResult.isRawFallback === true,
+    };
   }
 
   return {
     text: enhanceResult.text,
     usage: cumulativeUsage,
     wasAnomalous: false,
+    wasEmptyResponse: enhanceResult.isRawFallback === true,
   };
 }

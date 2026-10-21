@@ -248,6 +248,8 @@ export const useHistoryStore = defineStore("history", () => {
   const searchQuery = ref("");
   const hasMore = ref(true);
   const currentOffset = ref(0);
+  const retryingId = ref<string | null>(null);
+  const retryingAction = ref<"transcribe" | "enhance" | null>(null);
 
   async function fetchTranscriptionList() {
     isLoading.value = true;
@@ -722,6 +724,22 @@ export const useHistoryStore = defineStore("history", () => {
   async function retranscribeRecord(
     record: TranscriptionRecord,
   ): Promise<HistoryRetryResult> {
+    if (record.isEditMode || retryingId.value !== null) {
+      return { ok: false, errorKey: "history.retranscribeFailed" };
+    }
+    retryingId.value = record.id;
+    retryingAction.value = "transcribe";
+    try {
+      return await retranscribeRecordUnlocked(record);
+    } finally {
+      retryingId.value = null;
+      retryingAction.value = null;
+    }
+  }
+
+  async function retranscribeRecordUnlocked(
+    record: TranscriptionRecord,
+  ): Promise<HistoryRetryResult> {
     if (!record.audioFilePath) {
       return { ok: false, errorKey: "history.noRecordingFile" };
     }
@@ -838,6 +856,22 @@ export const useHistoryStore = defineStore("history", () => {
   async function reEnhanceRecord(
     record: TranscriptionRecord,
   ): Promise<HistoryRetryResult> {
+    if (record.isEditMode || retryingId.value !== null) {
+      return { ok: false, errorKey: "history.reEnhanceFailed" };
+    }
+    retryingId.value = record.id;
+    retryingAction.value = "enhance";
+    try {
+      return await reEnhanceRecordUnlocked(record);
+    } finally {
+      retryingId.value = null;
+      retryingAction.value = null;
+    }
+  }
+
+  async function reEnhanceRecordUnlocked(
+    record: TranscriptionRecord,
+  ): Promise<HistoryRetryResult> {
     if (!record.rawText.trim()) {
       return { ok: false, errorKey: "history.reEnhanceFailed" };
     }
@@ -895,7 +929,7 @@ export const useHistoryStore = defineStore("history", () => {
       settingsStore.getEffectiveChatModel(),
     );
 
-    if (enhanceResult.wasAnomalous) {
+    if (enhanceResult.wasAnomalous || enhanceResult.wasEmptyResponse) {
       return { ok: false, errorKey: "history.reEnhanceFailed" };
     }
 
@@ -940,6 +974,8 @@ export const useHistoryStore = defineStore("history", () => {
     searchQuery,
     hasMore,
     currentOffset,
+    retryingId,
+    retryingAction,
     dashboardStats,
     dailyUsageTrendList,
     usageTrendDays: USAGE_TREND_DAYS,
