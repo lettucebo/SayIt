@@ -1,23 +1,47 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { Button } from "@/components/ui/button";
 import type { TestResult } from "@/lib/connectionTest";
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   onTest: () => Promise<TestResult>;
   disabled?: boolean;
-}>();
+  contextKey?: number;
+  label?: string;
+  testId?: string;
+}>(), {
+  contextKey: 0,
+  label: undefined,
+  testId: undefined,
+});
 
 const { t } = useI18n();
 const testing = ref(false);
 const result = ref<TestResult | null>(null);
+let contextGeneration = 0;
+
+function invalidateResult() {
+  contextGeneration++;
+  result.value = null;
+}
+
+watch(() => props.contextKey, invalidateResult, { flush: "sync" });
+watch(() => props.disabled, (disabled) => {
+  if (disabled) invalidateResult();
+}, { flush: "sync" });
 
 async function handleTest() {
+  if (props.disabled || testing.value) return;
+
+  const startedGeneration = contextGeneration;
   testing.value = true;
   result.value = null;
   try {
-    result.value = await props.onTest();
+    const testResult = await props.onTest();
+    if (startedGeneration === contextGeneration) {
+      result.value = testResult;
+    }
   } finally {
     testing.value = false;
   }
@@ -30,13 +54,14 @@ async function handleTest() {
       type="button"
       variant="outline"
       size="sm"
+      :data-testid="testId"
       :disabled="disabled || testing"
       @click="handleTest"
     >
       {{
         testing
           ? t("settings.connectionTest.testing")
-          : t("settings.connectionTest.button")
+          : label ?? t("settings.connectionTest.button")
       }}
     </Button>
 

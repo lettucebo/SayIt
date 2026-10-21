@@ -444,18 +444,6 @@ test.describe("Settings model selector layout", () => {
           body: {
             value: [
               {
-                name: "chat-prod",
-                modelName: "gpt-4.1",
-                modelPublisher: "OpenAI",
-                capabilities: { chat: "true" },
-              },
-            ],
-          },
-        },
-        {
-          body: {
-            value: [
-              {
                 name: "whisper-prod",
                 modelName: "whisper-large-v3",
                 modelPublisher: "OpenAI",
@@ -477,7 +465,10 @@ test.describe("Settings model selector layout", () => {
       "https://main-resource.services.ai.azure.com/api/projects/voice-project/deployments?api-version=v1",
     );
 
-    await page.locator('label[for="azure-auth-key"]').click();
+    await page.getByTestId("ai-transcription-manage-connection").click();
+    await page.getByTestId("azure-auth-key").click();
+    await page.getByTestId("azure-connection-save").click();
+    await page.getByTestId("connection-return-to-workflow").click();
 
     await expect(page.getByTestId("azure-whisper-deployment-select")).toHaveCount(
       0,
@@ -530,8 +521,11 @@ test.describe("Settings model selector layout", () => {
       .poll(async () => (await getHttpRequestList(page)).length)
       .toBe(1);
 
-    await page.locator("#azure-resource-name").fill("resource-b");
+    await page.getByTestId("ai-transcription-manage-connection").click();
+    await page.getByTestId("azure-resource-name").fill("resource-b");
+    await page.getByTestId("azure-connection-save").click();
     await resolveHttpResponse(page, "resource-a-response");
+    await page.getByTestId("connection-return-to-workflow").click();
 
     await expect(page.getByTestId("azure-whisper-deployment-select")).toHaveCount(
       0,
@@ -539,7 +533,7 @@ test.describe("Settings model selector layout", () => {
     await expect(page.getByRole("option", { name: /a-only/ })).toHaveCount(0);
   });
 
-  test("[P0] Whisper 載入部署清單若儲存 shared Azure connection，會同步重載 chat 清單", async ({
+  test("[P0] shared Azure connection 須明確儲存才重載兩個用途清單", async ({
     page,
   }) => {
     await openSettings(page, {
@@ -599,24 +593,38 @@ test.describe("Settings model selector layout", () => {
     await expect
       .poll(async () => (await getHttpRequestList(page)).length)
       .toBe(1);
-    await page.locator("#azure-chat-deployment-list").click();
+    await page.getByTestId("azure-chat-deployment-select").click();
     await expect(
       page.getByRole("option", { name: /chat-a-only/ }),
     ).toBeVisible();
     await page.keyboard.press("Escape");
 
-    await page.locator("#azure-resource-name").fill("resource-b");
+    await page.getByTestId("ai-transcription-manage-connection").click();
+    await page.getByTestId("azure-resource-name").fill("resource-b");
+    const writesBefore = await getStoreSetCount(page, "azureResourceName");
+    await page.getByTestId("connection-return-to-workflow").click();
+    await expect(page.getByTestId("azure-whisper-load-deployments")).toBeDisabled();
+    await expect(page.getByTestId("azure-chat-load-deployments")).toBeDisabled();
+    expect(await getStoreSetCount(page, "azureResourceName")).toBe(writesBefore);
+    expect((await getHttpRequestList(page)).length).toBe(1);
+    await page.getByTestId("ai-transcription-manage-connection").click();
+    await page.getByTestId("azure-connection-save").click();
+    await page.getByTestId("connection-return-to-workflow").click();
+    await expect.poll(async () => (await getHttpRequestList(page)).length).toBe(2);
     await page.getByTestId("azure-whisper-load-deployments").click();
 
     await expect
       .poll(async () => (await getHttpRequestList(page)).length)
       .toBe(3);
-    await page.locator("#azure-chat-deployment-list").click();
+    await page.getByTestId("azure-chat-deployment-select").click();
     await expect(
       page.getByRole("option", { name: /chat-b-only/ }),
     ).toBeVisible();
     await expect(page.getByRole("option", { name: /chat-a-only/ })).toHaveCount(
       0,
     );
+    await page.keyboard.press("Escape");
+    await page.getByTestId("azure-whisper-deployment-select").click();
+    await expect(page.getByRole("option", { name: /whisper-b-only/ })).toBeVisible();
   });
 });

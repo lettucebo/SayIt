@@ -118,7 +118,9 @@ async function bootstrap() {
   // 以「當前轉錄設定是否完整」判斷（非只查 Groq key）：
   // 使用者可能只設定了 Gemini 或 Azure 轉錄而沒有 Groq key。
   if (!settingsStore.hasWhisperConfig) {
-    await router.push("/settings");
+    if (router.currentRoute.value.path !== "/settings") {
+      await router.push("/settings");
+    }
     await nextTick();
     const currentWindow = getCurrentWindow();
     await currentWindow.show();

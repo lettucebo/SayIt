@@ -9,6 +9,7 @@ import type { Page } from "@playwright/test";
 export interface TauriMockOptions {
   /** 預先寫入 tauri-plugin-store 的鍵值，對應 `useSettingsStore` 讀取的欄位。 */
   storeValues?: Record<string, unknown>;
+  storeGetError?: string;
   httpResponses?: Array<{
     status?: number;
     statusText?: string;
@@ -24,6 +25,8 @@ const MOCKED_TABLE_SET = new Set(["api_usage", "schema_version", "transcriptions
 
 interface TauriMockState {
   getStoreSetCount: (key: string) => number;
+  getInvokeCount: (command: string) => number;
+  failNextStoreSave: () => void;
   getHttpRequestList: () => Array<{
     url: string;
     method: string;
@@ -39,6 +42,7 @@ export async function installTauriMock(
   await page.addInitScript(
     (init: {
       storeValues: Record<string, unknown>;
+      storeGetError?: string;
       schemaVersion: number;
       tableList: string[];
       httpResponses: Array<{
@@ -55,6 +59,8 @@ export async function installTauriMock(
       const callbackRegistry = new Map<number, (payload: unknown) => void>();
       const eventCallbackIdMap = new Map<number, number>();
       const storeSetCountMap = new Map<string, number>();
+      const invokeCountMap = new Map<string, number>();
+      let shouldFailNextSave = false;
       const httpRequestList: Array<{
         url: string;
         method: string;
@@ -100,6 +106,7 @@ export async function installTauriMock(
           case "plugin:store|get_store":
             return 1;
           case "plugin:store|get":
+            if (init.storeGetError) throw new Error(init.storeGetError);
             return [storeState.get(key), storeState.has(key)];
           case "plugin:store|set":
             storeState.set(key, args.value);
@@ -118,6 +125,10 @@ export async function installTauriMock(
           case "plugin:store|length":
             return storeState.size;
           case "plugin:store|save":
+            if (shouldFailNextSave) {
+              shouldFailNextSave = false;
+              throw new Error("E2E_SETTINGS_SAVE_FAILED");
+            }
             return null;
           default:
             throw new Error(`Unsupported store command in E2E mock: ${cmd}`);
@@ -217,6 +228,7 @@ export async function installTauriMock(
         cmd: string,
         args: Record<string, unknown> = {},
       ): Promise<unknown> => {
+        invokeCountMap.set(cmd, (invokeCountMap.get(cmd) ?? 0) + 1);
         if (cmd.startsWith("plugin:store|")) return invokeStore(cmd, args);
         if (cmd.startsWith("plugin:sql|")) return invokeSql(cmd, args);
         if (cmd.startsWith("plugin:http|")) return invokeHttp(cmd, args);
@@ -234,6 +246,8 @@ export async function installTauriMock(
         }
         if (cmd === "plugin:autostart|is_enabled") return false;
         if (cmd === "get_os_theme") return "light";
+        if (cmd === "list_audio_input_devices") return [];
+        if (cmd === "get_default_input_device_name") return "Mock microphone";
         if (cmd === "get_azure_entra_token") {
           return { accessToken: "e2e-access-token", expiresIn: 3600 };
         }
@@ -286,6 +300,8 @@ export async function installTauriMock(
       };
       globalScope.__SAYIT_E2E_TAURI_MOCK__ = {
         getStoreSetCount: (key: string) => storeSetCountMap.get(key) ?? 0,
+        getInvokeCount: (command: string) => invokeCountMap.get(command) ?? 0,
+        failNextStoreSave: () => { shouldFailNextSave = true; },
         getHttpRequestList: () => httpRequestList,
         resolveHttpResponse: (key: string) => {
           const resolve = httpDelayResolverMap.get(key);
@@ -297,6 +313,7 @@ export async function installTauriMock(
     },
     {
       storeValues: options.storeValues ?? {},
+      storeGetError: options.storeGetError,
       schemaVersion: MOCKED_SCHEMA_VERSION,
       tableList: [...MOCKED_TABLE_SET],
       httpResponses: options.httpResponses ?? [],
@@ -313,6 +330,20 @@ export async function getStoreSetCount(page: Page, key: string): Promise<number>
     ).__SAYIT_E2E_TAURI_MOCK__;
     return mockState.getStoreSetCount(storeKey);
   }, key);
+}
+
+export async function getInvokeCount(page: Page, command: string): Promise<number> {
+  return page.evaluate((name) => {
+    const scope = window as unknown as { __SAYIT_E2E_TAURI_MOCK__: TauriMockState };
+    return scope.__SAYIT_E2E_TAURI_MOCK__.getInvokeCount(name);
+  }, command);
+}
+
+export async function failNextStoreSave(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const scope = window as unknown as { __SAYIT_E2E_TAURI_MOCK__: TauriMockState };
+    scope.__SAYIT_E2E_TAURI_MOCK__.failNextStoreSave();
+  });
 }
 
 export async function getHttpRequestList(
